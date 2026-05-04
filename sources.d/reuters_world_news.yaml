@@ -1,0 +1,248 @@
+schema_version: 1
+
+name: reuters_world_news
+source_type: reuters_world_news
+layer_type: news_articles
+display_name: "Reuters World News"
+enabled: false  # feed URL is dead (feeds.reuters.com doesn't resolve)
+
+transport:
+  type: http_poll
+  url: "https://feeds.reuters.com/reuters/worldNews"
+  method: GET
+  headers:
+    Accept: "application/xml"
+  timeout: "15s"
+  interval: "300s"
+
+parser:
+  format: rss
+  max_records: 100
+
+entity:
+  external_id: >
+    has(record.guid) ? record.guid : record.link
+  name: >
+    record.title
+  metadata:
+    source_url: >
+      record.link
+    description: >
+      has(record.description) ? record.description : ""
+    author: >
+      has(record.creator) ? record.creator : ""
+    country: >
+      has(record.category) && size(record.category) > 0 ? record.category[0] : ""
+    feed_source: >
+      "reuters"
+
+observation:
+  latitude: >
+    has(record.georss_lat) ? record.georss_lat : 0.0
+  longitude: >
+    has(record.georss_lon) ? record.georss_lon : 0.0
+  altitude: "0.0"
+  timestamp: >
+    has(record.pubDate) ? parse_rfc2822(record.pubDate) : now()
+  velocity: {}
+  metadata:
+    description: >
+      has(record.description) ? record.description : ""
+  content_hash: >
+    has(record.guid) ? record.guid : record.link
+
+recording:
+  mode: dedupe
+
+cache:
+  ttl: "3600s"
+
+display:
+  icon:
+    shape: diamond
+    rotatable: false
+    interpolation: false
+    scale: 0.8
+  trail:
+    color: "#00bfff"
+    width: 1.0
+    opacity: 0.6
+  style:
+    color: "#00bfff"
+    point_size: 6
+  field_renderers:
+    - keys: [feed_source]
+      label: "SOURCE"
+      format:
+        type: string
+        transform: upper
+      priority: 0
+    - keys: [country]
+      label: "COUNTRY"
+      format:
+        type: string
+        transform: upper
+      priority: 1
+    - keys: [description]
+      label: "DESCRIPTION"
+      format:
+        type: string
+      priority: 2
+    - keys: [source_url]
+      label: "URL"
+      format:
+        type: string
+      priority: 3
+    - keys: [severity]
+      label: "SEVERITY"
+      format:
+        type: string
+        transform: upper
+      priority: 4
+    - keys: [category]
+      label: "CATEGORY"
+      format:
+        type: string
+        transform: upper
+      priority: 5
+    - keys: [summary]
+      label: "SUMMARY"
+      format:
+        type: string
+      priority: 6
+    - keys: [key_actors]
+      label: "KEY ACTORS"
+      format:
+        type: string
+      priority: 7
+    - keys: [affected_population]
+      label: "AFFECTED POPULATION"
+      format:
+        type: string
+        transform: upper
+      priority: 8
+
+ai:
+  enabled: true
+  operations:
+    - name: news_geo_enrichment
+      prompt: |
+        You are an OSINT analyst producing structured intelligence from news
+        articles for a global situational awareness dashboard. Your output
+        will be read by decision-makers who need rapid, accurate understanding
+        of events worldwide.
+
+        <article>
+          <title>{{.Entity.Name}}</title>
+          <description>{{index .Entity.Metadata "description"}}</description>
+          <source>{{index .Entity.Metadata "source_url"}}</source>
+        </article>
+
+        Perform the following tasks in order:
+
+        1. GEOLOCATE — Identify the most specific location this article
+           covers. If you can confidently provide coordinates (e.g. a named
+           city or specific site), include lat/lon. Otherwise leave them null
+           and provide city/region/country text for geocoding.
+
+        2. CLASSIFY — Assign a single primary category from the allowed enum
+           that best describes the event type.
+
+        3. ASSESS SEVERITY — Rate the operational significance:
+           - low: routine reporting, periodic updates, no immediate impact
+           - moderate: developing situation worth monitoring
+           - high: significant event with humanitarian or security implications
+           - critical: acute crisis requiring immediate attention
+
+        4. SUMMARIZE — Write a concise 1-2 sentence intelligence summary of
+           what is happening and why it matters. Focus on the situation, not
+           on the source or publication metadata. Write for an analyst who
+           has not read the article.
+
+        5. IDENTIFY KEY ACTORS — List the principal organizations, armed
+           groups, governments, or agencies involved (max 5).
+
+        6. ESTIMATE AFFECTED POPULATION — Classify the scale of people
+           affected using the allowed enum.
+
+        <example>
+        Input article: "Ukraine: Renewed shelling of Kherson Oblast damages
+        civilian infrastructure, displacing thousands"
+
+        Output:
+        {
+          "lat": 46.64,
+          "lon": 32.62,
+          "city": "Kherson",
+          "region": "Kherson Oblast",
+          "country": "Ukraine",
+          "country_iso3": "UKR",
+          "location_confidence": 0.9,
+          "category": "armed_conflict",
+          "severity": "high",
+          "summary": "Renewed Russian shelling across Kherson Oblast has damaged residential areas and critical infrastructure, displacing thousands of civilians and disrupting water supply to the regional capital.",
+          "key_actors": ["Russian Armed Forces", "Ukrainian Armed Forces", "OCHA"],
+          "affected_population": "moderate"
+        }
+        </example>
+
+        Respond with JSON matching this schema:
+        {{.OutputSchema}}
+      output_schema:
+        type: object
+        required: [country, location_confidence, category, severity, summary]
+        properties:
+          lat: { type: [number, "null"], minimum: -90, maximum: 90 }
+          lon: { type: [number, "null"], minimum: -180, maximum: 180 }
+          city: { type: [string, "null"] }
+          region: { type: [string, "null"] }
+          country: { type: string }
+          country_iso3: { type: [string, "null"] }
+          location_confidence:
+            type: number
+            minimum: 0.0
+            maximum: 1.0
+          category:
+            type: string
+            enum:
+              - armed_conflict
+              - natural_disaster
+              - humanitarian_crisis
+              - food_insecurity
+              - disease_outbreak
+              - displacement
+              - political_instability
+              - terrorism
+              - cyber_attack
+              - data_breach
+              - vulnerability
+              - cyber_espionage
+              - infrastructure
+              - environmental
+              - policy_report
+              - other
+          severity:
+            type: string
+            enum: [low, moderate, high, critical]
+          summary:
+            type: string
+          key_actors:
+            type: array
+            items: { type: string }
+          affected_population:
+            type: string
+            enum: [unknown, localized, moderate, large, massive]
+      max_tokens: 500
+      temperature: 0
+      output:
+        target: entity
+        patch_coordinates:
+          enabled: true
+          lat_field: "lat"
+          lon_field: "lon"
+          confidence_field: "location_confidence"
+          min_confidence: 0.7
+
+history:
+  max_lookback: "720h"
+  max_range_span: "24h"

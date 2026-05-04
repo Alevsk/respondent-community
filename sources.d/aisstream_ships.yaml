@@ -1,0 +1,145 @@
+# sources.d/aisstream_ships.yaml
+# Live global vessel tracking via AISStream.io WebSocket API.
+# Receives AIS position reports from ships worldwide.
+# Reference: docs/FEEDER_DECLARATIVE_SOURCES.md
+schema_version: 2
+
+name: aisstream_ships
+labels:
+  category: maritime
+  priority: high
+source_type: aisstream_ships
+layer_type: ships
+display_name: "AIS Ship Tracking"
+enabled: true
+
+filtering: viewport
+
+geo_cache:
+  overfetch_ratio: 3.0
+  alive_ratio_threshold: 0.5
+  gc_batch_size: 500
+
+transport:
+  type: websocket
+  url: "wss://stream.aisstream.io/v0/stream"
+  timeout: "15s"
+  websocket:
+    # API key is injected via ${AISSTREAM_APY_KEY} -> RESPONDENT_AISSTREAM_APY_KEY env var.
+    subscribe_messages:
+      - '{"APIKey":"${AISSTREAM_APY_KEY}","BoundingBoxes":[[[-90,-180],[90,180]]],"FilterMessageTypes":["PositionReport"]}'
+    ping_interval: "30s"
+    message_format: text
+  reconnect:
+    max_attempts: 0
+    backoff: exponential
+    initial_delay: "2s"
+    max_delay: "60s"
+  batching:
+    mode: window
+    window: "5s"
+    max_size: 500
+
+parser:
+  format: json
+  records_path: ""
+  max_records: 500
+
+# Only process messages with valid position data.
+filter: >
+  has(record.Message) && has(record.Message.PositionReport)
+  && has(record.MetaData) && has(record.MetaData.MMSI)
+  && record.Message.PositionReport.Latitude != 0.0
+  && record.Message.PositionReport.Longitude != 0.0
+
+entity:
+  external_id: >
+    string(record.MetaData.MMSI)
+  name: >
+    has(record.MetaData.ShipName) && record.MetaData.ShipName.trim() != ""
+      ? record.MetaData.ShipName.trim()
+      : string(record.MetaData.MMSI)
+  metadata:
+    mmsi: >
+      string(record.MetaData.MMSI)
+    ship_name: >
+      has(record.MetaData.ShipName) ? record.MetaData.ShipName.trim() : ""
+    nav_status: >
+      has(record.Message.PositionReport.NavigationalStatus)
+        ? string(record.Message.PositionReport.NavigationalStatus)
+        : ""
+
+observation:
+  latitude: >
+    record.Message.PositionReport.Latitude
+  longitude: >
+    record.Message.PositionReport.Longitude
+  altitude: "0.0"
+  timestamp: >
+    now()
+  velocity:
+    speed: >
+      has(record.Message.PositionReport.Sog)
+        ? string(record.Message.PositionReport.Sog * 0.514444)
+        : "0"
+    heading: >
+      has(record.Message.PositionReport.TrueHeading)
+        && record.Message.PositionReport.TrueHeading != 511
+        ? string(record.Message.PositionReport.TrueHeading)
+        : (has(record.Message.PositionReport.Cog)
+            ? string(record.Message.PositionReport.Cog) : "0")
+  metadata:
+    sog_knots: >
+      has(record.Message.PositionReport.Sog)
+        ? string(record.Message.PositionReport.Sog)
+        : ""
+    cog: >
+      has(record.Message.PositionReport.Cog)
+        ? string(record.Message.PositionReport.Cog)
+        : ""
+
+recording:
+  mode: append
+
+cache:
+  ttl: "1800s"
+
+display:
+  icon:
+    shape: ship
+    rotatable: true
+    interpolation: true
+    scale: 1.0
+  trail:
+    color: "#4fc3f7"
+    width: 1.5
+    opacity: 0.7
+  style:
+    color: "#4fc3f7"
+    point_size: 6
+  field_renderers:
+    - keys: [ship_name]
+      label: "VESSEL"
+      format:
+        type: string
+        transform: upper
+      priority: 0
+    - keys: [mmsi]
+      label: "MMSI"
+      format:
+        type: string
+      priority: 1
+    - keys: [sog_knots]
+      label: "SPEED"
+      format:
+        type: float
+        precision: 1
+        suffix: " kn"
+      priority: 2
+    - keys: [cog]
+      label: "COURSE"
+      format:
+        type: float
+        precision: 1
+        suffix: "\u00b0"
+      priority: 3

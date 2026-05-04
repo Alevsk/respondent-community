@@ -1,0 +1,251 @@
+schema_version: 1
+
+name: reliefweb_updates_rss
+source_type: reliefweb_updates_rss
+layer_type: news_articles
+display_name: "ReliefWeb Updates (RSS)"
+enabled: true
+
+lookup_tables:
+  - name: "country_centroids"
+    key_field: "iso3"
+    entries:
+      - { iso3: "UKR", lat: 48.38, lon: 31.17, name: "Ukraine" }
+      - { iso3: "SYR", lat: 34.80, lon: 39.00, name: "Syria" }
+      - { iso3: "SDN", lat: 12.86, lon: 30.22, name: "Sudan" }
+      - { iso3: "AFG", lat: 33.94, lon: 67.71, name: "Afghanistan" }
+      - { iso3: "MMR", lat: 21.91, lon: 95.96, name: "Myanmar" }
+      # ... extend as needed
+
+transport:
+  type: http_poll
+  url: "https://reliefweb.int/updates/rss.xml"
+  method: GET
+  headers:
+    Accept: "application/xml"
+  timeout: "15s"
+  interval: "1800s"
+
+parser:
+  format: rss
+  max_records: 200
+
+entity:
+  external_id: >
+    record.link
+  name: >
+    record.title
+  metadata:
+    source_url: >
+      record.link
+    description: >
+      has(record.description) ? record.description : ""
+    author: >
+      has(record.author) ? record.author : ""
+    country: >
+      has(record.category) && size(record.category) > 0 ? record.category[0] : ""
+
+observation:
+  latitude: "0.0"
+  longitude: "0.0"
+  altitude: "0.0"
+  timestamp: >
+    has(record.pubDate) ? parse_rfc2822(record.pubDate) : now()
+  velocity: {}
+  metadata:
+    description: >
+      has(record.description) ? record.description : ""
+  content_hash: >
+    has(record.guid) ? record.guid : record.link
+
+ai:
+  enabled: true
+  operations:
+    - name: news_geo_enrichment
+      prompt: |
+        You are an OSINT analyst producing structured intelligence from news
+        articles for a global situational awareness dashboard. Your output
+        will be read by decision-makers who need rapid, accurate understanding
+        of events worldwide.
+
+        <article>
+          <title>{{.Entity.Name}}</title>
+          <description>{{index .Entity.Metadata "description"}}</description>
+          <country_hint>{{index .Entity.Metadata "country"}}</country_hint>
+          <source>{{index .Entity.Metadata "source_url"}}</source>
+        </article>
+
+        Perform the following tasks in order:
+
+        1. GEOLOCATE — Identify the most specific location this article
+           covers. If you can confidently provide coordinates (e.g. a named
+           city or specific site), include lat/lon. Otherwise leave them null
+           and provide city/region/country text for geocoding.
+
+        2. CLASSIFY — Assign a single primary category from the allowed enum
+           that best describes the event type.
+
+        3. ASSESS SEVERITY — Rate the operational significance:
+           - low: routine reporting, periodic updates, no immediate impact
+           - moderate: developing situation worth monitoring
+           - high: significant event with humanitarian or security implications
+           - critical: acute crisis requiring immediate attention
+
+        4. SUMMARIZE — Write a concise 1-2 sentence intelligence summary of
+           what is happening and why it matters. Focus on the situation, not
+           on the source or publication metadata. Write for an analyst who
+           has not read the article.
+
+        5. IDENTIFY KEY ACTORS — List the principal organizations, armed
+           groups, governments, or agencies involved (max 5).
+
+        6. ESTIMATE AFFECTED POPULATION — Classify the scale of people
+           affected using the allowed enum.
+
+        <example>
+        Input article: "Sudan: Escalation of hostilities in North Darfur
+        displaces over 300,000 people since April 2026"
+
+        Output:
+        {
+          "lat": 13.63,
+          "lon": 25.35,
+          "city": "El Fasher",
+          "region": "North Darfur",
+          "country": "Sudan",
+          "country_iso3": "SDN",
+          "location_confidence": 0.85,
+          "category": "armed_conflict",
+          "severity": "critical",
+          "summary": "Renewed fighting between the RSF and Sudanese Armed Forces in North Darfur has displaced over 300,000 civilians since April, with El Fasher under siege and humanitarian access severely restricted.",
+          "key_actors": ["RSF", "Sudanese Armed Forces", "OCHA", "UNHCR"],
+          "affected_population": "large"
+        }
+        </example>
+
+        Respond with JSON matching this schema:
+        {{.OutputSchema}}
+      output_schema:
+        type: object
+        required: [country, location_confidence, category, severity, summary]
+        properties:
+          lat: { type: [number, "null"], minimum: -90, maximum: 90 }
+          lon: { type: [number, "null"], minimum: -180, maximum: 180 }
+          city: { type: [string, "null"] }
+          region: { type: [string, "null"] }
+          country: { type: string }
+          country_iso3: { type: [string, "null"] }
+          location_confidence:
+            type: number
+            minimum: 0.0
+            maximum: 1.0
+          category:
+            type: string
+            enum:
+              - armed_conflict
+              - natural_disaster
+              - humanitarian_crisis
+              - food_insecurity
+              - disease_outbreak
+              - displacement
+              - political_instability
+              - terrorism
+              - cyber_attack
+              - data_breach
+              - vulnerability
+              - cyber_espionage
+              - infrastructure
+              - environmental
+              - policy_report
+              - other
+          severity:
+            type: string
+            enum: [low, moderate, high, critical]
+          summary:
+            type: string
+          key_actors:
+            type: array
+            items: { type: string }
+          affected_population:
+            type: string
+            enum: [unknown, localized, moderate, large, massive]
+      max_tokens: 500
+      temperature: 0
+      output:
+        target: entity
+        patch_coordinates:
+          enabled: true
+          lat_field: "lat"
+          lon_field: "lon"
+          confidence_field: "location_confidence"
+          min_confidence: 0.7
+
+recording:
+  mode: dedupe
+
+cache:
+  ttl: "3600s"
+
+display:
+  icon:
+    shape: diamond
+    rotatable: false
+    interpolation: false
+    scale: 0.8
+  style:
+    color: "#ffa500"
+    point_size: 6
+  trail:
+    color: "#ffa500"
+    width: 1.0
+    opacity: 0.6
+  field_renderers:
+    - keys: [country]
+      label: "COUNTRY"
+      format:
+        type: string
+        transform: upper
+      priority: 0
+    - keys: [author]
+      label: "SOURCE"
+      format:
+        type: string
+      priority: 1
+    - keys: [description]
+      label: "DESCRIPTION"
+      format:
+        type: string
+      priority: 2
+    - keys: [source_url]
+      label: "URL"
+      format:
+        type: string
+      priority: 3
+    - keys: [severity]
+      label: "SEVERITY"
+      format:
+        type: string
+        transform: upper
+      priority: 4
+    - keys: [category]
+      label: "CATEGORY"
+      format:
+        type: string
+        transform: upper
+      priority: 5
+    - keys: [summary]
+      label: "SUMMARY"
+      format:
+        type: string
+      priority: 6
+    - keys: [key_actors]
+      label: "KEY ACTORS"
+      format:
+        type: string
+      priority: 7
+    - keys: [affected_population]
+      label: "AFFECTED POPULATION"
+      format:
+        type: string
+        transform: upper
+      priority: 8

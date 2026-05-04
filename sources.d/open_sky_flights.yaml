@@ -1,0 +1,129 @@
+schema_version: 2
+name: open_sky_flights
+labels:
+  category: aviation
+  priority: high
+source_type: open_sky_flights
+layer_type: flights_commercial
+display_name: "OpenSky Flights"
+
+enabled: false
+
+filtering: viewport
+
+geo_cache:
+  overfetch_ratio: 3.0
+  alive_ratio_threshold: 0.5
+  gc_batch_size: 500
+
+transport:
+  type: http_poll
+  url: "https://opensky-network.org/api/states/all"
+  method: GET
+  headers:
+    Accept: "application/json"
+  timeout: "30s"
+  interval: "120s"
+  max_response_bytes: 52428800
+  retry:
+    max_attempts: 3
+    backoff: exponential
+    initial_delay: "10s"
+    max_delay: "60s"
+
+parser:
+  format: json
+  records_path: "states"
+  max_records: 10000
+  array_columns:
+    - icao24
+    - callsign
+    - origin_country
+    - time_position
+    - last_contact
+    - longitude
+    - latitude
+    - baro_altitude
+    - on_ground
+    - velocity
+    - true_track
+    - vertical_rate
+    - sensors
+    - geo_altitude
+    - squawk
+    - spi
+    - position_source
+
+filter: >
+  has(record.latitude) && record.latitude != null
+  && has(record.longitude) && record.longitude != null
+
+entity:
+  external_id: >
+    record.icao24
+  name: >
+    has(record.callsign) && record.callsign != null && string(record.callsign).trim() != ""
+      ? string(record.callsign).trim()
+      : record.icao24
+  metadata:
+    callsign: >
+      has(record.callsign) && record.callsign != null ? string(record.callsign).trim() : ""
+    origin_country: >
+      has(record.origin_country) ? string(record.origin_country) : ""
+    icao24: >
+      record.icao24
+
+observation:
+  latitude: >
+    double(record.latitude)
+  longitude: >
+    double(record.longitude)
+  altitude: >
+    has(record.baro_altitude) && record.baro_altitude != null
+      ? double(record.baro_altitude)
+      : (has(record.geo_altitude) && record.geo_altitude != null ? double(record.geo_altitude) : 0.0)
+  timestamp: >
+    has(record.time_position) && record.time_position != null
+      ? unix_s(int(record.time_position))
+      : now()
+  velocity:
+    speed: >
+      has(record.velocity) && record.velocity != null ? string(record.velocity) : "0"
+    heading: >
+      has(record.true_track) && record.true_track != null ? string(record.true_track) : "0"
+    climb: >
+      has(record.vertical_rate) && record.vertical_rate != null ? string(record.vertical_rate) : "0"
+  metadata: {}
+  content_hash: ""
+
+recording:
+  mode: append
+
+cache:
+  ttl: "2700s"
+
+display:
+  icon:
+    shape: flight
+    rotatable: true
+    interpolation: true
+    scale: 1.0
+  trail:
+    color: "#00ff9d"
+    width: 1.5
+    opacity: 0.7
+  style:
+    color: "#00ff9d"
+    point_size: 6
+  field_renderers:
+    - keys: [callsign]
+      label: "CALLSIGN"
+      format:
+        type: string
+        transform: upper
+      priority: 0
+    - keys: [origin_country]
+      label: "ORIGIN"
+      format:
+        type: string
+      priority: 1

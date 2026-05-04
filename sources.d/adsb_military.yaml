@@ -1,0 +1,185 @@
+# sources.d/adsb_military.yaml
+# Declarative definition for military flight data via adsb.lol v2 API.
+# Uses the same adsb.lol JSON format as adsb_lol_flights but with the /mil endpoint.
+# Reference: docs/FEEDER_DECLARATIVE_SOURCES.md
+schema_version: 2
+
+name: adsb_military
+labels:
+  category: aviation
+  priority: high
+source_type: adsb_military
+layer_type: flights_military
+display_name: "Military Flights"
+
+enabled: true
+
+
+transport:
+  type: http_poll
+  url: "https://api.adsb.lol/v2/mil"
+  method: GET
+  timeout: "30s"
+  interval: "30s"
+  max_response_bytes: 52428800
+  retry:
+    max_attempts: 2
+    backoff: exponential
+    initial_delay: "1s"
+    max_delay: "10s"
+
+parser:
+  format: json
+  records_path: "ac"
+  max_records: 10000
+
+filter: >
+  has(record.hex) && has(record.lat) && has(record.lon)
+
+entity:
+  external_id: >
+    record.hex
+  name: >
+    has(record.flight) && string(record.flight).trim() != ""
+      ? string(record.flight).trim()
+      : record.hex
+  metadata:
+    callsign: >
+      has(record.flight) ? string(record.flight).trim() : ""
+    hex: >
+      record.hex
+    type: >
+      has(record.t) ? record.t : ""
+    registration: >
+      has(record.r) ? record.r : ""
+
+observation:
+  latitude: >
+    double(record.lat)
+  longitude: >
+    double(record.lon)
+  altitude: >
+    has(record.alt_baro) && record.alt_baro != "ground"
+      ? coerce_double(record.alt_baro, 0.0) * 0.3048
+      : (has(record.alt_geom) ? coerce_double(record.alt_geom, 0.0) * 0.3048 : 0.0)
+  timestamp: >
+    now()
+  velocity:
+    speed: >
+      has(record.gs) ? string(double(record.gs) * 0.514444) : "0"
+    heading: >
+      has(record.track) ? string(record.track) : "0"
+    climb: >
+      has(record.baro_rate) ? string(double(record.baro_rate) * 0.00508) : "0"
+  metadata: {}
+  content_hash: ""
+
+recording:
+  mode: append
+
+cache:
+  ttl: "60s"
+
+display:
+  icon:
+    shape: flight-alt-b
+    rotatable: true
+    interpolation: true
+    scale: 1.0
+  trail:
+    color: "#ff6b35"
+    width: 1.5
+    opacity: 0.7
+  style:
+    color: "#ff6b35"
+    point_size: 6
+  field_renderers:
+    - keys: [callsign]
+      label: "CALLSIGN"
+      format:
+        type: string
+        transform: upper
+      priority: 0
+    - keys: [registration]
+      label: "REGISTRATION"
+      format:
+        type: string
+        transform: upper
+      priority: 1
+    - keys: [type]
+      label: "AIRCRAFT"
+      format:
+        type: string
+        transform: upper
+      priority: 2
+
+# --- AI Enrichment ---
+# Classifies military aircraft by role, operator, and mission profile using
+# ICAO type code, callsign patterns, and registration prefix. Populates
+# ai_metadata on the entity, which feeds into cross-layer analyses like
+# military_conflict_proximity via the aircraft_ai_context column.
+ai:
+  enabled: true
+  operations:
+    - name: military_aircraft_classification
+      prompt: |
+        You are a military aviation analyst. Classify this military aircraft based on the
+        available identifiers and provide operational context.
+
+        Aircraft Data:
+        - ICAO Hex: {{index .Entity.Metadata "hex"}}
+        - Callsign: {{index .Entity.Metadata "callsign"}}
+        - ICAO Type Code: {{index .Entity.Metadata "type"}}
+        - Registration: {{index .Entity.Metadata "registration"}}
+        - Position: {{.Observation.Lat}}, {{.Observation.Lon}}
+        {{if .HasAltitude}}- Altitude: {{.Observation.Altitude}}m{{end}}
+
+        Using the type code, callsign, and registration, determine:
+
+        1. **Aircraft Role**: Primary mission role from the type code.
+           Common military type codes:
+           - Tankers: K35R (KC-135), KC10 (KC-10), A332 (A330 MRTT), KC46 (KC-46)
+           - ISR/Recon: R135 (RC-135), E8 (E-8 JSTARS), BE20/BE35 (King Air ISR), U2 (U-2), RQ4 (Global Hawk), MQ9 (Reaper)
+           - AWACS/C2: E3CF/E3TF (E-3 Sentry), B762/B763 (E-767), E6 (E-6B Mercury)
+           - Transport: C17 (C-17), C130/C30J (C-130), C5M (C-5M), A400 (A400M)
+           - Maritime Patrol: P8 (P-8A), P3 (P-3C)
+           - Fighters: F16/F15/F18/F22/F35 variants, EUFI (Typhoon), RFL (Rafale)
+           - Helicopters: H60 (Black Hawk), H47 (Chinook), AH64 (Apache), V22 (Osprey)
+
+        2. **Operator**: Identify the likely operating nation/service from:
+           - Registration prefix (e.g., 16- = USAF, 168xxx = USN, ZZ/ZM = RAF, 10+/46+ = Luftwaffe)
+           - Callsign patterns (e.g., RCH = USAF AMC, DUKE = USAF KC-135, CHAOS = USMC, NATO = NATO)
+           - ICAO hex range (e.g., AE/AF = US mil, 43C = UK mil, 3F = Germany mil)
+
+        3. **Mission Profile**: What this aircraft type typically does operationally.
+
+        4. **Intel Value**: How valuable tracking this aircraft is for OSINT
+           (low = common trainer/transport, medium = routine patrol, high = ISR/AWACS/specialized)
+
+        If the type code is empty or unrecognized, classify based on callsign and hex range only.
+        If insufficient data, use "unknown" for role and "unidentified" for operator.
+
+        Respond with JSON matching this schema:
+        {{.OutputSchema}}
+      output_schema:
+        type: object
+        required: [role, operator, mission_profile, intel_value, summary]
+        properties:
+          role:
+            type: string
+            enum: [isr, tanker, transport, awacs, maritime_patrol, fighter, helicopter, trainer, uav, command_control, unknown]
+          operator:
+            type: string
+          mission_profile:
+            type: string
+          intel_value:
+            type: string
+            enum: [low, medium, high]
+          summary:
+            type: string
+      temperature: 0
+      cache_ttl: "6h"
+      output:
+        store_insights: true
+        insight_type: "military_classification"
+        websocket_push: true

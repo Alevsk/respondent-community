@@ -1,0 +1,154 @@
+# sources.d/copernicus_ems.yaml
+# Copernicus EMS — Emergency Management Service Rapid Mapping Activations
+# Source: https://mapping.emergency.copernicus.eu/
+# Auth: None required (public REST API)
+# Format: JSON with WKT POINT centroids
+#
+# Returns active EMS Rapid Mapping activations across Europe and worldwide.
+# Each activation represents a disaster event with satellite-derived mapping
+# products (flood extents, damage assessments, etc.).
+schema_version: 2
+
+name: copernicus_ems
+labels:
+  category: disaster
+  priority: medium
+source_type: copernicus_ems
+layer_type: ems_activations
+display_name: "Copernicus EMS Activations"
+
+transport:
+  type: http_poll
+  url: "https://mapping.emergency.copernicus.eu/activations/api/activations/?format=json&limit=100&closed=false"
+  method: GET
+  headers:
+    Accept: "application/json"
+    User-Agent: "respondent-feeder/1.0"
+  timeout: "15s"
+  interval: "1800s"  # 30 minutes
+  max_response_bytes: 10485760  # 10MB
+  retry:
+    max_attempts: 3
+    backoff: "exponential"
+    initial_delay: "2s"
+    max_delay: "30s"
+
+parser:
+  format: json
+  records_path: "results"
+  max_records: 500
+
+# Only records with a valid WKT POINT centroid.
+filter: >
+  has(record.centroid)
+  && record.centroid != ""
+  && record.centroid.startsWith("POINT (")
+
+entity:
+  external_id: >
+    "cems_" + record.code
+  name: >
+    has(record.name) && record.name != "" ? record.name : record.code
+  metadata:
+    category: >
+      has(record.category) && has(record.category.name) ? record.category.name : ""
+    country: >
+      has(record.countries) && size(record.countries) > 0
+      && has(record.countries[0].short_name)
+        ? record.countries[0].short_name
+        : ""
+    phase: >
+      has(record.drmPhase) ? record.drmPhase : ""
+
+observation:
+  # WKT centroid: "POINT (lon lat)" — extract coordinates via string ops.
+  # substring(7) strips "POINT (" prefix, trim ")" suffix, split on space.
+  latitude: >
+    double(record.centroid.substring(7, int(record.centroid.size()) - 1).trim().split(" ")[1])
+  longitude: >
+    double(record.centroid.substring(7, int(record.centroid.size()) - 1).trim().split(" ")[0])
+  altitude: "0.0"
+  timestamp: >
+    has(record.activationTime) && record.activationTime != ""
+      ? parse_iso8601(record.activationTime)
+      : now()
+  metadata:
+    category: >
+      has(record.category) && has(record.category.name) ? record.category.name : ""
+    category_slug: >
+      has(record.category) && has(record.category.slug) ? record.category.slug : ""
+    country: >
+      has(record.countries) && size(record.countries) > 0
+      && has(record.countries[0].short_name)
+        ? record.countries[0].short_name
+        : ""
+    phase: >
+      has(record.drmPhase) ? record.drmPhase : ""
+    areas_of_interest: >
+      has(record.n_aois) ? string(record.n_aois) : "0"
+    products: >
+      has(record.n_products) ? string(record.n_products) : "0"
+    activation_code: >
+      record.code
+  content_hash: ""
+
+recording:
+  mode: upsert
+
+cache:
+  ttl: "3600s"
+
+
+# --- History ---
+history:
+  max_lookback: "2160h"
+  max_range_span: "168h"
+
+display:
+  icon:
+    shape: warning
+    rotatable: false
+    interpolation: false
+    scale: 1.1
+  trail:
+    color: "#1976d2"
+    width: 1.5
+    opacity: 0.8
+  style:
+    color: "#1976d2"
+    point_size: 6
+  field_renderers:
+    - keys: [category]
+      label: "HAZARD"
+      format:
+        type: string
+        transform: upper
+      priority: 0
+    - keys: [phase]
+      label: "PHASE"
+      format:
+        type: string
+        transform: upper
+      priority: 1
+    - keys: [country]
+      label: "COUNTRY"
+      format:
+        type: string
+        transform: upper
+      priority: 2
+    - keys: [areas_of_interest]
+      label: "AOIs"
+      format:
+        type: integer
+      priority: 3
+    - keys: [products]
+      label: "PRODUCTS"
+      format:
+        type: integer
+      priority: 4
+    - keys: [activation_code]
+      label: "CODE"
+      format:
+        type: string
+        transform: upper
+      priority: 5

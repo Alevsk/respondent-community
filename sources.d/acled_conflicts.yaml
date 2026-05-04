@@ -1,0 +1,401 @@
+# sources.d/acled_conflicts.yaml
+# ACLED — Armed Conflict Location & Event Data
+# Source: https://acleddata.com/
+# Data: ACLED Explorer pre-built static JSON (public, no auth required)
+#       https://apps.acleddata.com/newexplorer/standard/
+#
+# Polls the monthly global overview and ingests the `countryTimeline` array,
+# which provides **daily per-country** conflict metrics over the last ~29 days
+# (~6200 records per fetch). Each record carries event counts, fatalities,
+# population exposure, and exposure percentage for a single country on a
+# single day, with real date-based timestamps.
+#
+# Country centroids and display names are resolved via the inline
+# country_coords lookup table (252 entries).
+#
+# NOTE: For event-level precision with individual geolocated incidents,
+# the ACLED REST API at https://acleddata.com/api/acled/read requires an
+# approved myACLED account with data-tier access and uses OAuth2 password-
+# grant auth. The OAuth2 token provider in the ingest engine supports
+# this — switch back when API access is granted.
+schema_version: 1
+
+name: acled_conflicts
+labels:
+  category: conflict
+  priority: high
+source_type: acled_conflicts
+layer_type: conflict_events
+display_name: "ACLED Armed Conflict Events"
+
+enabled: true
+
+# Country ID -> centroid coordinates + display name (252 entries).
+# Names sourced from ACLED Explorer country list; coords from countryBounds.json.
+lookup_tables:
+  - name: "country_coords"
+    key_field: "id"
+    entries:
+      - { id: "4", name: "Afghanistan", lat: 33.84, lng: 66.03 }
+      - { id: "2", name: "Akrotiri and Dhekelia", lat: 32.93, lng: 34.62 }
+      - { id: "8", name: "Albania", lat: 40.64, lng: 20.16 }
+      - { id: "12", name: "Algeria", lat: 28.16, lng: 2.63 }
+      - { id: "16", name: "American Samoa", lat: -14.3, lng: -170.71 }
+      - { id: "20", name: "Andorra", lat: 42.55, lng: 1.58 }
+      - { id: "24", name: "Angola", lat: -12.1, lng: 17.91 }
+      - { id: "660", name: "Anguilla", lat: 18.19, lng: -63.08 }
+      - { id: "10", name: "Antarctica", lat: -90, lng: 0 }
+      - { id: "28", name: "Antigua and Barbuda", lat: 17.28, lng: -61.79 }
+      - { id: "32", name: "Argentina", lat: -36.25, lng: -63.95 }
+      - { id: "51", name: "Armenia", lat: 40.61, lng: 44.66 }
+      - { id: "533", name: "Aruba", lat: 12.52, lng: -69.98 }
+      - { id: "36", name: "Australia", lat: -25.73, lng: 134.49 }
+      - { id: "40", name: "Austria", lat: 47.61, lng: 14.3 }
+      - { id: "31", name: "Azerbaijan", lat: 40.42, lng: 47.72 }
+      - { id: "48", name: "Bahrain", lat: 26.02, lng: 50.56 }
+      - { id: "50", name: "Bangladesh", lat: 24.35, lng: 90.08 }
+      - { id: "52", name: "Barbados", lat: 13.18, lng: -59.56 }
+      - { id: "112", name: "Belarus", lat: 53.54, lng: 28.05 }
+      - { id: "56", name: "Belgium", lat: 50.44, lng: 4.63 }
+      - { id: "84", name: "Belize", lat: 17.22, lng: -88.69 }
+      - { id: "204", name: "Benin", lat: 10.34, lng: 2.43 }
+      - { id: "60", name: "Bermuda", lat: 32.32, lng: -64.74 }
+      - { id: "64", name: "Bhutan", lat: 27.42, lng: 90.43 }
+      - { id: "68", name: "Bolivia", lat: -16.97, lng: -64.27 }
+      - { id: "535", name: "Caribbean Netherlands", lat: 12.18, lng: -68.23 }
+      - { id: "70", name: "Bosnia and Herzegovina", lat: 44.17, lng: 17.79 }
+      - { id: "72", name: "Botswana", lat: -22.21, lng: 24.32 }
+      - { id: "74", name: "Bouvet Island", lat: -54.43, lng: 3.4 }
+      - { id: "76", name: "Brazil", lat: -9.59, lng: -51.62 }
+      - { id: "86", name: "British Indian Ocean Territory", lat: -6.17, lng: 71.42 }
+      - { id: "92", name: "British Virgin Islands", lat: 18.4, lng: -64.57 }
+      - { id: "96", name: "Brunei", lat: 4.57, lng: 114.56 }
+      - { id: "100", name: "Bulgaria", lat: 42.76, lng: 25.23 }
+      - { id: "854", name: "Burkina Faso", lat: 12.28, lng: -1.57 }
+      - { id: "108", name: "Burundi", lat: -3.53, lng: 29.89 }
+      - { id: "116", name: "Cambodia", lat: 12.46, lng: 104.92 }
+      - { id: "120", name: "Cameroon", lat: 4.81, lng: 12.21 }
+      - { id: "124", name: "Canada", lat: 55.59, lng: -105.75 }
+      - { id: "132", name: "Cape Verde", lat: 15.98, lng: -23.97 }
+      - { id: "136", name: "Cayman Islands", lat: 19.31, lng: -81.24 }
+      - { id: "140", name: "Central African Republic", lat: 6.57, lng: 20.48 }
+      - { id: "148", name: "Chad", lat: 15.36, lng: 18.66 }
+      - { id: "152", name: "Chile", lat: -26.78, lng: -69.76 }
+      - { id: "162", name: "Christmas Island", lat: -10.49, lng: 105.63 }
+      - { id: "166", name: "Cocos (Keeling) Islands", lat: -12.17, lng: 96.83 }
+      - { id: "170", name: "Colombia", lat: 3.07, lng: -73.13 }
+      - { id: "174", name: "Comoros", lat: -11.89, lng: 43.68 }
+      - { id: "184", name: "Cook Islands", lat: -21.24, lng: -159.77 }
+      - { id: "188", name: "Costa Rica", lat: 10.26, lng: -84.2 }
+      - { id: "191", name: "Croatia", lat: 45.66, lng: 16.68 }
+      - { id: "192", name: "Cuba", lat: 21.95, lng: -79.24 }
+      - { id: "531", name: "Curacao", lat: 12.18, lng: -68.98 }
+      - { id: "196", name: "Cyprus", lat: 35.05, lng: 33.22 }
+      - { id: "203", name: "Czech Republic", lat: 49.74, lng: 15.34 }
+      - { id: "180", name: "Democratic Republic of Congo", lat: -1.17, lng: 23.17 }
+      - { id: "208", name: "Denmark", lat: 55.96, lng: 10.05 }
+      - { id: "262", name: "Djibouti", lat: 11.75, lng: 42.58 }
+      - { id: "212", name: "Dominica", lat: 15.44, lng: -61.36 }
+      - { id: "214", name: "Dominican Republic", lat: 18.61, lng: -70.11 }
+      - { id: "626", name: "East Timor", lat: -8.85, lng: 125.77 }
+      - { id: "218", name: "Ecuador", lat: -1.16, lng: -78.43 }
+      - { id: "818", name: "Egypt", lat: 26.49, lng: 29.87 }
+      - { id: "222", name: "El Salvador", lat: 13.74, lng: -88.87 }
+      - { id: "226", name: "Equatorial Guinea", lat: 1.61, lng: 10.53 }
+      - { id: "232", name: "Eritrea", lat: 15.68, lng: 38.58 }
+      - { id: "233", name: "Estonia", lat: 58.78, lng: 25.76 }
+      - { id: "748", name: "eSwatini", lat: -26.56, lng: 31.5 }
+      - { id: "231", name: "Ethiopia", lat: 8.63, lng: 39.62 }
+      - { id: "238", name: "Falkland Islands", lat: -51.77, lng: -59.54 }
+      - { id: "234", name: "Faroe Islands", lat: 62.03, lng: -6.88 }
+      - { id: "583", name: "Federated States of Micronesia", lat: 6.08, lng: 160.4 }
+      - { id: "242", name: "Fiji", lat: -18.12, lng: 179.01 }
+      - { id: "246", name: "Finland", lat: 62.78, lng: 26.2 }
+      - { id: "250", name: "France", lat: 47.82, lng: 2.62 }
+      - { id: "254", name: "French Guiana", lat: 4.36, lng: -53.17 }
+      - { id: "258", name: "French Polynesia", lat: -14.85, lng: -146.42 }
+      - { id: "260", name: "French Southern and Antarctic Lands", lat: -49.5, lng: 63.91 }
+      - { id: "266", name: "Gabon", lat: -0.59, lng: 11.8 }
+      - { id: "268", name: "Georgia", lat: 42.18, lng: 43.52 }
+      - { id: "276", name: "Germany", lat: 51.13, lng: 10.02 }
+      - { id: "288", name: "Ghana", lat: 6.88, lng: -1.17 }
+      - { id: "292", name: "Gibraltar", lat: 36.14, lng: -5.34 }
+      - { id: "300", name: "Greece", lat: 38.59, lng: 23.83 }
+      - { id: "304", name: "Greenland", lat: 74.72, lng: -41.39 }
+      - { id: "308", name: "Grenada", lat: 12.11, lng: -61.68 }
+      - { id: "312", name: "Guadeloupe", lat: 16.2, lng: -61.54 }
+      - { id: "316", name: "Guam", lat: 13.44, lng: 144.78 }
+      - { id: "320", name: "Guatemala", lat: 15.61, lng: -90.39 }
+      - { id: "831", name: "Bailiwick of Guernsey", lat: 49.45, lng: -2.58 }
+      - { id: "324", name: "Guinea", lat: 10.79, lng: -11.03 }
+      - { id: "624", name: "Guinea-Bissau", lat: 12.03, lng: -14.96 }
+      - { id: "328", name: "Guyana", lat: 5.62, lng: -58.97 }
+      - { id: "332", name: "Haiti", lat: 19.18, lng: -72.43 }
+      - { id: "334", name: "Heard Island and McDonald Islands", lat: -53.1, lng: 72.52 }
+      - { id: "340", name: "Honduras", lat: 14.76, lng: -86.92 }
+      - { id: "344", name: "Hong Kong", lat: 22.28, lng: 114.16 }
+      - { id: "348", name: "Hungary", lat: 47.06, lng: 19.5 }
+      - { id: "352", name: "Iceland", lat: 65, lng: -18.61 }
+      - { id: "356", name: "India", lat: 22.2, lng: 78.48 }
+      - { id: "360", name: "Indonesia", lat: -2.28, lng: 117.37 }
+      - { id: "364", name: "Iran", lat: 32.57, lng: 54.3 }
+      - { id: "368", name: "Iraq", lat: 33.05, lng: 43.4 }
+      - { id: "372", name: "Ireland", lat: 53.31, lng: -7.74 }
+      - { id: "833", name: "Isle of Man", lat: 54.23, lng: -4.53 }
+      - { id: "376", name: "Israel", lat: 31.85, lng: 34.84 }
+      - { id: "380", name: "Italy", lat: 42.5, lng: 12.65 }
+      - { id: "384", name: "Ivory Coast", lat: 7.81, lng: -5.38 }
+      - { id: "388", name: "Jamaica", lat: 18.15, lng: -77.32 }
+      - { id: "392", name: "Japan", lat: 36.39, lng: 138.59 }
+      - { id: "832", name: "Bailiwick of Jersey", lat: 49.22, lng: -2.14 }
+      - { id: "400", name: "Jordan", lat: 31.01, lng: 36.44 }
+      - { id: "398", name: "Kazakhstan", lat: 48.16, lng: 67.3 }
+      - { id: "404", name: "Kenya", lat: 0.53, lng: 37.86 }
+      - { id: "296", name: "Kiribati", lat: 1.84, lng: -157.37 }
+      - { id: "0", name: "Kosovo", lat: 20.24, lng: 42.56 }
+      - { id: "414", name: "Kuwait", lat: 29.34, lng: 47.59 }
+      - { id: "417", name: "Kyrgyzstan", lat: 41.47, lng: 74.56 }
+      - { id: "418", name: "Laos", lat: 19.92, lng: 102.59 }
+      - { id: "428", name: "Latvia", lat: 56.96, lng: 24.86 }
+      - { id: "422", name: "Lebanon", lat: 33.92, lng: 35.89 }
+      - { id: "426", name: "Lesotho", lat: -29.58, lng: 28.24 }
+      - { id: "430", name: "Liberia", lat: 6.45, lng: -9.31 }
+      - { id: "434", name: "Libya", lat: 27.04, lng: 18.02 }
+      - { id: "438", name: "Liechtenstein", lat: 47.15, lng: 9.55 }
+      - { id: "440", name: "Lithuania", lat: 55.49, lng: 23.93 }
+      - { id: "442", name: "Luxembourg", lat: 49.77, lng: 6.09 }
+      - { id: "446", name: "Macau", lat: 22.17, lng: 113.55 }
+      - { id: "450", name: "Madagascar", lat: -19.37, lng: 46.71 }
+      - { id: "454", name: "Malawi", lat: -13.22, lng: 33.74 }
+      - { id: "458", name: "Malaysia", lat: 2.72, lng: 113.27 }
+      - { id: "462", name: "Maldives", lat: 3.22, lng: 73.25 }
+      - { id: "466", name: "Mali", lat: 17.35, lng: -1.25 }
+      - { id: "470", name: "Malta", lat: 35.89, lng: 14.44 }
+      - { id: "584", name: "Marshall Islands", lat: 8.43, lng: 168.55 }
+      - { id: "474", name: "Martinique", lat: 14.65, lng: -61.02 }
+      - { id: "478", name: "Mauritania", lat: 19.76, lng: -10.53 }
+      - { id: "480", name: "Mauritius", lat: -20.25, lng: 57.87 }
+      - { id: "175", name: "Mayotte", lat: -12.82, lng: 45.14 }
+      - { id: "484", name: "Mexico", lat: 23.95, lng: -102.53 }
+      - { id: "498", name: "Moldova", lat: 47.19, lng: 28.57 }
+      - { id: "492", name: "Monaco", lat: 43.75, lng: 7.41 }
+      - { id: "496", name: "Mongolia", lat: 46.84, lng: 103.08 }
+      - { id: "499", name: "Montenegro", lat: 42.79, lng: 19.25 }
+      - { id: "500", name: "Montserrat", lat: 16.74, lng: -62.19 }
+      - { id: "504", name: "Morocco", lat: 32.35, lng: -6.02 }
+      - { id: "508", name: "Mozambique", lat: -18.09, lng: 34.75 }
+      - { id: "104", name: "Myanmar", lat: 21.15, lng: 96.51 }
+      - { id: "516", name: "Namibia", lat: -21.2, lng: 17.29 }
+      - { id: "520", name: "Nauru", lat: -0.52, lng: 166.93 }
+      - { id: "524", name: "Nepal", lat: 28.25, lng: 83.94 }
+      - { id: "528", name: "Netherlands", lat: 51.97, lng: 5.61 }
+      - { id: "530", name: "Netherlands Antilles", lat: 12.25, lng: -68.75 }
+      - { id: "540", name: "New Caledonia", lat: -21.32, lng: 165.72 }
+      - { id: "554", name: "New Zealand", lat: -41.84, lng: 171.78 }
+      - { id: "558", name: "Nicaragua", lat: 12.34, lng: -84.92 }
+      - { id: "562", name: "Niger", lat: 17.43, lng: 9.4 }
+      - { id: "566", name: "Nigeria", lat: 9.59, lng: 8.11 }
+      - { id: "570", name: "Niue", lat: -19.02, lng: -169.87 }
+      - { id: "574", name: "Norfolk Island", lat: -29.03, lng: 167.95 }
+      - { id: "408", name: "North Korea", lat: 40.35, lng: 126.85 }
+      - { id: "580", name: "Northern Mariana Islands", lat: 15.09, lng: 145.68 }
+      - { id: "578", name: "Norway", lat: 61.25, lng: 8.8 }
+      - { id: "512", name: "Oman", lat: 21.38, lng: 57.09 }
+      - { id: "586", name: "Pakistan", lat: 28.19, lng: 67.7 }
+      - { id: "585", name: "Palau", lat: 7.52, lng: 134.58 }
+      - { id: "275", name: "Palestine", lat: 32.3, lng: 35.33 }
+      - { id: "591", name: "Panama", lat: 8.7, lng: -80.27 }
+      - { id: "598", name: "Papua New Guinea", lat: -6.48, lng: 145.24 }
+      - { id: "600", name: "Paraguay", lat: -23.24, lng: -58.39 }
+      - { id: "156", name: "China", lat: 35.49, lng: 101.9 }
+      - { id: "604", name: "Peru", lat: -10.15, lng: -75.31 }
+      - { id: "608", name: "Philippines", lat: 11.74, lng: 122.88 }
+      - { id: "612", name: "Pitcairn Islands", lat: -25.07, lng: -130.1 }
+      - { id: "616", name: "Poland", lat: 52.12, lng: 19.3 }
+      - { id: "620", name: "Portugal", lat: 39.6, lng: -8.56 }
+      - { id: "630", name: "Puerto Rico", lat: 18.22, lng: -66.46 }
+      - { id: "634", name: "Qatar", lat: 25.32, lng: 51.19 }
+      - { id: "807", name: "North Macedonia", lat: 41.6, lng: 21.7 }
+      - { id: "178", name: "Republic of Congo", lat: -0.31, lng: 15.99 }
+      - { id: "642", name: "Romania", lat: 45.84, lng: 24.97 }
+      - { id: "643", name: "Russia", lat: 61.99, lng: 96.67 }
+      - { id: "646", name: "Rwanda", lat: -1.87, lng: 29.92 }
+      - { id: "638", name: "Reunion", lat: -21.12, lng: 55.54 }
+      - { id: "654", name: "Saint Helena", lat: -16.68, lng: -4.97 }
+      - { id: "659", name: "Saint Kitts and Nevis", lat: 17.33, lng: -62.75 }
+      - { id: "662", name: "Saint Lucia", lat: 13.9, lng: -60.97 }
+      - { id: "663", name: "Saint Martin", lat: 18.09, lng: -63.05 }
+      - { id: "666", name: "Saint Pierre and Miquelon", lat: 46.9, lng: -56.32 }
+      - { id: "670", name: "Saint Vincent and the Grenadines", lat: 13.25, lng: -61.19 }
+      - { id: "652", name: "Saint-Barthelemy", lat: 17.92, lng: -62.86 }
+      - { id: "882", name: "Samoa", lat: -13.76, lng: -172.16 }
+      - { id: "674", name: "San Marino", lat: 43.94, lng: 12.46 }
+      - { id: "682", name: "Saudi Arabia", lat: 23.38, lng: 44.65 }
+      - { id: "686", name: "Senegal", lat: 15.22, lng: -14.82 }
+      - { id: "688", name: "Serbia", lat: 44.23, lng: 20.8 }
+      - { id: "690", name: "Seychelles", lat: -6.35, lng: 52.23 }
+      - { id: "694", name: "Sierra Leone", lat: 8.56, lng: -11.79 }
+      - { id: "702", name: "Singapore", lat: 1.35, lng: 103.81 }
+      - { id: "534", name: "Sint Maarten", lat: 18.04, lng: -63.04 }
+      - { id: "703", name: "Slovakia", lat: 48.71, lng: 19.49 }
+      - { id: "705", name: "Slovenia", lat: 46.17, lng: 14.69 }
+      - { id: "90", name: "Solomon Islands", lat: -8.92, lng: 159.63 }
+      - { id: "706", name: "Somalia", lat: 5.79, lng: 47.33 }
+      - { id: "710", name: "South Africa", lat: -28.38, lng: 23.91 }
+      - { id: "239", name: "South Georgia and the South Sandwich Islands", lat: -54.84, lng: -35.81 }
+      - { id: "410", name: "South Korea", lat: 36.54, lng: 128.17 }
+      - { id: "728", name: "South Sudan", lat: 7.27, lng: 30.05 }
+      - { id: "724", name: "Spain", lat: 41.29, lng: -4.06 }
+      - { id: "144", name: "Sri Lanka", lat: 7.61, lng: 80.7 }
+      - { id: "729", name: "Sudan", lat: 13.83, lng: 30.05 }
+      - { id: "740", name: "Suriname", lat: 3.69, lng: -55.91 }
+      - { id: "744", name: "Svalbard and Jan Mayen", lat: 78.72, lng: 20.35 }
+      - { id: "752", name: "Sweden", lat: 64.96, lng: 17.68 }
+      - { id: "756", name: "Switzerland", lat: 46.8, lng: 8.23 }
+      - { id: "760", name: "Syria", lat: 35.01, lng: 38.51 }
+      - { id: "678", name: "Sao Tome and Principe", lat: 0.46, lng: 6.74 }
+      - { id: "158", name: "Taiwan", lat: 23.78, lng: 120.93 }
+      - { id: "762", name: "Tajikistan", lat: 38.84, lng: 71.04 }
+      - { id: "834", name: "Tanzania", lat: -6.27, lng: 34.82 }
+      - { id: "764", name: "Thailand", lat: 15.13, lng: 101.02 }
+      - { id: "44", name: "Bahamas", lat: 25.24, lng: -76.55 }
+      - { id: "270", name: "Gambia", lat: 13.44, lng: -15.91 }
+      - { id: "768", name: "Togo", lat: 8.77, lng: 1.04 }
+      - { id: "772", name: "Tokelau", lat: -9.17, lng: -171.82 }
+      - { id: "776", name: "Tonga", lat: -20.39, lng: -174.83 }
+      - { id: "780", name: "Trinidad and Tobago", lat: 10.47, lng: -61.25 }
+      - { id: "788", name: "Tunisia", lat: 34.11, lng: 9.56 }
+      - { id: "792", name: "Turkey", lat: 39.06, lng: 35.18 }
+      - { id: "795", name: "Turkmenistan", lat: 39.12, lng: 59.38 }
+      - { id: "796", name: "Turks and Caicos Islands", lat: 21.72, lng: -71.62 }
+      - { id: "798", name: "Tuvalu", lat: -7.96, lng: 178.01 }
+      - { id: "800", name: "Uganda", lat: 1.28, lng: 32.39 }
+      - { id: "804", name: "Ukraine", lat: 49.32, lng: 31.32 }
+      - { id: "784", name: "United Arab Emirates", lat: 23.85, lng: 54.26 }
+      - { id: "826", name: "United Kingdom", lat: 54.24, lng: -2.37 }
+      - { id: "581", name: "United States Minor Outlying Islands", lat: 19.28, lng: 166.6 }
+      - { id: "840", name: "United States", lat: 39.38, lng: -97.92 }
+      - { id: "850", name: "United States Virgin Islands", lat: 17.74, lng: -64.76 }
+      - { id: "858", name: "Uruguay", lat: -32.8, lng: -56.01 }
+      - { id: "860", name: "Uzbekistan", lat: 41.75, lng: 63.17 }
+      - { id: "548", name: "Vanuatu", lat: -16.26, lng: 167.72 }
+      - { id: "336", name: "Vatican City", lat: 41.9, lng: 12.45 }
+      - { id: "862", name: "Venezuela", lat: 7.62, lng: -65.8 }
+      - { id: "704", name: "Vietnam", lat: 14.32, lng: 108.34 }
+      - { id: "876", name: "Wallis and Futuna", lat: -13.87, lng: -177.21 }
+      - { id: "732", name: "Western Sahara", lat: 24.6, lng: -13.7 }
+      - { id: "887", name: "Yemen", lat: 15.94, lng: 47.62 }
+      - { id: "894", name: "Zambia", lat: -14, lng: 27.43 }
+      - { id: "716", name: "Zimbabwe", lat: -19.19, lng: 29.94 }
+      - { id: "248", name: "Aland Islands", lat: 60.12, lng: 19.9 }
+
+transport:
+  type: http_poll
+  url: "https://apps.acleddata.com/newexplorer/standard/data/acled/month_all_overview.json"
+  method: GET
+  headers:
+    Accept: "application/json"
+  timeout: "30s"
+  interval: "7200s"      # 2 hours — Explorer data refreshed infrequently
+  max_response_bytes: 10485760  # 10MB
+  retry:
+    max_attempts: 3
+    backoff: "exponential"
+    initial_delay: "5s"
+    max_delay: "60s"
+
+parser:
+  format: json
+  records_path: "countryTimeline"
+  max_records: 10000
+
+# Filter: only days with actual events and a known centroid
+filter: >
+  has(record.events) && record.events > 0
+  && has(record.id)
+  && has_lookup("country_coords", string(int(record.id)))
+
+entity:
+  external_id: >
+    string(int(record.id))
+  name: >
+    lookup("country_coords", string(int(record.id)), "name")
+  metadata:
+    country_id: >
+      string(int(record.id))
+
+observation:
+  latitude: >
+    lookup("country_coords", string(int(record.id)), "lat")
+  longitude: >
+    lookup("country_coords", string(int(record.id)), "lng")
+  altitude: "0.0"
+  timestamp: >
+    parse_datetime(record.date, "2006-01-02")
+  event_time: >
+    parse_datetime(record.date, "2006-01-02")
+  velocity: {}
+  metadata:
+    date: >
+      record.date
+    events: >
+      string(int(record.events))
+    fatalities: >
+      string(int(record.fatalities))
+    exposure: >
+      string(int(record.exposure))
+    exposure_pct: >
+      string(record.exposure_pct)
+  content_hash: >
+    string(int(record.id)) + "_" + record.date + "_" + string(int(record.events)) + "_" + string(int(record.fatalities)) + "_" + string(int(record.exposure))
+
+recording:
+  mode: upsert
+
+cache:
+  ttl: "7200s"
+
+display:
+  icon:
+    shape: explosion
+    rotatable: false
+    interpolation: false
+    scale: 1.0
+  trail:
+    color: "#ff4444"
+    width: 1.5
+    opacity: 0.7
+  style:
+    color: "#ff4444"
+    point_size: 6
+  field_renderers:
+    - keys: [date]
+      label: "DATE"
+      format:
+        type: string
+      priority: 0
+    - keys: [events]
+      label: "EVENTS"
+      format:
+        type: string
+      priority: 1
+    - keys: [fatalities]
+      label: "FATALITIES"
+      format:
+        type: string
+      priority: 2
+    - keys: [exposure]
+      label: "POP EXPOSED"
+      format:
+        type: string
+      priority: 3
+    - keys: [exposure_pct]
+      label: "EXPOSURE %"
+      format:
+        type: string
+        suffix: "%"
+      priority: 4
+
+history:
+  max_lookback: "2160h"      # 90 days
+  max_range_span: "720h"     # 30 days per query window

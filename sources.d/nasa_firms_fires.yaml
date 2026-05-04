@@ -1,0 +1,150 @@
+# sources.d/nasa_firms_fires.yaml
+# NASA FIRMS Active Fire Data (VIIRS NOAA-20 Near Real-Time)
+# Source: https://firms.modaps.eosdis.nasa.gov/api/
+# Auth: Free MAP_KEY required (register at NASA Earthdata)
+# Format: CSV with header row
+schema_version: 2
+
+name: nasa_firms_fires
+labels:
+  category: environmental
+  priority: medium
+
+# --- Identity ---
+source_type: nasa_firms_fires
+layer_type: fires_active
+display_name: "NASA FIRMS Active Fires"
+
+filtering: viewport
+
+geo_cache:
+  overfetch_ratio: 3.0
+  alive_ratio_threshold: 0.5
+  gc_batch_size: 500
+
+# --- Ingestion ---
+transport:
+  type: http_poll
+  # FIRMS API embeds the API key directly in the URL path segment.
+  # ${NASA_FIRMS_MAP_KEY} is resolved at load time from RESPONDENT_NASA_FIRMS_MAP_KEY env var.
+  url: "https://firms.modaps.eosdis.nasa.gov/api/area/csv/${NASA_FIRMS_MAP_KEY}/VIIRS_NOAA20_NRT/world/2"
+  method: GET
+  timeout: "30s"
+  interval: "10800s"  # 3 hours (matches satellite overpass schedule)
+  max_response_bytes: 52428800  # 50MB
+  retry:
+    max_attempts: 3
+    backoff: "exponential"
+    initial_delay: "5s"
+    max_delay: "60s"
+
+# --- Response Parsing ---
+parser:
+  format: csv
+  max_records: 50000
+  csv_options:
+    delimiter: ","
+    has_header: true
+    skip_lines: 0
+
+# --- Record Filtering (CEL) ---
+# Filter out records with low confidence
+filter: >
+  record.confidence != "low" && record.confidence != "l"
+
+# --- Entity Mapping (CEL) ---
+entity:
+  # Composite key: lat_lon_acq_date_acq_time for dedup
+  external_id: >
+    record.latitude + "_" + record.longitude + "_" + record.acq_date + "_" + record.acq_time
+  name: >
+    "Fire " + record.latitude + "," + record.longitude
+  metadata:
+    bright_ti4: >
+      has(record.bright_ti4) ? record.bright_ti4 : ""
+    confidence: >
+      has(record.confidence) ? record.confidence : ""
+    frp: >
+      has(record.frp) ? record.frp : "0"
+    satellite: >
+      has(record.satellite) ? record.satellite : ""
+    daynight: >
+      has(record.daynight) ? record.daynight : ""
+
+# --- Observation Mapping (CEL) ---
+observation:
+  latitude: >
+    double(record.latitude)
+  longitude: >
+    double(record.longitude)
+  altitude: "0.0"
+  # FIRMS CSV provides acq_date (YYYY-MM-DD) and acq_time (HHMM) as strings.
+  # Concatenate and parse with Go layout: "2006-01-02 1504"
+  timestamp: >
+    parse_datetime(record.acq_date + " " + record.acq_time, "2006-01-02 1504")
+  velocity: {}
+  metadata:
+    bright_ti4: >
+      has(record.bright_ti4) ? record.bright_ti4 : ""
+    frp: >
+      has(record.frp) ? record.frp : "0"
+    scan: >
+      has(record.scan) ? record.scan : ""
+  # Composite hash for dedupe: lat + lon + date + time + brightness uniquely identifies a fire detection.
+  content_hash: >
+    record.latitude + "_" + record.longitude + "_" + record.acq_date + "_" + record.acq_time + "_" + (has(record.bright_ti4) ? record.bright_ti4 : "")
+
+# --- Recording ---
+recording:
+  mode: dedupe
+
+# --- Cache ---
+cache:
+  ttl: "3600s"
+
+# --- Display ---
+display:
+  icon:
+    shape: fire
+    rotatable: false
+    interpolation: false
+    scale: 0.7
+  trail:
+    color: "#ff4500"
+    width: 1.0
+    opacity: 0.8
+  style:
+    color: "#ff4500"
+    point_size: 6
+  field_renderers:
+    - keys: [frp]
+      label: "FIRE RADIATIVE POWER"
+      format:
+        type: float
+        precision: 1
+        suffix: " MW"
+      priority: 0
+    - keys: [bright_ti4]
+      label: "BRIGHTNESS"
+      format:
+        type: float
+        precision: 1
+        suffix: " K"
+      priority: 1
+    - keys: [confidence]
+      label: "CONFIDENCE"
+      format:
+        type: string
+        transform: upper
+      priority: 2
+    - keys: [satellite]
+      label: "SATELLITE"
+      format:
+        type: string
+        transform: upper
+      priority: 3
+
+# --- History (per-layer time range limits) ---
+history:
+  max_lookback: "2160h"    # 90 days
+  max_range_span: "168h"   # 7 days per query window

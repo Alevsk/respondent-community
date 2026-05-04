@@ -1,0 +1,174 @@
+# sources.d/spacedevs_launches.yaml
+# Upcoming rocket launches from Launch Library 2 by TheSpaceDevs.
+# API docs: https://thespacedevs.com/llapi
+# Free tier: 15 requests/hour. Uses the dev endpoint (lldev) for development.
+# Switch to ll.thespacedevs.com for production with a paid API key.
+schema_version: 1
+
+name: spacedevs_launches
+labels:
+  category: space
+  priority: medium
+
+# --- Identity ---
+source_type: spacedevs_launches
+layer_type: rocket_launches
+display_name: "Upcoming Launches"
+
+# --- Ingestion ---
+transport:
+  type: http_poll
+  url: "https://lldev.thespacedevs.com/2.3.0/launches/upcoming/?limit=50&mode=normal"
+  method: GET
+  headers:
+    Accept: "application/json"
+    User-Agent: "Respondent/1.0"
+  timeout: "15s"
+  interval: "600s"
+  max_response_bytes: 10485760  # 10MB
+  retry:
+    max_attempts: 2
+    backoff: "exponential"
+    initial_delay: "5s"
+    max_delay: "60s"
+
+# --- Response Parsing ---
+parser:
+  format: json
+  records_path: "results"
+  max_records: 500
+
+# --- Record Filtering (CEL) ---
+# Require valid pad coordinates for map placement.
+filter: >
+  has(record.pad) && has(record.pad.latitude) && has(record.pad.longitude) && record.pad.latitude != "" && record.pad.longitude != ""
+
+# --- Entity Mapping (CEL) ---
+entity:
+  external_id: >
+    record.id
+  name: >
+    record.name
+  metadata:
+    status: >
+      has(record.status) && has(record.status.name) ? record.status.name : ""
+    status_abbrev: >
+      has(record.status) && has(record.status.abbrev) ? record.status.abbrev : ""
+    net: >
+      has(record.net) ? record.net : ""
+    window_start: >
+      has(record.window_start) ? record.window_start : ""
+    window_end: >
+      has(record.window_end) ? record.window_end : ""
+    rocket: >
+      has(record.rocket) && has(record.rocket.configuration) && has(record.rocket.configuration.full_name) ? record.rocket.configuration.full_name : ""
+    mission: >
+      has(record.mission) && has(record.mission.name) ? record.mission.name : ""
+    mission_type: >
+      has(record.mission) && has(record.mission.type) ? record.mission.type : ""
+    orbit: >
+      has(record.mission) && has(record.mission.orbit) && has(record.mission.orbit.name) ? record.mission.orbit.name : ""
+    provider: >
+      has(record.launch_service_provider) && has(record.launch_service_provider.name) ? record.launch_service_provider.name : ""
+    pad_name: >
+      has(record.pad) && has(record.pad.name) ? record.pad.name : ""
+    location: >
+      has(record.pad) && has(record.pad.location) && has(record.pad.location.name) ? record.pad.location.name : ""
+
+# --- Observation Mapping (CEL) ---
+observation:
+  latitude: >
+    double(record.pad.latitude)
+  longitude: >
+    double(record.pad.longitude)
+  altitude: "0.0"
+  timestamp: >
+    now()
+  event_time: >
+    parse_iso8601(record.net)
+  event_end: >
+    parse_iso8601(record.window_end)
+  velocity: {}
+  metadata:
+    status: >
+      has(record.status) && has(record.status.name) ? record.status.name : ""
+    rocket: >
+      has(record.rocket) && has(record.rocket.configuration) && has(record.rocket.configuration.full_name) ? record.rocket.configuration.full_name : ""
+  content_hash: >
+    record.id + "_" + (has(record.status) && has(record.status.abbrev) ? record.status.abbrev : "") + "_" + (has(record.net) ? record.net : "") + "_" + (has(record.window_end) ? record.window_end : "")
+
+# --- Recording ---
+recording:
+  mode: dedupe
+
+# --- Cache ---
+cache:
+  ttl: "1800s"
+
+# --- Display (consumed by frontend) ---
+display:
+  icon:
+    shape: missile
+    rotatable: false
+    interpolation: false
+    scale: 1.2
+  trail:
+    color: "#00bcd4"
+    width: 1.5
+    opacity: 0.7
+  style:
+    color: "#00bcd4"
+    point_size: 6
+  field_renderers:
+    - keys: [status]
+      label: "STATUS"
+      format:
+        type: string
+        transform: upper
+      priority: 0
+    - keys: [rocket]
+      label: "ROCKET"
+      format:
+        type: string
+      priority: 1
+    - keys: [provider]
+      label: "PROVIDER"
+      format:
+        type: string
+      priority: 2
+    - keys: [mission]
+      label: "MISSION"
+      format:
+        type: string
+      priority: 3
+    - keys: [mission_type]
+      label: "MISSION TYPE"
+      format:
+        type: string
+        transform: upper
+      priority: 4
+    - keys: [orbit]
+      label: "ORBIT"
+      format:
+        type: string
+      priority: 5
+    - keys: [net]
+      label: "NET"
+      format:
+        type: string
+      priority: 6
+    - keys: [pad_name]
+      label: "PAD"
+      format:
+        type: string
+      priority: 7
+    - keys: [location]
+      label: "LOCATION"
+      format:
+        type: string
+      priority: 8
+
+# --- History ---
+history:
+  max_lookback: "2160h"     # 90 days
+  max_range_span: "720h"    # 30 days per query window

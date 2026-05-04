@@ -1,0 +1,180 @@
+# sources.d/emsc_earthquakes.yaml
+# European-Mediterranean Seismological Centre earthquake data.
+# Complements USGS earthquakes on the same layer.
+# API: FDSN event web service (Seismic Portal)
+schema_version: 2
+
+name: emsc_earthquakes
+labels:
+  category: geological
+  priority: low
+
+# --- Identity ---
+source_type: emsc_earthquakes
+layer_type: earthquakes
+display_name: "EMSC Earthquakes"
+
+
+# --- Ingestion ---
+transport:
+  type: http_poll
+  url: "https://www.seismicportal.eu/fdsnws/event/1/query?format=json&limit=100&orderby=time"
+  method: GET
+  headers:
+    Accept: "application/json"
+  timeout: "10s"
+  interval: "120s"
+  max_response_bytes: 52428800  # 50MB
+  retry:
+    max_attempts: 3
+    backoff: "exponential"
+    initial_delay: "1s"
+    max_delay: "30s"
+
+# --- Response Parsing ---
+parser:
+  format: geojson
+  records_path: "features"
+  max_records: 10000
+
+# --- Record Filtering (CEL) ---
+filter: >
+  has(record.properties.mag) && double(record.properties.mag) >= 1.0
+
+# --- Entity Mapping (CEL) ---
+entity:
+  external_id: >
+    record.id
+  name: >
+    has(record.properties.flynn_region) ? record.properties.flynn_region : record.id
+  metadata:
+    magnitude: >
+      string(record.properties.mag)
+    depth: >
+      string(record.properties.depth)
+    place: >
+      has(record.properties.flynn_region) ? record.properties.flynn_region : "Unknown"
+    type: >
+      has(record.properties.evtype) ? record.properties.evtype : "earthquake"
+    source: >
+      "EMSC"
+    magtype: >
+      has(record.properties.magtype) ? record.properties.magtype : ""
+    auth: >
+      has(record.properties.auth) ? record.properties.auth : ""
+
+# --- Observation Mapping (CEL) ---
+observation:
+  latitude: >
+    record.geometry.coordinates[1]
+  longitude: >
+    record.geometry.coordinates[0]
+  altitude: >
+    record.geometry.coordinates[2] * -1000.0
+  timestamp: >
+    timestamp(record.properties.time)
+  velocity: {}
+  metadata:
+    magnitude: >
+      string(record.properties.mag)
+  content_hash: ""
+
+# --- Recording ---
+recording:
+  mode: upsert
+
+# --- Cache ---
+cache:
+  ttl: "3600s"
+
+# --- Display (consumed by frontend) ---
+display:
+  icon:
+    shape: ripple
+    rotatable: false
+    interpolation: false
+    scale: 1.0
+  trail:
+    color: "#ff006e"
+    width: 1.5
+    opacity: 0.7
+  style:
+    color: "#ff006e"
+    point_size: 6
+  field_renderers:
+    - keys: [magnitude, mag]
+      label: "MAGNITUDE"
+      format:
+        type: float
+        precision: 1
+        prefix: "M"
+      priority: 0
+    - keys: [depth, depth_km]
+      label: "DEPTH"
+      format:
+        type: float
+        precision: 1
+        suffix: " km"
+      priority: 1
+    - keys: [place]
+      label: "LOCATION"
+      format:
+        type: string
+      priority: 2
+    - keys: [type]
+      label: "TYPE"
+      format:
+        type: string
+        transform: upper
+      priority: 3
+
+# --- AI Enrichment ---
+ai:
+  enabled: true
+  operations:
+    - name: earthquake_risk_assessment
+      prompt: |
+        Analyze this earthquake event and provide a risk assessment.
+
+        Entity: {{.Entity.Name}}
+        Magnitude: {{index .Entity.Metadata "magnitude"}}
+        Depth: {{index .Entity.Metadata "depth"}} km
+        Type: {{index .Entity.Metadata "type"}}
+        Source: {{index .Entity.Metadata "source"}}
+        Location: {{.Observation.Lat}}, {{.Observation.Lon}}
+        {{if .HasAltitude}}Depth (m): {{.Observation.Altitude}}{{end}}
+
+        Provide a structured risk assessment including:
+        1. Severity classification (minor, moderate, significant, major, catastrophic)
+        2. Estimated population exposure (low, medium, high)
+        3. Tsunami risk (none, low, moderate, high) based on magnitude, depth, and proximity to coast
+        4. A brief one-sentence summary
+
+        Respond with JSON matching this schema:
+        {{.OutputSchema}}
+      output_schema:
+        type: object
+        required: [severity, population_exposure, tsunami_risk, summary]
+        properties:
+          severity:
+            type: string
+            enum: [minor, moderate, significant, major, catastrophic]
+          population_exposure:
+            type: string
+            enum: [low, medium, high]
+          tsunami_risk:
+            type: string
+            enum: [none, low, moderate, high]
+          summary:
+            type: string
+      temperature: 0
+      cache_ttl: "1h"
+      output:
+        store_insights: true
+        insight_type: "risk_assessment"
+        websocket_push: true
+
+# --- History (per-layer time range limits) ---
+history:
+  max_lookback: "2160h"    # 90 days
+  max_range_span: "168h"   # 7 days per query window

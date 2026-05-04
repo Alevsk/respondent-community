@@ -1,0 +1,170 @@
+schema_version: 2
+
+name: yahoo_finance_markets
+labels:
+  category: financial
+  priority: high
+
+source_type: yahoo_finance_markets
+layer_type: markets
+display_name: "Markets"
+entity_type: global_indicator
+
+transport:
+  type: http_poll
+  url: "https://query2.finance.yahoo.com/v8/finance/spark?symbols=^VIX,^GSPC,DX-Y.NYB,CL=F,GC=F,BTC-USD,^TNX&range=1d&interval=1d"
+  method: GET
+  headers:
+    Accept: "application/json"
+    User-Agent: "Mozilla/5.0"
+  timeout: "10s"
+  interval: "300s"
+
+parser:
+  format: json
+  max_records: 1
+
+entity:
+  external_id: '"yahoo_finance_markets"'
+  name: '"Market Indicators"'
+  metadata:
+    source: '"Yahoo Finance"'
+
+observation:
+  timestamp: 'now()'
+  metadata:
+    vix_value:       'string(record["^VIX"].close[0])'
+    vix_change_pct:  'string((record["^VIX"].close[0] / record["^VIX"].chartPreviousClose - 1.0) * 100.0)'
+    spx_value:       'string(record["^GSPC"].close[0])'
+    spx_change_pct:  'string((record["^GSPC"].close[0] / record["^GSPC"].chartPreviousClose - 1.0) * 100.0)'
+    dxy_value:       'string(record["DX-Y.NYB"].close[0])'
+    dxy_change_pct:  'string((record["DX-Y.NYB"].close[0] / record["DX-Y.NYB"].chartPreviousClose - 1.0) * 100.0)'
+    wti_value:       'string(record["CL=F"].close[0])'
+    wti_change_pct:  'string((record["CL=F"].close[0] / record["CL=F"].chartPreviousClose - 1.0) * 100.0)'
+    gold_value:      'string(record["GC=F"].close[0])'
+    gold_change_pct: 'string((record["GC=F"].close[0] / record["GC=F"].chartPreviousClose - 1.0) * 100.0)'
+    btc_value:       'string(record["BTC-USD"].close[0])'
+    btc_change_pct:  'string((record["BTC-USD"].close[0] / record["BTC-USD"].chartPreviousClose - 1.0) * 100.0)'
+    us10y_value:     'string(record["^TNX"].close[0])'
+    us10y_change_pct: 'string((record["^TNX"].close[0] / record["^TNX"].chartPreviousClose - 1.0) * 100.0)'
+  content_hash: >
+    string(record["^VIX"].close[0]) + "_" + string(record["^GSPC"].close[0]) + "_" + string(record["^TNX"].close[0])
+
+recording:
+  mode: append
+
+cache:
+  ttl: "300s"
+
+indicator:
+  values:
+    - key: vix
+      label: "VIX"
+      source_field: vix_value
+      unit: ""
+      format: number
+      precision: 2
+      change_source_field: vix_change_pct
+      max_level: 5
+      level_thresholds: [12, 18, 25, 35, 45]
+    - key: spx
+      label: "S&P 500"
+      source_field: spx_value
+      unit: "pts"
+      format: number
+      precision: 0
+      change_source_field: spx_change_pct
+      max_level: 5
+      level_expr: >
+        int(math.abs(double(change_pct))) < 1 ? 0 :
+        int(math.abs(double(change_pct))) < 2 ? 1 :
+        int(math.abs(double(change_pct))) < 3 ? 2 :
+        int(math.abs(double(change_pct))) < 5 ? 3 :
+        int(math.abs(double(change_pct))) < 8 ? 4 : 5
+    - key: dxy
+      label: "Dollar Index"
+      source_field: dxy_value
+      unit: ""
+      format: number
+      precision: 3
+      change_source_field: dxy_change_pct
+      max_level: 5
+      level_expr: >
+        int(math.abs(double(change_pct))) < 1 ? 0 :
+        int(math.abs(double(change_pct))) < 2 ? 1 :
+        int(math.abs(double(change_pct))) < 3 ? 2 :
+        int(math.abs(double(change_pct))) < 5 ? 3 :
+        int(math.abs(double(change_pct))) < 8 ? 4 : 5
+    - key: wti
+      label: "Crude Oil"
+      source_field: wti_value
+      unit: ""
+      format: currency
+      precision: 2
+      prefix: "$"
+      change_source_field: wti_change_pct
+      max_level: 5
+      level_expr: >
+        int(math.abs(double(change_pct))) < 1 ? 0 :
+        int(math.abs(double(change_pct))) < 2 ? 1 :
+        int(math.abs(double(change_pct))) < 3 ? 2 :
+        int(math.abs(double(change_pct))) < 5 ? 3 :
+        int(math.abs(double(change_pct))) < 8 ? 4 : 5
+    - key: gold
+      label: "Gold"
+      source_field: gold_value
+      unit: ""
+      format: currency
+      precision: 0
+      prefix: "$"
+      change_source_field: gold_change_pct
+      max_level: 5
+      level_expr: >
+        int(math.abs(double(change_pct))) < 1 ? 0 :
+        int(math.abs(double(change_pct))) < 2 ? 1 :
+        int(math.abs(double(change_pct))) < 3 ? 2 :
+        int(math.abs(double(change_pct))) < 5 ? 3 :
+        int(math.abs(double(change_pct))) < 8 ? 4 : 5
+    - key: btc
+      label: "Bitcoin"
+      source_field: btc_value
+      unit: ""
+      format: currency
+      precision: 0
+      prefix: "$"
+      change_source_field: btc_change_pct
+      max_level: 5
+      level_expr: >
+        int(math.abs(double(change_pct))) < 1 ? 0 :
+        int(math.abs(double(change_pct))) < 2 ? 1 :
+        int(math.abs(double(change_pct))) < 3 ? 2 :
+        int(math.abs(double(change_pct))) < 5 ? 3 :
+        int(math.abs(double(change_pct))) < 8 ? 4 : 5
+    - key: us10y
+      label: "10Y Yield"
+      source_field: us10y_value
+      unit: "%"
+      format: percent
+      precision: 3
+      change_source_field: us10y_change_pct
+      max_level: 5
+      level_expr: >
+        int(math.abs(double(change_pct))) < 1 ? 0 :
+        int(math.abs(double(change_pct))) < 2 ? 1 :
+        int(math.abs(double(change_pct))) < 3 ? 2 :
+        int(math.abs(double(change_pct))) < 5 ? 3 :
+        int(math.abs(double(change_pct))) < 8 ? 4 : 5
+
+display:
+  icon:
+    shape: dot
+    rotatable: false
+    interpolation: false
+    scale: 1.0
+  trail:
+    color: "#00ff9d"
+    width: 1.0
+    opacity: 0.5
+  style:
+    color: "#00ff9d"
+    point_size: 6

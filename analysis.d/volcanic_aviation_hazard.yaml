@@ -1,0 +1,188 @@
+# =============================================================================
+# VOLCANIC AVIATION HAZARD — Volcano-to-Flight-Path Correlation
+# =============================================================================
+# Detects commercial aircraft operating near active volcanoes. Volcanic ash is
+# invisible to weather radar, can travel thousands of km, and destroys jet
+# engines (cf. BA Flight 9, 1982; KLM Flight 867, 1989). This analysis
+# correlates Smithsonian volcano data with real-time ADS-B flight positions.
+#
+# Data layers: volcanoes (Smithsonian GVP) × flights_commercial (ADS-B)
+# =============================================================================
+
+schema_version: 1
+name: volcanic_aviation_hazard
+display_name: "Volcanic Aviation Hazard"
+enabled: false # TODO: enable
+
+schedule:
+  interval: "180s"
+
+data:
+  layers: [flights_commercial]
+  lookback: "6h"
+  min_records: 1
+  max_records: 30
+  dedup:
+    window: "1h"
+    key_fields: ["entity_external_id", "volcano_external_id"]
+  sql: |
+    WITH active_volcanoes AS (
+      -- Volcanoes with non-Holocene status (erupted in recorded history)
+      -- or with recent VEI > 0 indicating recent activity.
+      SELECT v.id, v.name, v.external_id, v.metadata,
+             o.lat, o.lon, o.position,
+             COALESCE(v.metadata->>'status', 'unknown') AS volcano_status,
+             COALESCE(v.metadata->>'elevation', '0') AS elevation_m,
+             COALESCE(v.metadata->>'last_eruption_year', 'unknown') AS last_eruption,
+             COALESCE(v.metadata->>'morphology', 'unknown') AS morphology,
+             COALESCE(v.metadata->>'vei', '0') AS vei
+      FROM entities v
+      CROSS JOIN LATERAL (
+        SELECT lat, lon, position
+        FROM observations WHERE entity_id = v.id ORDER BY ts DESC LIMIT 1
+      ) o
+      WHERE v.layer_type = 'volcanoes'
+        AND v.metadata->>'status' != 'Holocene'
+    ),
+    nearby_flights AS (
+      -- Commercial flights within 200km of active volcanoes.
+      -- 200km = volcanic ash danger zone for en-route aircraft.
+      SELECT
+        f.id AS flight_id,
+        f.name AS flight_name,
+        f.external_id AS flight_hex,
+        f.metadata->>'callsign' AS callsign,
+        f.metadata->>'type' AS aircraft_type,
+        o_f.lat AS flight_lat, o_f.lon AS flight_lon,
+        o_f.altitude_m AS flight_alt,
+        o_f.ts AS flight_ts,
+        av.name AS volcano_name,
+        av.external_id AS volcano_external_id,
+        av.volcano_status,
+        av.elevation_m,
+        av.last_eruption,
+        av.morphology,
+        ROUND(ST_Distance(o_f.position::geography, av.position::geography) / 1000)::text AS distance_km
+      FROM entities f
+      CROSS JOIN LATERAL (
+        SELECT lat, lon, altitude_m, position, ts
+        FROM observations WHERE entity_id = f.id ORDER BY ts DESC LIMIT 1
+      ) o_f
+      JOIN active_volcanoes av ON ST_DWithin(o_f.position::geography, av.position::geography, 200000)
+      WHERE f.layer_type = 'flights_commercial'
+        AND o_f.ts > NOW() - INTERVAL '6 hours'
+    )
+    SELECT
+      nf.flight_id AS entity_id,
+      nf.flight_name AS name,
+      nf.flight_hex AS external_id,
+      'flights_commercial' AS layer_type,
+      nf.flight_lat AS lat, nf.flight_lon AS lon,
+      nf.flight_alt AS altitude_m,
+      nf.flight_ts AS ts,
+      COALESCE(nf.callsign, nf.flight_name) AS callsign,
+      COALESCE(nf.aircraft_type, 'unknown') AS aircraft_type,
+      nf.volcano_name,
+      nf.volcano_status,
+      nf.elevation_m AS volcano_elevation_m,
+      nf.last_eruption,
+      nf.morphology,
+      nf.distance_km,
+      nf.volcano_external_id
+    FROM nearby_flights nf
+    ORDER BY CAST(nf.distance_km AS int) ASC
+    LIMIT 30
+
+ai:
+  enabled: true
+  operations:
+    - name: volcanic_ash_risk_assessment
+      tags: [osint, aviation, volcano, safety, cross-layer]
+      prompt: |
+        You are an aviation safety analyst specializing in volcanic ash hazards. Your assessments inform NOTAM recommendations and flight safety bulletins.
+
+        VOLCANIC AVIATION HAZARD: {{.RecordCount}} commercial flights detected within
+        200km of active volcanoes (last {{.Lookback}}).
+
+        Volcanic ash is invisible to weather radar and destroys jet engines.
+        Historical incidents: BA Flight 9 (1982), KLM 867 (1989) — total engine failure.
+
+        Flight-to-volcano proximity data:
+        {{range .Records}}
+        - FLIGHT: {{index .Metadata "callsign"}} ({{index .Metadata "aircraft_type"}}, ID: {{.ExternalID}})
+          Position: {{.Lat}}, {{.Lon}} | Alt: {{.Altitude}}m
+          VOLCANO: {{index .Metadata "volcano_name"}} (ref: {{index .Metadata "volcano_external_id"}}) (status: {{index .Metadata "volcano_status"}})
+          Elevation: {{index .Metadata "volcano_elevation_m"}}m | Last eruption: {{index .Metadata "last_eruption"}}
+          Morphology: {{index .Metadata "morphology"}}
+          Distance: {{index .Metadata "distance_km"}}km
+        {{end}}
+
+        Volcano status reference: Historical = erupted in historical time, Fumarolic = gas emissions,
+        Tephrochronology = dated by tephra layers, Pleistocene = older activity.
+
+        ERUPTION RISK CALIBRATION:
+        - Currently erupting or erupted within last 5 years: HIGH baseline risk. Ash could be present NOW.
+        - Last eruption 5-50 years ago: MODERATE baseline. Volcano is in an active cycle.
+        - Last eruption 50-500 years ago: LOW baseline. Monitor for precursors.
+        - Last eruption 500+ years ago or Holocene only: NEGLIGIBLE baseline. Flag only if other signals present.
+
+        A "Historical" status volcano that last erupted in 2014 (Ontakesan) is VERY different from one that last erupted in 1707.
+
+        Calculate whether the flight altitude actually intersects the potential ash cloud zone. Ash clouds typically extend from the volcano summit elevation to summit + 10-15km for explosive eruptions, or summit + 2-5km for effusive eruptions. State the altitude math explicitly.
+
+        Reference the relevant Volcanic Ash Advisory Centre (VAAC) jurisdiction: Tokyo VAAC for western Pacific, Buenos Aires VAAC for South America, London VAAC for North Atlantic/Europe, etc.
+
+        For each flight-volcano pair, assess:
+        1. Risk level based on volcano status, last eruption recency, and flight proximity
+        2. Whether flight altitude intersects the potential ash cloud zone (show the altitude math)
+        3. Flight rerouting urgency: none/advisory/recommended/immediate
+        4. Overall hazard: negligible/low/moderate/high/critical
+
+        Each assessment field MUST be 2-3 sentences. Differentiate meaningfully between dormant volcanoes and those with recent activity.
+
+        Respond with JSON matching this schema:
+        {{.OutputSchema}}
+
+      output_schema:
+        type: object
+        required: [hazards, summary]
+        properties:
+          summary:
+            type: string
+          hazards:
+            type: array
+            items:
+              type: object
+              required: [callsign, volcano_name, hazard_level, assessment, ash_cloud_risk]
+              properties:
+                callsign: { type: string }
+                aircraft_type: { type: string }
+                flight_altitude_m: { type: number }
+                volcano_name: { type: string }
+                volcano_status: { type: string }
+                distance_km: { type: number }
+                eruption_recency: { type: string }
+                ash_cloud_risk:
+                  type: string
+                  enum: [none, theoretical, possible, likely, confirmed]
+                vaac_jurisdiction: { type: string }
+                hazard_level:
+                  type: string
+                  enum: [negligible, low, moderate, high, critical]
+                rerouting_urgency:
+                  type: string
+                  enum: [none, advisory, recommended, immediate]
+                assessment: { type: string }
+                entity_external_id: { type: string }
+                volcano_external_id: { type: string }
+      max_tokens: 5000
+      temperature: 0.1
+      output:
+        store_insights: true
+        insight_type: "volcanic_aviation_hazard"
+        results_path: "hazards"
+        ref_fields:
+          - field: "volcano_external_id"
+            layer_type: "volcanoes"
+        websocket_push: true
+        retention: "168h"

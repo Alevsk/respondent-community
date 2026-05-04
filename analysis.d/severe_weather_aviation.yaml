@@ -1,0 +1,197 @@
+# =============================================================================
+# SEVERE WEATHER AVIATION IMPACT — Weather-to-Flight Correlation
+# =============================================================================
+# Detects commercial aircraft operating in or near severe/extreme weather alert
+# zones. NOAA weather alerts with high severity intersected with real-time
+# flight positions identify aircraft at risk from thunderstorms, icing,
+# turbulence, and other meteorological hazards.
+#
+# Data layers: weather_alerts (NOAA) × flights_commercial (ADS-B)
+#              + aviation_weather (SIGMETs) for additional context
+# =============================================================================
+
+schema_version: 1
+name: severe_weather_aviation
+display_name: "Severe Weather Aviation Impact"
+enabled: false # TODO: enable
+
+schedule:
+  interval: "120s"
+
+data:
+  layers: [flights_commercial]
+  lookback: "6h"
+  min_records: 1
+  max_records: 30
+  dedup:
+    window: "30m"
+    key_fields: ["entity_external_id", "weather_external_id"]
+  sql: |
+    WITH severe_weather AS (
+      -- Weather alerts: only ~319 Severe/Extreme — small set, LATERAL is fine.
+      SELECT w.id, w.name, w.external_id, w.metadata,
+             o.lat, o.lon, o.position, o.ts,
+             COALESCE(w.metadata->>'event', 'unknown') AS weather_event,
+             COALESCE(w.metadata->>'severity', 'unknown') AS severity,
+             COALESCE(w.metadata->>'urgency', 'unknown') AS urgency,
+             COALESCE(w.metadata->>'certainty', 'unknown') AS certainty,
+             COALESCE(w.metadata->>'area_desc', 'unknown') AS area_desc
+      FROM entities w
+      CROSS JOIN LATERAL (
+        SELECT lat, lon, position, ts
+        FROM observations WHERE entity_id = w.id ORDER BY ts DESC LIMIT 1
+      ) o
+      WHERE w.layer_type = 'weather_alerts'
+        AND w.metadata->>'severity' IN ('Severe', 'Extreme')
+    ),
+    recent_flights AS (
+      -- Observation-first: ~18K active flights vs 72K total entities.
+      SELECT DISTINCT ON (o.entity_id)
+        o.entity_id, o.lat, o.lon, o.position, o.altitude_m, o.ts
+      FROM observations o
+      JOIN entities e ON e.id = o.entity_id AND e.layer_type = 'flights_commercial'
+      WHERE o.ts > NOW() - INTERVAL '6 hours'
+      ORDER BY o.entity_id, o.ts DESC
+    ),
+    affected_flights AS (
+      -- Flights within 100km of severe weather zones.
+      SELECT
+        f.id AS flight_id,
+        f.name AS flight_name,
+        f.external_id AS flight_hex,
+        f.metadata->>'callsign' AS callsign,
+        f.metadata->>'type' AS aircraft_type,
+        rf.lat AS flight_lat, rf.lon AS flight_lon,
+        rf.altitude_m AS flight_alt,
+        rf.ts AS flight_ts,
+        sw.name AS alert_name,
+        sw.external_id AS weather_external_id,
+        sw.weather_event,
+        sw.severity,
+        sw.urgency,
+        sw.certainty,
+        sw.area_desc,
+        ROUND(ST_Distance(rf.position::geography, sw.position::geography) / 1000)::text AS distance_km
+      FROM recent_flights rf
+      JOIN entities f ON f.id = rf.entity_id
+      JOIN severe_weather sw ON
+        -- Bounding box pre-filter for 100km (~0.9 degrees latitude)
+        rf.lat BETWEEN sw.lat - 0.9 AND sw.lat + 0.9
+        AND rf.lon BETWEEN sw.lon - (0.9 / GREATEST(COS(RADIANS(sw.lat)), 0.01))
+                       AND sw.lon + (0.9 / GREATEST(COS(RADIANS(sw.lat)), 0.01))
+        AND ST_DWithin(rf.position::geography, sw.position::geography, 100000)
+    )
+    SELECT
+      af.flight_id AS entity_id,
+      af.flight_name AS name,
+      af.flight_hex AS external_id,
+      'flights_commercial' AS layer_type,
+      af.flight_lat AS lat, af.flight_lon AS lon,
+      af.flight_alt AS altitude_m,
+      af.flight_ts AS ts,
+      COALESCE(af.callsign, af.flight_name) AS callsign,
+      COALESCE(af.aircraft_type, 'unknown') AS aircraft_type,
+      af.alert_name AS weather_alert,
+      af.weather_event,
+      af.severity AS weather_severity,
+      af.urgency,
+      af.certainty,
+      af.area_desc,
+      af.distance_km,
+      af.weather_external_id
+    FROM affected_flights af
+    ORDER BY
+      CASE WHEN af.severity = 'Extreme' THEN 0 ELSE 1 END,
+      CAST(af.distance_km AS int) ASC
+    LIMIT 30
+
+ai:
+  enabled: true
+  operations:
+    - name: weather_aviation_assessment
+      tags: [osint, weather, aviation, safety, cross-layer]
+      prompt: |
+        You are an aviation meteorologist producing safety assessments for active flights near severe weather systems.
+
+        SEVERE WEATHER AVIATION IMPACT: {{.RecordCount}} flights detected within
+        100km of severe/extreme weather alerts (last {{.Lookback}}).
+
+        Flight-to-weather correlation data:
+        {{range .Records}}
+        - FLIGHT: {{index .Metadata "callsign"}} ({{index .Metadata "aircraft_type"}}, ID: {{.ExternalID}})
+          Position: {{.Lat}}, {{.Lon}} | Alt: {{.Altitude}}m
+          ALERT: {{index .Metadata "weather_alert"}} (ref: {{index .Metadata "weather_external_id"}}) — {{index .Metadata "weather_event"}}
+          Severity: {{index .Metadata "weather_severity"}} | Urgency: {{index .Metadata "urgency"}}
+          Area: {{index .Metadata "area_desc"}}
+          Distance: {{index .Metadata "distance_km"}}km
+        {{end}}
+
+        Weather-altitude interaction matrix:
+        - Thunderstorm/Tornado: Dangerous at ALL altitudes. Cumulonimbus tops can reach FL450 (13.7km). Severe turbulence, hail, wind shear even outside the cell.
+        - Winter Storm/Ice Storm: Critical below FL200 (6km) for icing. Approach/departure most dangerous.
+        - Hurricane/Typhoon: Avoid within 200nm. Turbulence extends to FL450+. Eye wall especially dangerous.
+        - Flood/Flash Flood: Ground-level only. Affects departure/arrival airports, NOT en-route flights at altitude. Only a concern if flight is departing/arriving at affected airport.
+        - Extreme Wind/Wind Advisory: Wind shear on approach below 2000ft. Crosswind limits for landing.
+        - Dense Fog: Surface only. Affects CAT I/II/III approach minimums.
+
+        CRITICAL — Determine the flight phase based on altitude:
+        - Ground/taxi: 0m (airport operations affected by all surface weather)
+        - Departure/arrival: 0-3000m (vulnerable to icing, wind shear, thunderstorm cells)
+        - Climb/descent: 3000-8000m (icing zone, embedded thunderstorms)
+        - Cruise: >8000m (generally above weather, except severe thunderstorms and hurricanes)
+
+        A flood warning is IRRELEVANT to a flight cruising at 10km. Say so briefly and move on — do not waste words stating the obvious. Focus analytical effort on genuinely dangerous combinations.
+
+        For low-risk combinations (e.g., ground-level flood + cruise altitude), keep assessment to one sentence. Reserve detailed 2-3 sentence assessments for genuinely dangerous situations.
+
+        For each flight-weather pair, assess:
+        1. Whether the weather hazard affects the flight's current altitude
+        2. Risk of continued flight through/near the weather system
+        3. Diversion recommendation: none/monitor/consider/recommended/immediate
+        4. Impact severity: minimal/moderate/significant/dangerous/critical
+
+        Respond with JSON matching this schema:
+        {{.OutputSchema}}
+
+      output_schema:
+        type: object
+        required: [impacts, summary]
+        properties:
+          summary:
+            type: string
+          impacts:
+            type: array
+            items:
+              type: object
+              required: [callsign, weather_event, impact_severity, assessment, flight_phase]
+              properties:
+                callsign: { type: string }
+                aircraft_type: { type: string }
+                flight_altitude_m: { type: number }
+                weather_event: { type: string }
+                weather_severity: { type: string }
+                distance_km: { type: number }
+                flight_phase:
+                  type: string
+                  enum: [ground, departure_arrival, climb_descent, cruise]
+                weather_affects_altitude: { type: boolean }
+                impact_severity:
+                  type: string
+                  enum: [minimal, moderate, significant, dangerous, critical]
+                diversion_recommendation:
+                  type: string
+                  enum: [none, monitor, consider, recommended, immediate]
+                assessment: { type: string }
+                entity_external_id: { type: string }
+                weather_external_id: { type: string }
+      max_tokens: 3000
+      temperature: 0.1
+      output:
+        store_insights: true
+        insight_type: "weather_aviation_impact"
+        results_path: "impacts"
+        ref_fields:
+          - field: "weather_external_id"
+            layer_type: "weather_alerts"
+        websocket_push: true
+        retention: "168h"

@@ -1,0 +1,59 @@
+# =============================================================================
+# SATELLITE CONJUNCTION / SPACE DOMAIN AWARENESS — Placeholder
+# =============================================================================
+# TODO: Monitor satellite positions for potential conjunctions (close approaches)
+# and correlate satellite activity with ground events.
+#
+# Data layers: satellites (CelesTrak + TLE API, 545 entities)
+# Metadata available: [norad_id, tle_line1, tle_line2]
+#
+# Intelligence value:
+#   - Close approach detection between satellites (conjunction events)
+#   - Unusual orbital maneuvers (delta-V from TLE changes over time)
+#   - Satellite passes over conflict zones (ISR correlation)
+#   - Space debris tracking and collision risk
+#
+# Challenge: This is computationally intensive. TLE propagation requires
+# SGP4/SDP4 orbital mechanics, which the SQL layer can't do. Would need:
+#   1. A custom Go module to propagate TLEs and compute conjunctions
+#   2. Or: pre-compute satellite positions in observations and use PostGIS
+#      for proximity detection (but orbits change rapidly)
+#
+# Simpler alternative: Correlate satellite ground tracks with conflict zones
+# using the observation lat/lon (already computed by orbital propagator in
+# the feeder). Detect ISR satellites passing over active conflict regions.
+#
+# Potential SQL approach (simplified):
+#   satellites × conflict_events via ST_DWithin(500km)
+#   WHERE satellite NORAD ID in known ISR/military catalog
+#   Focus: "which military satellites just passed over this conflict zone?"
+# =============================================================================
+
+schema_version: 1
+name: satellite_conjunction
+display_name: "Satellite Conjunction / Space Domain Awareness"
+enabled: false
+
+schedule:
+  interval: "300s"
+
+data:
+  lookback: "1h"
+  min_records: 1
+  sql: "SELECT 1 WHERE false"
+
+ai:
+  enabled: true
+  operations:
+    - name: placeholder
+      tags: [space, satellite, conjunction, isr, placeholder]
+      prompt: "placeholder"
+      output_schema:
+        type: object
+        required: [results]
+        properties:
+          results: { type: array, items: { type: object } }
+      output:
+        store_insights: true
+        insight_type: "satellite_awareness"
+        results_path: "results"

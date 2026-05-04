@@ -1,0 +1,66 @@
+:root {
+  /* Primary green scale */
+  --color-primary-50:  #e6fff5;
+  --color-primary-100: #b3ffe0;
+  --color-primary-200: #80ffcc;
+  --color-primary-300: #33ffb1;
+  --color-primary-400: #00ff9d;
+  --color-primary-500: #00e68a;
+  --color-primary-600: #00cc7d;
+  --color-primary-700: #00b36d;
+  --color-primary-800: #00994d;
+  --color-primary-900: #006633;
+
+  /* Secondary accent (hot pink, used sparingly for emphasis) */
+  --color-secondary: #ff006e;
+
+  /* Neutral gray scale */
+  --color-gray-50:  #f5f5f5;
+  --color-gray-100: #f0f0f0;
+  --color-gray-200: #e0e0e0;
+  --color-gray-300: #cccccc;
+  --color-gray-400: #999999;
+  --color-gray-500: #666666;
+  --color-gray-600: #4d4d4d;
+  --color-gray-700: #333333;
+  --color-gray-800: #1a1a1a;
+  --color-gray-900: #0d0d0d;
+
+  /* Semantic colors */
+  --color-success: #10b981;
+  --color-warning: #f59e0b;
+  --color-danger:  #ef4444;
+  --color-info:    #3b82f6;
+
+  /* Layout dimensions */
+  --sidebar-width: 260px;
+  --toc-width: 220px;
+  --content-max-width: 720px;
+  --header-height: 64px;
+
+  /* Typography */
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.25rem;
+  --text-2xl: 1.5rem;
+  --text-3xl: 1.875rem;
+
+  /* Code block defaults */
+  --code-bg: #f0f0f0;
+  --code-border: var(--color-gray-200);
+  --code-radius: 8px;
+
+  /* Surface defaults (light mode) */
+  --color-bg: #ffffff;
+  --color-surface: #f5f5f5;
+  --color-text: #1a1a1a;
+  --color-text-secondary: #666666;
+  --color-border: #e0e0e0;
+  --sidebar-bg: var(--color-gray-50);
+  --header-bg: #ffffff;
+  --header-border: var(--color-gray-200);
+}

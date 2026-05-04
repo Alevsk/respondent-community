@@ -1,0 +1,186 @@
+# sources.d/bellingcat_ukraine.yaml
+# Bellingcat Ukraine Civilian Harm Database
+# Source: https://ukraine.bellingcat.com/
+# Auth: None (public static JSON hosted on DigitalOcean Spaces CDN)
+# Format: Flat JSON array of event objects (NOT a FeatureCollection)
+#
+# Tracks verified civilian harm incidents across Ukraine with geolocation,
+# date, description, impact categories, weapon systems, and source links.
+#
+# API fields (10 total):
+#   id, date, description, location (nullable), latitude, longitude,
+#   graphic (bool), impact (list), weapon_system (list), sources (list of URLs)
+#
+# 2517 records as of 2026-03. ~930 have location=null (still geolocated).
+# Each record is a unique verified incident; 1 entity per incident, 1 observation.
+schema_version: 2
+
+name: bellingcat_ukraine
+labels:
+  category: conflict
+  priority: high
+source_type: bellingcat_ukraine
+layer_type: ukraine_civilian_harm
+display_name: "Bellingcat Ukraine Civilian Harm"
+
+enabled: true
+
+filtering: viewport
+
+geo_cache:
+  overfetch_ratio: 2.0
+  alive_ratio_threshold: 0.5
+  gc_batch_size: 500
+
+transport:
+  type: http_poll
+  url: "https://bellingcat-embeds.ams3.cdn.digitaloceanspaces.com/production/ukr/timemap/api.json"
+  method: GET
+  headers:
+    Accept: "application/json"
+  timeout: "30s"
+  interval: "3600s"
+  max_response_bytes: 52428800  # 50MB — dataset is ~1MB+ and growing
+  retry:
+    max_attempts: 3
+    backoff: "exponential"
+    initial_delay: "5s"
+    max_delay: "60s"
+
+parser:
+  format: json
+  records_path: ""
+  max_records: 100000
+
+# Filter: require valid coordinates and a non-empty id.
+# Note: location can be null — do NOT filter on it (37% of records lack location).
+filter: >
+  has(record.id) && record.id != ""
+  && has(record.latitude) && has(record.longitude)
+
+entity:
+  external_id: >
+    record.id
+  # Null-safe: location is JSON null for ~930 records.
+  # CEL `has()` returns true for null fields (key exists), so we must also
+  # guard against null before string operations.
+  name: >
+    has(record.location) && record.location != null && string(record.location).trim() != ""
+      ? string(record.location).trim() + " — " + record.date
+      : "Incident " + record.id + " — " + record.date
+  metadata:
+    location: >
+      has(record.location) && record.location != null
+        ? string(record.location).trim()
+        : ""
+    description: >
+      has(record.description) ? record.description : ""
+    date: >
+      has(record.date) ? record.date : ""
+    # Capture ALL source URLs (pipe-delimited), not just the first.
+    # Records have 0-58 sources; 60%+ have 2+.
+    sources: >
+      has(record.sources) && size(record.sources) > 0
+        ? record.sources.join("|")
+        : ""
+    # Impact categories: e.g. "Residential|Religious|School or childcare"
+    # 2373/2517 records have impact data. Critical for civilian harm analysis.
+    impact: >
+      has(record.impact) && size(record.impact) > 0
+        ? record.impact.join("|")
+        : ""
+    # Weapon system: e.g. "Cruise missile", "Cluster munitions", "Loitering munition"
+    # 1892/2517 records have weapon_system data.
+    weapon_system: >
+      has(record.weapon_system) && size(record.weapon_system) > 0
+        ? record.weapon_system.join("|")
+        : ""
+    graphic: >
+      has(record.graphic) ? string(record.graphic) : "false"
+
+observation:
+  latitude: >
+    double(record.latitude)
+  longitude: >
+    double(record.longitude)
+  altitude: "0.0"
+  timestamp: >
+    now()
+  event_time: >
+    parse_datetime(record.date, "2006-01-02")
+  velocity: {}
+  metadata:
+    location: >
+      has(record.location) && record.location != null
+        ? string(record.location).trim()
+        : ""
+    description: >
+      has(record.description) ? record.description : ""
+    impact: >
+      has(record.impact) && size(record.impact) > 0
+        ? record.impact.join("|")
+        : ""
+    weapon_system: >
+      has(record.weapon_system) && size(record.weapon_system) > 0
+        ? record.weapon_system.join("|")
+        : ""
+    sources: >
+      has(record.sources) && size(record.sources) > 0
+        ? record.sources.join("|")
+        : ""
+    graphic: >
+      has(record.graphic) ? string(record.graphic) : "false"
+  content_hash: >
+    record.id + "_" + record.date + "_"
+    + (has(record.description) ? record.description : "")
+
+recording:
+  mode: dedupe
+
+cache:
+  ttl: "7200s"
+
+display:
+  icon:
+    shape: explosion
+    rotatable: false
+    interpolation: false
+    scale: 1.0
+  trail:
+    color: "#ff0033"
+    width: 1.5
+    opacity: 0.7
+  style:
+    color: "#ff0033"
+    point_size: 6
+  field_renderers:
+    - keys: [date]
+      label: "DATE"
+      format:
+        type: string
+      priority: 0
+    - keys: [location]
+      label: "LOCATION"
+      format:
+        type: string
+      priority: 1
+    - keys: [description]
+      label: "DESCRIPTION"
+      format:
+        type: string
+      priority: 2
+    - keys: [impact]
+      label: "IMPACT"
+      format:
+        type: string
+      priority: 3
+    - keys: [weapon_system]
+      label: "WEAPON"
+      format:
+        type: string
+      priority: 4
+    - keys: [sources]
+      label: "SOURCES"
+      format:
+        type: string
+      priority: 5

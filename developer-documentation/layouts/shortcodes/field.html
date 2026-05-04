@@ -1,0 +1,15 @@
+{{ $name := .Get "name" }}
+{{ $type := .Get "type" | default "string" }}
+{{ $required := .Get "required" | default "false" }}
+{{ $default := .Get "default" }}
+<div class="field-doc">
+  <div class="field-header">
+    <code class="field-name">{{ $name }}</code>
+    <span class="field-type">{{ $type }}</span>
+    {{ if eq $required "true" }}<span class="field-required">required</span>{{ end }}
+    {{ if $default }}<span class="field-default">default: <code>{{ $default }}</code></span>{{ end }}
+  </div>
+  <div class="field-desc">
+    {{ .Inner | markdownify }}
+  </div>
+</div>

@@ -1,0 +1,145 @@
+# sources.d/iss_position.yaml
+# International Space Station Real-Time Position Tracker
+# Source: Where the ISS at? API (https://wheretheiss.at/)
+# Auth: None required (public API)
+# Returns a single JSON object with lat, lon, altitude, velocity, visibility.
+schema_version: 1
+
+name: iss_position
+labels:
+  category: space
+  priority: high
+
+# --- Identity ---
+source_type: iss_position
+layer_type: iss
+display_name: "ISS Position"
+
+# --- Operational Controls ---
+enabled: true
+
+# --- Ingestion ---
+transport:
+  type: http_poll
+  url: "https://api.wheretheiss.at/v1/satellites/25544"
+  method: GET
+  headers:
+    Accept: "application/json"
+  timeout: "10s"
+  interval: "60s"  # ISS moves ~7.7 km/s; 60s is sufficient with client-side interpolation
+  max_response_bytes: 1048576  # 1MB (response is tiny)
+  retry:
+    max_attempts: 3
+    backoff: exponential
+    initial_delay: "1s"
+    max_delay: "15s"
+
+# --- Response Parsing ---
+# API returns a single flat JSON object (not an array).
+# The JSON parser auto-wraps single objects into a one-element slice.
+parser:
+  format: json
+  max_records: 1
+
+# --- Record Filtering (CEL) ---
+filter: >
+  has(record.latitude) && has(record.longitude)
+
+# --- Entity Mapping (CEL) ---
+entity:
+  # NORAD catalog ID 25544 is the ISS; stable across all polls.
+  external_id: >
+    string(record.id)
+  name: >
+    record.name == "iss" ? "International Space Station" : record.name
+  metadata:
+    norad_id: >
+      string(record.id)
+    visibility: >
+      has(record.visibility) ? record.visibility : ""
+
+# --- Observation Mapping (CEL) ---
+observation:
+  latitude: >
+    double(record.latitude)
+  longitude: >
+    double(record.longitude)
+  # Altitude from API is in kilometers; convert to meters for consistency.
+  altitude: >
+    double(record.altitude) * 1000.0
+  timestamp: >
+    unix_s(record.timestamp)
+  velocity:
+    speed: >
+      string(double(record.velocity))
+  metadata:
+    altitude_km: >
+      string(double(record.altitude))
+    velocity_kmh: >
+      string(double(record.velocity))
+    visibility: >
+      has(record.visibility) ? record.visibility : ""
+    footprint_km: >
+      has(record.footprint) ? string(double(record.footprint)) : ""
+    daynum: >
+      has(record.daynum) ? string(double(record.daynum)) : ""
+    solar_lat: >
+      has(record.solar_lat) ? string(double(record.solar_lat)) : ""
+    solar_lon: >
+      has(record.solar_lon) ? string(double(record.solar_lon)) : ""
+
+# --- Recording ---
+recording:
+  mode: append
+
+# --- Cache ---
+cache:
+  ttl: "60s"
+
+# --- Display ---
+display:
+  icon:
+    shape: iss
+    rotatable: false
+    interpolation: true
+    scale: 1.5
+  trail:
+    color: "#00bfff"
+    width: 1.5
+    opacity: 0.7
+  style:
+    color: "#00bfff"
+    point_size: 6
+  field_renderers:
+    - keys: [altitude_km]
+      label: "ALTITUDE"
+      format:
+        type: float
+        precision: 1
+        suffix: " km"
+      priority: 0
+    - keys: [velocity_kmh]
+      label: "VELOCITY"
+      format:
+        type: float
+        precision: 1
+        suffix: " km/h"
+      priority: 1
+    - keys: [visibility]
+      label: "VISIBILITY"
+      format:
+        type: string
+        transform: upper
+      priority: 2
+    - keys: [footprint_km]
+      label: "FOOTPRINT"
+      format:
+        type: float
+        precision: 1
+        suffix: " km"
+      priority: 3
+    - keys: [norad_id]
+      label: "NORAD ID"
+      format:
+        type: string
+      priority: 4

@@ -1,0 +1,183 @@
+# sources.d/noaa_buoys.yaml
+# NOAA NDBC (National Data Buoy Center) — Live Ocean Buoy Observations
+# Source: https://www.ndbc.noaa.gov/data/latest_obs/latest_obs.txt
+# Auth: None required (public data)
+# Format: Whitespace-delimited text with 2 comment header lines
+#
+# Contains ~751 stations with live observation data:
+# wind speed/direction, wave height, water temperature, air pressure, visibility, tide.
+# Updates every 5-10 minutes.
+schema_version: 2
+
+name: noaa_buoys
+labels:
+  category: environmental
+  priority: medium
+
+# --- Identity ---
+source_type: noaa_buoys
+layer_type: ocean_buoys
+display_name: "NOAA Ocean Buoys"
+
+# --- Ingestion ---
+transport:
+  type: http_poll
+  url: "https://www.ndbc.noaa.gov/data/latest_obs/latest_obs.txt"
+  method: GET
+  headers:
+    Accept: "text/plain"
+    User-Agent: "respondent-feeder/1.0"
+  timeout: "30s"
+  interval: "600s"
+  max_response_bytes: 2097152  # 2MB (~100KB actual)
+  retry:
+    max_attempts: 3
+    backoff: "exponential"
+    initial_delay: "2s"
+    max_delay: "30s"
+
+# --- Response Parsing ---
+# Whitespace-delimited text with 2 comment header lines:
+#   Line 1: #STN LAT LON YYYY MM DD hh mm WDIR WSPD GST WVHT DPD APD MWD PRES PTDY ATMP WTMP DEWP VIS TIDE
+#   Line 2: #text deg deg yr mo day hr mn degT m/s m/s m sec sec degT hPa hPa degC degC degC nmi ft
+#
+# comment_prefix: "#" strips # from line 1 (becomes header: STN, LAT, LON, ...)
+# and removes line 2 entirely (subsequent comment lines are skipped).
+# collapse_whitespace: true collapses variable-width spaces/tabs into single tabs.
+parser:
+  format: csv
+  max_records: 2000
+  csv_options:
+    collapse_whitespace: true
+    has_header: true
+    comment_prefix: "#"
+
+# --- Record Filtering (CEL) ---
+# Only rows with valid coordinates (skip MM or empty values).
+filter: >
+  has(record.LAT) && has(record.LON)
+  && record.LAT != "MM" && record.LON != "MM"
+  && record.STN != ""
+
+# --- Entity Mapping (CEL) ---
+entity:
+  external_id: '"ndbc_" + record.STN'
+  name: '"NDBC " + record.STN'
+  metadata:
+    station_id: 'record.STN'
+
+# --- Observation Mapping (CEL) ---
+observation:
+  latitude: 'double(record.LAT)'
+  longitude: 'double(record.LON)'
+  altitude: '"0.0"'
+  timestamp: >
+    record.YYYY + "-" + record.MM + "-" + record.DD + "T"
+    + record.hh + ":" + record.mm + ":00Z"
+  metadata:
+    wind_dir_deg: 'record.WDIR'
+    wind_speed_ms: 'record.WSPD'
+    wind_gust_ms: 'record.GST'
+    wave_height_m: 'record.WVHT'
+    dominant_period_s: 'record.DPD'
+    avg_period_s: 'record.APD'
+    mean_wave_dir: 'record.MWD'
+    pressure_hpa: 'record.PRES'
+    pressure_tendency: 'record.PTDY'
+    air_temp_c: 'record.ATMP'
+    water_temp_c: 'record.WTMP'
+    dew_point_c: 'record.DEWP'
+    visibility_nmi: 'record.VIS'
+    tide_ft: 'record.TIDE'
+
+# --- Recording ---
+recording:
+  mode: upsert
+
+# --- Cache ---
+cache:
+  ttl: "600s"
+
+
+# --- History ---
+history:
+  max_lookback: "720h"
+  max_range_span: "168h"
+
+# --- Display ---
+display:
+  icon:
+    shape: anchor
+    rotatable: false
+    interpolation: false
+    scale: 1.0
+  trail:
+    color: "#00838f"
+    width: 1.0
+    opacity: 0.5
+  style:
+    color: "#00838f"
+    point_size: 6
+  field_renderers:
+    - keys: [station_id]
+      label: "STATION"
+      format:
+        type: string
+        transform: upper
+      priority: 0
+    - keys: [wind_speed_ms]
+      label: "WIND SPEED"
+      format:
+        type: float
+        precision: 1
+        suffix: " m/s"
+      priority: 1
+    - keys: [wind_gust_ms]
+      label: "WIND GUST"
+      format:
+        type: float
+        precision: 1
+        suffix: " m/s"
+      priority: 2
+    - keys: [wave_height_m]
+      label: "WAVE HEIGHT"
+      format:
+        type: float
+        precision: 1
+        suffix: " m"
+      priority: 3
+    - keys: [water_temp_c]
+      label: "WATER TEMP"
+      format:
+        type: float
+        precision: 1
+        suffix: " °C"
+      priority: 4
+    - keys: [air_temp_c]
+      label: "AIR TEMP"
+      format:
+        type: float
+        precision: 1
+        suffix: " °C"
+      priority: 5
+    - keys: [pressure_hpa]
+      label: "PRESSURE"
+      format:
+        type: float
+        precision: 1
+        suffix: " hPa"
+      priority: 6
+    - keys: [visibility_nmi]
+      label: "VISIBILITY"
+      format:
+        type: float
+        precision: 1
+        suffix: " nmi"
+      priority: 7
+    - keys: [tide_ft]
+      label: "TIDE"
+      format:
+        type: float
+        precision: 1
+        suffix: " ft"
+      priority: 8

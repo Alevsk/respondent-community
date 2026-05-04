@@ -1,0 +1,84 @@
+# --- Secrets (MUST stay first) ---
+.env
+.env.local
+.env.*.local
+*.env
+!.env.example
+
+# --- Runtime data (SQLite database files + bind-mount dir) ---
+data/
+respondent.db
+respondent.db-shm
+respondent.db-wal
+*.sqlite
+*.sqlite3
+*.sqlite-shm
+*.sqlite-wal
+*.db-shm
+*.db-wal
+
+# --- Logs ---
+*.log
+logs/
+
+# --- Hugo build output (developer-documentation/) ---
+developer-documentation/public/
+developer-documentation/resources/_gen/
+developer-documentation/.hugo_build.lock
+public/
+resources/_gen/
+.hugo_build.lock
+
+# --- Node / npm (Hugo theme deps, if any) ---
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+package-lock.json.bak
+
+# --- macOS ---
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# --- Linux ---
+*~
+.fuse_hidden*
+.Trash-*
+.nfs*
+
+# --- Windows ---
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# --- Editors / IDEs ---
+.idea/
+.vscode/
+*.swp
+*.swo
+*.swn
+*.bak
+*.tmp
+.netrwhist
+Session.vim
+.vim/
+.nvim/
+
+# --- Python (just in case any tooling drops it) ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# --- General build artifacts ---
+dist/
+build/
+out/
+tmp/
+.cache/

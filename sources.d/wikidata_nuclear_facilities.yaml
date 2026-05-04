@@ -1,0 +1,233 @@
+# sources.d/wikidata_nuclear_facilities.yaml
+# Global Nuclear Facilities -- Wikidata SPARQL
+# Source: https://query.wikidata.org/sparql
+# Auth: None required (CC0 public domain)
+# Format: SPARQL JSON results (application/sparql-results+json)
+#
+# Queries Wikidata for nuclear power plants (Q134447), research reactors (Q1438105),
+# nuclear reprocessing sites (Q64785417), and radioactive waste repositories (Q21493801).
+# Each result binding has per-field objects: { "value": "...", "type": "..." }.
+# Access values via record.FIELD.value in CEL.
+# Coordinates are extracted via psv:P625 / wikibase:geoLatitude/geoLongitude (not geof:).
+#
+# Poll interval: 24 hours -- facility status changes are measured in months.
+# Recording mode: dedupe -- only re-record when status/capacity/operator changes.
+schema_version: 1
+
+name: wikidata_nuclear_facilities
+labels:
+  category: "nuclear"
+  priority: "medium"
+
+source_type: wikidata_nuclear_facilities
+layer_type: nuclear_facilities
+display_name: "Nuclear Facilities"
+
+enabled: true
+
+transport:
+  type: http_poll
+  # SPARQL query URL-encoded. The query fetches nuclear facilities of four types,
+  # extracts coordinates via psv:P625 + wikibase:geoLatitude/geoLongitude (reliable;
+  # geof:latitude/geof:longitude via BIND is unreliable on the Wikidata endpoint),
+  # and optionally retrieves country, operator, reactor type, capacity, status, and PRIS ID.
+  # The LIMIT 2000 is well above the ~500 currently tracked facilities.
+  url: >-
+    https://query.wikidata.org/sparql?format=json&query=SELECT%20%3Ffacility%20%3FfacilityLabel%20%3Flat%20%3Flon%20%3FcountryLabel%20%3FoperatorLabel%20%3FreactorTypeLabel%20%3Fcapacity%20%3FstatusLabel%20%3Fcommissioned%20%3Fdecommissioned%20%3FfacilityType%20%3FprisId%20WHERE%20%7B%20VALUES%20%3FfacilityType%20%7B%20wd%3AQ134447%20wd%3AQ1438105%20wd%3AQ64785417%20wd%3AQ21493801%20%7D%20%3Ffacility%20wdt%3AP31%20%3FfacilityType%20.%20%3Ffacility%20p%3AP625%20%3FcoordStmt%20.%20%3FcoordStmt%20psv%3AP625%20%3FcoordNode%20.%20%3FcoordNode%20wikibase%3AgeoLatitude%20%3Flat%20.%20%3FcoordNode%20wikibase%3AgeoLongitude%20%3Flon%20.%20OPTIONAL%20%7B%20%3Ffacility%20wdt%3AP17%20%3Fcountry%20%7D%20OPTIONAL%20%7B%20%3Ffacility%20wdt%3AP137%20%3Foperator%20%7D%20OPTIONAL%20%7B%20%3Ffacility%20wdt%3AP516%20%3FreactorType%20%7D%20OPTIONAL%20%7B%20%3Ffacility%20wdt%3AP1102%20%3Fcapacity%20%7D%20OPTIONAL%20%7B%20%3Ffacility%20wdt%3AP5817%20%3Fstatus%20%7D%20OPTIONAL%20%7B%20%3Ffacility%20wdt%3AP729%20%3Fcommissioned%20%7D%20OPTIONAL%20%7B%20%3Ffacility%20wdt%3AP730%20%3Fdecommissioned%20%7D%20OPTIONAL%20%7B%20%3Ffacility%20wdt%3AP1249%20%3FprisId%20%7D%20SERVICE%20wikibase%3Alabel%20%7B%20bd%3AserviceParam%20wikibase%3Alanguage%20%22en%22%20.%20%7D%20%7D%20LIMIT%202000
+  method: GET
+  headers:
+    Accept: "application/sparql-results+json"
+    User-Agent: "respondent-community/1.0 (https://github.com/alevsk/respondent-community)"
+  timeout: "30s"
+  interval: "86400s"   # 24 hours -- facility status is near-static
+  max_response_bytes: 10485760  # 10MB
+  retry:
+    max_attempts: 3
+    backoff: "exponential"
+    initial_delay: "10s"
+    max_delay: "120s"
+
+# SPARQL JSON envelope: { "results": { "bindings": [ {...}, {...} ] } }
+parser:
+  format: json
+  records_path: "results.bindings"
+  max_records: 2000
+
+# Require facility URI, valid lat/lon values, and a non-empty label.
+# Coordinates come in as string-typed binding values; parse before comparison.
+filter: >
+  has(record.facility) && has(record.facility.value)
+  && has(record.lat) && has(record.lat.value)
+  && has(record.lon) && has(record.lon.value)
+  && has(record.facilityLabel) && has(record.facilityLabel.value)
+  && record.facilityLabel.value != ""
+  && double(record.lat.value) != 0.0
+  && double(record.lon.value) != 0.0
+
+# Strip the Wikidata URI prefix to get the bare QID (e.g., "Q49389").
+entity:
+  external_id: >
+    record.facility.value.replace("http://www.wikidata.org/entity/", "")
+  name: >
+    record.facilityLabel.value
+  metadata:
+    country: >
+      has(record.countryLabel) && has(record.countryLabel.value)
+        ? record.countryLabel.value : ""
+    operator: >
+      has(record.operatorLabel) && has(record.operatorLabel.value)
+        ? record.operatorLabel.value : ""
+    reactor_type: >
+      has(record.reactorTypeLabel) && has(record.reactorTypeLabel.value)
+        ? record.reactorTypeLabel.value : ""
+    capacity_mwe: >
+      has(record.capacity) && has(record.capacity.value)
+        ? record.capacity.value : ""
+    commissioned_year: >
+      has(record.commissioned) && has(record.commissioned.value)
+        && size(record.commissioned.value) >= 4
+        ? record.commissioned.value.substring(0, 4) : ""
+    decommissioned_year: >
+      has(record.decommissioned) && has(record.decommissioned.value)
+        && size(record.decommissioned.value) >= 4
+        ? record.decommissioned.value.substring(0, 4) : ""
+    wikidata_qid: >
+      record.facility.value.replace("http://www.wikidata.org/entity/", "")
+    facility_type_qid: >
+      has(record.facilityType) && has(record.facilityType.value)
+        ? record.facilityType.value.replace("http://www.wikidata.org/entity/", "")
+        : ""
+    iaea_pris_id: >
+      has(record.prisId) && has(record.prisId.value)
+        ? record.prisId.value : ""
+
+observation:
+  latitude: >
+    double(record.lat.value)
+  longitude: >
+    double(record.lon.value)
+  altitude: "0.0"
+  timestamp: >
+    now()
+  velocity: {}
+  metadata:
+    status: >
+      (has(record.statusLabel) && has(record.statusLabel.value) && record.statusLabel.value != "")
+        ? (
+          record.statusLabel.value.lowerAscii().contains("operational") ||
+          record.statusLabel.value.lowerAscii().contains("in operation") ||
+          record.statusLabel.value.lowerAscii().contains("operating")
+            ? "operational"
+          : record.statusLabel.value.lowerAscii().contains("construction")
+            ? "under_construction"
+          : record.statusLabel.value.lowerAscii().contains("shutdown") ||
+            record.statusLabel.value.lowerAscii().contains("suspended")
+            ? "shutdown"
+          : record.statusLabel.value.lowerAscii().contains("decommission") ||
+            record.statusLabel.value.lowerAscii().contains("retired")
+            ? "decommissioned"
+          : "unknown"
+        )
+        : "unknown"
+    status_raw: >
+      has(record.statusLabel) && has(record.statusLabel.value)
+        ? record.statusLabel.value : ""
+    country: >
+      has(record.countryLabel) && has(record.countryLabel.value)
+        ? record.countryLabel.value : ""
+    capacity_mwe: >
+      has(record.capacity) && has(record.capacity.value)
+        ? record.capacity.value : ""
+    reactor_type: >
+      has(record.reactorTypeLabel) && has(record.reactorTypeLabel.value)
+        ? record.reactorTypeLabel.value : ""
+    operator: >
+      has(record.operatorLabel) && has(record.operatorLabel.value)
+        ? record.operatorLabel.value : ""
+    iaea_pris_id: >
+      has(record.prisId) && has(record.prisId.value)
+        ? record.prisId.value : ""
+  # Content hash: change when status, capacity, or operator changes.
+  content_hash: >
+    record.facility.value
+    + "_" + (has(record.statusLabel) && has(record.statusLabel.value) ? record.statusLabel.value : "")
+    + "_" + (has(record.capacity) && has(record.capacity.value) ? record.capacity.value : "")
+    + "_" + (has(record.operatorLabel) && has(record.operatorLabel.value) ? record.operatorLabel.value : "")
+
+recording:
+  mode: dedupe  # Re-record only when content_hash changes (status/capacity/operator)
+
+cache:
+  ttl: "172800s"  # 48 hours -- survive a missed daily poll
+
+# Icon shape: "nuclear" (radiation trefoil SVG) already registered in iconRegistry.ts.
+# Color is a static orange for a neutral "this is a nuclear site" default;
+# per-status color coding is implemented in BillboardLayerRenderer by reading
+# the observation.metadata.status field.
+display:
+  icon:
+    shape: radiation
+    rotatable: false
+    interpolation: false
+    scale: 1.2
+  trail:
+    color: "#ff9900"
+    width: 1.0
+    opacity: 0.6
+  style:
+    color: "#ff9900"
+    point_size: 6
+  field_renderers:
+    - keys: [status]
+      label: "STATUS"
+      format:
+        type: string
+        transform: upper
+      priority: 0
+    - keys: [country]
+      label: "COUNTRY"
+      format:
+        type: string
+        transform: upper
+      priority: 1
+    - keys: [reactor_type]
+      label: "REACTOR TYPE"
+      format:
+        type: string
+      priority: 2
+    - keys: [capacity_mwe]
+      label: "CAPACITY"
+      format:
+        type: float
+        precision: 0
+        suffix: " MWe"
+      priority: 3
+    - keys: [operator]
+      label: "OPERATOR"
+      format:
+        type: string
+      priority: 4
+    - keys: [commissioned_year]
+      label: "COMMISSIONED"
+      format:
+        type: integer
+      priority: 5
+    - keys: [decommissioned_year]
+      label: "DECOMMISSIONED"
+      format:
+        type: integer
+      priority: 6
+    - keys: [wikidata_qid]
+      label: "WIKIDATA"
+      format:
+        type: string
+      priority: 7
+    - keys: [iaea_pris_id]
+      label: "IAEA PRIS ID"
+      format:
+        type: string
+      priority: 8
+
+history:
+  max_lookback: "8760h"   # 1 year -- track status transitions over time
+  max_range_span: "720h"  # 30 days per query window

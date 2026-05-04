@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <rect width="32" height="32" rx="6" fill="#0a0a0a"/>
+  <!-- Outer radar ring -->
+  <circle cx="16" cy="16" r="11" fill="none" stroke="#00ff9d" stroke-width="1.5" opacity="0.3"/>
+  <!-- Middle radar ring -->
+  <circle cx="16" cy="16" r="7" fill="none" stroke="#00ff9d" stroke-width="1.5" opacity="0.5"/>
+  <!-- Inner radar ring -->
+  <circle cx="16" cy="16" r="3" fill="none" stroke="#00ff9d" stroke-width="1.5" opacity="0.8"/>
+  <!-- Crosshair lines -->
+  <line x1="16" y1="3" x2="16" y2="13" stroke="#00ff9d" stroke-width="1.5" opacity="0.6"/>
+  <line x1="16" y1="19" x2="16" y2="29" stroke="#00ff9d" stroke-width="1.5" opacity="0.6"/>
+  <line x1="3" y1="16" x2="13" y2="16" stroke="#00ff9d" stroke-width="1.5" opacity="0.6"/>
+  <line x1="19" y1="16" x2="29" y2="16" stroke="#00ff9d" stroke-width="1.5" opacity="0.6"/>
+  <!-- Radar sweep line -->
+  <line x1="16" y1="16" x2="25" y2="9" stroke="#00ff9d" stroke-width="2" stroke-linecap="round"/>
+  <!-- Center dot -->
+  <circle cx="16" cy="16" r="1.5" fill="#00ff9d"/>
+</svg>

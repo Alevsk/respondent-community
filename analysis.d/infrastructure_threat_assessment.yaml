@@ -1,0 +1,221 @@
+# =============================================================================
+# CRITICAL INFRASTRUCTURE THREAT ASSESSMENT — Cross-Layer Hazard Detection
+# =============================================================================
+# Correlates natural hazards (earthquakes, disasters, active volcanoes, extreme
+# weather) with critical internet/telecom infrastructure (subsea cables, IXPs,
+# data centers) to assess physical damage risk and service disruption potential.
+#
+# Hazard sources:
+#   - Earthquakes M3.0+ (last 12h)
+#   - Disaster alerts (GDACS — tsunamis, cyclones, floods)
+#   - Active volcanoes (non-Holocene status = recent/historical activity)
+#   - Extreme weather alerts (NOAA — severity 'Extreme')
+#
+# Infrastructure targets:
+#   - Submarine cable landing points (1,908 entities)
+#   - Internet infrastructure — IXPs, data centers (5,264 entities)
+# =============================================================================
+
+schema_version: 1
+name: infrastructure_threat_assessment
+display_name: "Critical Infrastructure Threat Assessment"
+enabled: false # TODO: enable
+
+schedule:
+  interval: "180s"
+
+data:
+  layers: [earthquakes, disaster_alerts, volcanoes, weather_alerts, subsea_cables, internet_infrastructure]
+  lookback: "12h"
+  min_records: 1
+  max_records: 30
+  dedup:
+    window: "3h"
+    key_fields: ["entity_external_id", "infrastructure_external_id"]
+  sql: |
+    WITH recent_hazards AS (
+      -- Earthquakes M3.0+ in last 12h
+      SELECT e.id, e.name, e.external_id, e.layer_type, e.metadata,
+             o.lat, o.lon, o.position, o.altitude_m, o.ts,
+             'earthquake' AS hazard_type,
+             COALESCE(e.metadata->>'magnitude', e.metadata->>'mag', '0') AS severity_value,
+             COALESCE(e.metadata->>'depth', '0') AS depth_km
+      FROM entities e
+      CROSS JOIN LATERAL (
+        SELECT lat, lon, position, altitude_m, ts
+        FROM observations WHERE entity_id = e.id ORDER BY ts DESC LIMIT 1
+      ) o
+      WHERE e.layer_type = 'earthquakes'
+        AND o.ts > NOW() - INTERVAL '12 hours'
+        AND CAST(COALESCE(e.metadata->>'magnitude', e.metadata->>'mag', '0') AS float) >= 3.0
+      UNION ALL
+      -- Active disaster alerts (GDACS — tsunamis, cyclones, floods, etc.)
+      SELECT e.id, e.name, e.external_id, e.layer_type, e.metadata,
+             o.lat, o.lon, o.position, o.altitude_m, o.ts,
+             'disaster' AS hazard_type,
+             COALESCE(e.metadata->>'alertlevel', 'unknown') AS severity_value,
+             '0' AS depth_km
+      FROM entities e
+      CROSS JOIN LATERAL (
+        SELECT lat, lon, position, altitude_m, ts
+        FROM observations WHERE entity_id = e.id ORDER BY ts DESC LIMIT 1
+      ) o
+      WHERE e.layer_type = 'disaster_alerts'
+        AND o.ts > NOW() - INTERVAL '12 hours'
+      UNION ALL
+      -- Active volcanoes (non-Holocene = has erupted in recorded history)
+      SELECT e.id, e.name, e.external_id, e.layer_type, e.metadata,
+             o.lat, o.lon, o.position, o.altitude_m, o.ts,
+             'volcano' AS hazard_type,
+             COALESCE(e.metadata->>'status', 'unknown') AS severity_value,
+             '0' AS depth_km
+      FROM entities e
+      CROSS JOIN LATERAL (
+        SELECT lat, lon, position, altitude_m, ts
+        FROM observations WHERE entity_id = e.id ORDER BY ts DESC LIMIT 1
+      ) o
+      WHERE e.layer_type = 'volcanoes'
+        AND e.metadata->>'status' != 'Holocene'
+      UNION ALL
+      -- Extreme weather alerts (NOAA)
+      SELECT e.id, e.name, e.external_id, e.layer_type, e.metadata,
+             o.lat, o.lon, o.position, o.altitude_m, o.ts,
+             'extreme_weather' AS hazard_type,
+             COALESCE(e.metadata->>'severity', 'unknown') AS severity_value,
+             '0' AS depth_km
+      FROM entities e
+      CROSS JOIN LATERAL (
+        SELECT lat, lon, position, altitude_m, ts
+        FROM observations WHERE entity_id = e.id ORDER BY ts DESC LIMIT 1
+      ) o
+      WHERE e.layer_type = 'weather_alerts'
+        AND e.metadata->>'severity' = 'Extreme'
+    )
+    SELECT
+      h.id AS entity_id,
+      h.name,
+      h.external_id AS external_id,
+      h.layer_type,
+      h.lat, h.lon, h.altitude_m, h.ts,
+      h.hazard_type,
+      h.severity_value,
+      h.depth_km,
+      infra.name AS infrastructure_name,
+      infra.layer_type AS infrastructure_type,
+      infra.metadata->>'name' AS cable_name,
+      infra.metadata->>'org_name' AS facility_org,
+      infra.metadata->>'net_count' AS network_count,
+      infra.metadata->>'ix_count' AS ix_count,
+      infra.external_id AS infrastructure_external_id,
+      -- Tighter radius for shallow earthquakes (<70km depth) which cause more
+      -- surface damage. Use 150km for shallow, 300km for deep.
+      ROUND(ST_Distance(h.position::geography, o_infra.position::geography) / 1000)::text AS distance_km
+    FROM recent_hazards h
+    JOIN entities infra ON infra.layer_type IN ('subsea_cables', 'internet_infrastructure')
+    CROSS JOIN LATERAL (
+      SELECT position FROM observations WHERE entity_id = infra.id ORDER BY ts DESC LIMIT 1
+    ) o_infra
+    WHERE CASE
+      -- Shallow earthquakes: tighter 150km radius (more destructive at surface)
+      WHEN h.hazard_type = 'earthquake' AND CAST(h.depth_km AS float) < 70
+        THEN ST_DWithin(h.position::geography, o_infra.position::geography, 150000)
+      -- Deep earthquakes and other hazards: wider 300km radius
+      ELSE ST_DWithin(h.position::geography, o_infra.position::geography, 300000)
+    END
+    ORDER BY
+      CASE WHEN h.hazard_type = 'earthquake' THEN CAST(h.severity_value AS float) ELSE 0 END DESC,
+      ST_Distance(h.position::geography, o_infra.position::geography) ASC
+    LIMIT 30
+
+ai:
+  enabled: true
+  operations:
+    - name: infrastructure_risk_analysis
+      tags: [osint, infrastructure, earthquake, disaster, volcano, weather, cables, internet, cross-layer]
+      prompt: |
+        You are a critical infrastructure protection analyst assessing physical threats to internet and telecommunications infrastructure from natural hazards.
+
+        CRITICAL INFRASTRUCTURE THREAT ANALYSIS: {{.RecordCount}} hazards detected
+        near critical internet/telecom infrastructure (last {{.Lookback}}).
+
+        Hazard types: earthquake, disaster (GDACS), volcano, extreme_weather (NOAA).
+
+        DAMAGE RADIUS THRESHOLDS BY HAZARD TYPE:
+        - Earthquake M3-4: <20km direct damage, <50km ground motion effects
+        - Earthquake M4-5: <50km direct damage, <100km significant shaking
+        - Earthquake M5-6: <100km direct damage, <200km moderate shaking (cable landing stations at risk)
+        - Earthquake M6+: <200km catastrophic potential, <500km infrastructure stress
+        - Shallow earthquakes (<70km depth) cause 3-10x more surface damage than deep events
+        - Submarine cables are most vulnerable at shore landing points and in continental shelf zones
+        - Tsunami from M7+ offshore earthquake: cables at risk within 1000km of coastline
+        - Volcano: lahars/pyroclastic flows within 30km, ashfall infrastructure damage within 100km
+        - Extreme weather: direct infrastructure damage within 50km of severe event center
+
+        Hazard-to-infrastructure proximity data:
+        {{range .Records}}
+        - HAZARD: {{.EntityName}} ({{index .Metadata "hazard_type"}}, severity: {{index .Metadata "severity_value"}}, ID: {{.ExternalID}})
+          {{if index .Metadata "depth_km"}}Depth: {{index .Metadata "depth_km"}}km | {{end}}Position: {{.Lat}}, {{.Lon}}
+          THREATENED: {{index .Metadata "infrastructure_name"}} ({{index .Metadata "infrastructure_type"}}, ref: {{index .Metadata "infrastructure_external_id"}})
+          {{if index .Metadata "cable_name"}}Cable: {{index .Metadata "cable_name"}}{{end}}
+          {{if index .Metadata "facility_org"}}Operator: {{index .Metadata "facility_org"}} ({{index .Metadata "network_count"}} networks, {{index .Metadata "ix_count"}} IXPs){{end}}
+          Distance: {{index .Metadata "distance_km"}}km
+        {{end}}
+
+        Consider the infrastructure's strategic importance. A cable landing point serving as the sole international internet connection for an island nation is FAR more critical than one of dozens of cables landing at a major hub like Singapore or New York.
+
+        For each hazard-infrastructure pair, assess:
+        1. Physical damage probability — use the DAMAGE RADIUS THRESHOLDS above to calibrate your assessment against the actual distance and hazard magnitude
+        2. Service disruption potential (how many networks/cables could be affected)
+        3. Redundancy assessment (are there alternative cable routes or facilities?)
+        4. Strategic importance — routine (well-connected hub with many alternatives), significant (regional importance, limited alternatives), or critical (sole or primary connection for a region/nation)
+        5. Recommended action — no_action, monitor, alert_operator, or activate_contingency
+        6. Overall threat level: low/moderate/elevated/high/critical
+        7. disruption_assessment MUST be 2-3 sentences describing the potential service impact
+
+        Respond with JSON matching this schema:
+        {{.OutputSchema}}
+
+      output_schema:
+        type: object
+        required: [threats, summary]
+        properties:
+          summary:
+            type: string
+          threats:
+            type: array
+            items:
+              type: object
+              required: [hazard_name, infrastructure_name, threat_level, damage_probability, disruption_assessment, recommended_action, strategic_importance]
+              properties:
+                hazard_name: { type: string }
+                hazard_type: { type: string }
+                infrastructure_name: { type: string }
+                infrastructure_type: { type: string }
+                distance_km: { type: number }
+                threat_level:
+                  type: string
+                  enum: [low, moderate, elevated, high, critical]
+                damage_probability: { type: string }
+                disruption_assessment: { type: string }
+                redundancy_notes: { type: string }
+                recommended_action:
+                  type: string
+                  enum: [no_action, monitor, alert_operator, activate_contingency]
+                strategic_importance:
+                  type: string
+                  enum: [routine, significant, critical]
+                entity_external_id: { type: string }
+                infrastructure_external_id: { type: string }
+      max_tokens: 5000
+      temperature: 0.1
+      output:
+        store_insights: true
+        insight_type: "infrastructure_threat"
+        results_path: "threats"
+        websocket_push: true
+        retention: "336h"
+        ref_fields:
+          - field: "infrastructure_external_id"
+            layer_type: "subsea_cables"
+          - field: "infrastructure_external_id"
+            layer_type: "internet_infrastructure"

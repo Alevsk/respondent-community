@@ -1,0 +1,11 @@
+services:
+  docs:
+    image: "docker.io/alevsk/respondent-community-docs:latest"
+    restart: unless-stopped
+    ports:
+      - "${DOCS_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8080/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3

@@ -1,0 +1,177 @@
+# sources.d/nifc_wildfires.yaml
+# NIFC WFIGS — Active Wildfire Perimeters (National Interagency Fire Center)
+# Source: https://data-nifc.opendata.arcgis.com/
+# Auth: None required (public ArcGIS FeatureServer)
+# Format: GeoJSON FeatureCollection with Polygon geometries
+#
+# Returns current active wildfire perimeters from the Wildland Fire
+# Interagency Geospatial Services (WFIGS). Refreshed every 5-15 minutes.
+# Entity position uses the fire's initial lat/lon (origin point).
+schema_version: 2
+
+name: nifc_wildfires
+labels:
+  category: disaster
+  priority: high
+source_type: nifc_wildfires
+layer_type: wildfires
+display_name: "US Wildfires"
+
+transport:
+  type: http_poll
+  url: "https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services/WFIGS_Interagency_Perimeters_Current/FeatureServer/0/query?where=1%3D1&outFields=poly_IncidentName,poly_GISAcres,poly_DateCurrent,poly_IRWINID,attr_IncidentName,attr_PercentContained,attr_GACC,attr_POOState,attr_POOCounty,attr_FireDiscoveryDateTime,attr_FireCauseGeneral,attr_IncidentSize,attr_IrwinID,attr_InitialLatitude,attr_InitialLongitude,attr_TotalIncidentPersonnel,attr_EstimatedCostToDate&f=geojson"
+  method: GET
+  headers:
+    Accept: "application/json"
+    User-Agent: "respondent-feeder/1.0"
+  timeout: "30s"
+  interval: "900s"
+  max_response_bytes: 52428800  # 50MB
+  retry:
+    max_attempts: 3
+    backoff: "exponential"
+    initial_delay: "2s"
+    max_delay: "30s"
+
+parser:
+  format: geojson
+  records_path: "features"
+  max_records: 5000
+
+# Only records with valid origin coordinates.
+filter: >
+  has(record.properties)
+  && has(record.properties.attr_InitialLatitude)
+  && has(record.properties.attr_InitialLongitude)
+  && record.properties.attr_InitialLatitude != 0.0
+  && record.properties.attr_InitialLongitude != 0.0
+
+entity:
+  external_id: >
+    has(record.properties.attr_IrwinID) && record.properties.attr_IrwinID != ""
+      ? "wfire_" + record.properties.attr_IrwinID
+      : "wfire_" + string(record.properties.attr_InitialLatitude) + "_" + string(record.properties.attr_InitialLongitude)
+  name: >
+    has(record.properties.attr_IncidentName) && record.properties.attr_IncidentName != ""
+      ? record.properties.attr_IncidentName
+      : (has(record.properties.poly_IncidentName) && record.properties.poly_IncidentName != ""
+          ? record.properties.poly_IncidentName
+          : "Wildfire")
+  metadata:
+    state: >
+      has(record.properties.attr_POOState) ? record.properties.attr_POOState : ""
+    county: >
+      has(record.properties.attr_POOCounty) ? record.properties.attr_POOCounty : ""
+    gacc: >
+      has(record.properties.attr_GACC) ? record.properties.attr_GACC : ""
+    cause: >
+      has(record.properties.attr_FireCauseGeneral) ? record.properties.attr_FireCauseGeneral : ""
+
+observation:
+  latitude: >
+    record.properties.attr_InitialLatitude
+  longitude: >
+    record.properties.attr_InitialLongitude
+  altitude: "0.0"
+  timestamp: >
+    has(record.properties.attr_FireDiscoveryDateTime)
+    && record.properties.attr_FireDiscoveryDateTime != null
+      ? unix_ms(record.properties.attr_FireDiscoveryDateTime)
+      : now()
+  metadata:
+    acres: >
+      has(record.properties.attr_IncidentSize)
+      && record.properties.attr_IncidentSize != null
+        ? string(record.properties.attr_IncidentSize)
+        : (has(record.properties.poly_GISAcres) ? string(record.properties.poly_GISAcres) : "")
+    percent_contained: >
+      has(record.properties.attr_PercentContained)
+      && record.properties.attr_PercentContained != null
+        ? string(record.properties.attr_PercentContained)
+        : ""
+    personnel: >
+      has(record.properties.attr_TotalIncidentPersonnel)
+      && record.properties.attr_TotalIncidentPersonnel != null
+        ? string(record.properties.attr_TotalIncidentPersonnel)
+        : ""
+    estimated_cost: >
+      has(record.properties.attr_EstimatedCostToDate)
+      && record.properties.attr_EstimatedCostToDate != null
+        ? string(record.properties.attr_EstimatedCostToDate)
+        : ""
+    cause: >
+      has(record.properties.attr_FireCauseGeneral)
+        ? record.properties.attr_FireCauseGeneral
+        : ""
+  content_hash: ""
+
+recording:
+  mode: upsert
+
+cache:
+  ttl: "1800s"
+
+
+# --- History ---
+history:
+  max_lookback: "2160h"
+  max_range_span: "168h"
+
+display:
+  icon:
+    shape: fire
+    rotatable: false
+    interpolation: false
+    scale: 1.2
+  trail:
+    color: "#ff6d00"
+    width: 1.5
+    opacity: 0.8
+  style:
+    color: "#ff6d00"
+    point_size: 6
+  field_renderers:
+    - keys: [acres]
+      label: "SIZE"
+      format:
+        type: float
+        precision: 0
+        suffix: " acres"
+      priority: 0
+    - keys: [percent_contained]
+      label: "CONTAINED"
+      format:
+        type: float
+        precision: 0
+        suffix: "%"
+      priority: 1
+    - keys: [personnel]
+      label: "PERSONNEL"
+      format:
+        type: integer
+      priority: 2
+    - keys: [cause]
+      label: "CAUSE"
+      format:
+        type: string
+        transform: upper
+      priority: 3
+    - keys: [estimated_cost]
+      label: "EST. COST"
+      format:
+        type: float
+        precision: 0
+        prefix: "$"
+      priority: 4
+    - keys: [state]
+      label: "STATE"
+      format:
+        type: string
+        transform: upper
+      priority: 5
+    - keys: [county]
+      label: "COUNTY"
+      format:
+        type: string
+        transform: upper
+      priority: 6

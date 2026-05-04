@@ -1,0 +1,139 @@
+# sources.d/adsb_lol_flights.yaml
+# Declarative definition for adsb.lol ADS-B Exchange v2 flight data.
+# Uses spatial grid crawling with hex-packed coverage and entity-level caching.
+# Reference: docs/FEEDER_DECLARATIVE_SOURCES.md
+schema_version: 2
+
+name: adsb_lol_flights
+labels:
+  category: aviation
+  priority: high
+source_type: adsb_lol_flights
+layer_type: flights_commercial
+display_name: "ADSB.lol Flights"
+
+enabled: true
+
+filtering: viewport
+backfill:
+  threshold: 10
+
+geo_cache:
+  overfetch_ratio: 3.0
+  alive_ratio_threshold: 0.5
+  gc_batch_size: 500
+
+transport:
+  type: http_poll
+  url: "https://api.adsb.lol/v2/lat/{lat}/lon/{lon}/dist/250"
+  on_demand_url: "https://api.adsb.lol/v2/point/{lat}/{lon}/250"
+  method: GET
+  timeout: "15s"
+  interval: "30s"
+  max_response_bytes: 52428800
+  retry:
+    max_attempts: 2
+    backoff: exponential
+    initial_delay: "1s"
+    max_delay: "10s"
+
+  spatial:
+    type: hex_grid
+    radius_nm: 250
+    target_refresh: "30m"
+    batch_size: 0                 # auto-calculate
+    lat_min: -50                  # skip Antarctica/Southern Ocean (no air traffic below -50°)
+    lat_max: 72                   # skip deep Arctic (minimal traffic above 72°)
+    viewport_priority: true
+    priority_cap_pct: 50
+
+parser:
+  format: json
+  records_path: "ac"
+  max_records: 10000
+
+filter: >
+  has(record.hex) && has(record.lat) && has(record.lon)
+
+entity:
+  external_id: >
+    record.hex
+  name: >
+    has(record.flight) && string(record.flight).trim() != ""
+      ? string(record.flight).trim()
+      : record.hex
+  metadata:
+    callsign: >
+      has(record.flight) ? string(record.flight).trim() : ""
+    hex: >
+      record.hex
+    type: >
+      has(record.t) ? record.t : ""
+    registration: >
+      has(record.r) ? record.r : ""
+
+observation:
+  latitude: >
+    double(record.lat)
+  longitude: >
+    double(record.lon)
+  altitude: >
+    has(record.alt_baro) && record.alt_baro != "ground"
+      ? coerce_double(record.alt_baro, 0.0) * 0.3048
+      : (has(record.alt_geom) ? coerce_double(record.alt_geom, 0.0) * 0.3048 : 0.0)
+  timestamp: >
+    now()
+  velocity:
+    speed: >
+      has(record.gs) ? string(double(record.gs) * 0.514444) : "0"
+    heading: >
+      has(record.track) ? string(record.track) : "0"
+    climb: >
+      has(record.baro_rate) ? string(double(record.baro_rate) * 0.00508) : "0"
+  metadata: {}
+  content_hash: ""
+
+entity_cache:
+  enabled: true
+  key: "record.hex"
+  ttl: "1800s"   # Must match target_refresh (30m) so entities survive a full sweep
+  accumulate: true
+
+recording:
+  mode: append
+
+cache:
+  ttl: "2700s"
+
+display:
+  icon:
+    shape: flight
+    rotatable: true
+    interpolation: true
+    scale: 1.0
+  trail:
+    color: "#00ff9d"
+    width: 1.5
+    opacity: 0.7
+  style:
+    color: "#00ff9d"
+    point_size: 6
+  field_renderers:
+    - keys: [callsign]
+      label: "CALLSIGN"
+      format:
+        type: string
+        transform: upper
+      priority: 0
+    - keys: [registration]
+      label: "REGISTRATION"
+      format:
+        type: string
+        transform: upper
+      priority: 1
+    - keys: [type]
+      label: "AIRCRAFT"
+      format:
+        type: string
+        transform: upper
+      priority: 2

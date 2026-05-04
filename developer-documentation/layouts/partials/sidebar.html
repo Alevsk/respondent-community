@@ -1,0 +1,35 @@
+<aside class="sidebar">
+  <nav>
+    <ul class="sidebar-nav">
+      {{ $currentPage := . }}
+      {{ range .Site.Menus.main }}
+        {{ $section := site.GetPage .URL }}
+        {{ if $section }}
+        <li class="sidebar-section">
+          <span class="sidebar-section-title">{{ .Name }}</span>
+          <ul class="sidebar-children">
+            {{ range $section.Pages.ByWeight }}
+            <li>
+              <a class="sidebar-link{{ if eq $currentPage.RelPermalink .RelPermalink }} active{{ end }}" href="{{ .RelPermalink }}">
+                {{ .Title }}
+              </a>
+              {{ if .Pages }}
+              <ul class="sidebar-children">
+                {{ range .Pages.ByWeight }}
+                <li>
+                  <a class="sidebar-link{{ if eq $currentPage.RelPermalink .RelPermalink }} active{{ end }}" href="{{ .RelPermalink }}">
+                    {{ .Title }}
+                  </a>
+                </li>
+                {{ end }}
+              </ul>
+              {{ end }}
+            </li>
+            {{ end }}
+          </ul>
+        </li>
+        {{ end }}
+      {{ end }}
+    </ul>
+  </nav>
+</aside>

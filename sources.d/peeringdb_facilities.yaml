@@ -1,0 +1,162 @@
+# sources.d/peeringdb_facilities.yaml
+# PeeringDB — Internet Exchange & Data Center Facilities
+# Source: https://www.peeringdb.com/api/fac
+# Auth: None required for anonymous reads (rate-limited; User-Agent recommended)
+# Format: JSON with top-level { "meta": {}, "data": [...] }
+schema_version: 2
+
+name: peeringdb_facilities
+labels:
+  category: "infrastructure"
+  priority: "low"
+
+# --- Identity ---
+source_type: peeringdb_facilities
+layer_type: internet_infrastructure
+display_name: "PeeringDB Facilities"
+
+# --- Operational Controls ---
+enabled: true
+
+filtering: viewport
+
+geo_cache:
+  overfetch_ratio: 2.0
+  alive_ratio_threshold: 0.5
+  gc_batch_size: 500
+
+# --- Ingestion ---
+transport:
+  type: http_poll
+  url: "https://www.peeringdb.com/api/fac?limit=500&depth=0"
+  method: GET
+  headers:
+    Accept: "application/json"
+    User-Agent: "respondent-geoint/1.0"
+  timeout: "30s"
+  interval: "86400s"  # 24 hours — facility data is relatively static
+  max_response_bytes: 52428800  # 50MB — large dataset
+  retry:
+    max_attempts: 3
+    backoff: "exponential"
+    initial_delay: "5s"
+    max_delay: "60s"
+  pagination:
+    type: offset
+    page_param: "skip"
+    size_param: "limit"
+    size: 500
+    max_pages: 40  # up to 20,000 facilities
+
+# --- Response Parsing ---
+# PeeringDB returns { "meta": {}, "data": [ {...}, {...}, ... ] }
+parser:
+  format: json
+  records_path: "data"
+  max_records: 20000
+
+# --- Record Filtering (CEL) ---
+# Only process facilities with valid coordinates and active status
+filter: >
+  has(record.latitude) && has(record.longitude)
+  && double(record.latitude) != 0.0 && double(record.longitude) != 0.0
+  && has(record.status) && record.status == "ok"
+
+# --- Entity Mapping (CEL) ---
+entity:
+  external_id: >
+    string(record.id)
+  name: >
+    record.name
+  metadata:
+    city: >
+      has(record.city) ? record.city : ""
+    country: >
+      has(record.country) ? record.country : ""
+    state: >
+      has(record.state) ? record.state : ""
+    website: >
+      has(record.website) ? record.website : ""
+    org_name: >
+      has(record.org_name) ? record.org_name : ""
+    net_count: >
+      has(record.net_count) ? string(record.net_count) : "0"
+    ix_count: >
+      has(record.ix_count) ? string(record.ix_count) : "0"
+
+# --- Observation Mapping (CEL) ---
+observation:
+  latitude: >
+    double(record.latitude)
+  longitude: >
+    double(record.longitude)
+  altitude: "0.0"
+  timestamp: >
+    now()
+  velocity: {}
+  metadata:
+    net_count: >
+      has(record.net_count) ? string(record.net_count) : "0"
+    ix_count: >
+      has(record.ix_count) ? string(record.ix_count) : "0"
+    city: >
+      has(record.city) ? record.city : ""
+    country: >
+      has(record.country) ? record.country : ""
+  content_hash: >
+    string(record.id) + "_" + (has(record.net_count) ? string(record.net_count) : "0") + "_" + (has(record.ix_count) ? string(record.ix_count) : "0")
+
+# --- Recording ---
+recording:
+  mode: dedupe
+
+# --- Cache ---
+cache:
+  ttl: "172800s"  # 48 hours — survive a missed daily poll
+
+# --- Display ---
+display:
+  icon:
+    shape: shield
+    rotatable: false
+    interpolation: false
+    scale: 1.0
+  trail:
+    color: "#00ccff"
+    width: 1.0
+    opacity: 0.5
+  style:
+    color: "#00ccff"
+    point_size: 6
+  field_renderers:
+    - keys: [org_name]
+      label: "OPERATOR"
+      format:
+        type: string
+      priority: 0
+    - keys: [city]
+      label: "CITY"
+      format:
+        type: string
+      priority: 1
+    - keys: [country]
+      label: "COUNTRY"
+      format:
+        type: string
+        transform: upper
+      priority: 2
+    - keys: [net_count]
+      label: "NETWORKS"
+      format:
+        type: integer
+      priority: 3
+    - keys: [ix_count]
+      label: "IXPs"
+      format:
+        type: integer
+      priority: 4
+    - keys: [website]
+      label: "WEBSITE"
+      format:
+        type: string
+      priority: 5

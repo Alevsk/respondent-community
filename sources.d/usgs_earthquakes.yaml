@@ -1,0 +1,138 @@
+# sources.d/usgs_earthquakes.yaml
+# Migration of the imperative EarthquakesAdapter to declarative YAML.
+# Source: USGS Earthquake Hazards Program
+# Reference: docs/FEEDER_DECLARATIVE_SOURCES.md
+schema_version: 2
+
+name: usgs_earthquakes
+labels:
+  category: geological
+  priority: low
+
+# --- Identity ---
+source_type: usgs_earthquakes
+layer_type: earthquakes
+display_name: "USGS Earthquakes"
+
+
+# --- Ingestion ---
+transport:
+  type: http_poll
+  url: "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_hour.geojson"
+  method: GET
+  headers:
+    Accept: "application/json"
+  timeout: "10s"
+  interval: "60s"
+  max_response_bytes: 52428800  # 50MB
+  retry:
+    max_attempts: 3
+    backoff: "exponential"
+    initial_delay: "1s"
+    max_delay: "30s"
+
+# --- Response Parsing ---
+parser:
+  format: geojson
+  records_path: "features"
+  max_records: 10000
+
+# --- Record Filtering (CEL) ---
+filter: >
+  has(record.properties.mag) && double(record.properties.mag) >= 1.0
+
+# --- Entity Mapping (CEL) ---
+entity:
+  external_id: >
+    record.id
+  name: >
+    has(record.properties.place) ? record.properties.place : record.id
+  metadata:
+    magnitude: >
+      string(record.properties.mag)
+    depth: >
+      string(record.geometry.coordinates[2])
+    place: >
+      has(record.properties.place) ? record.properties.place : "Unknown"
+    type: >
+      has(record.properties.type) ? record.properties.type : "earthquake"
+    alert: >
+      has(record.properties.alert) ? record.properties.alert : ""
+    url: >
+      has(record.properties.url) ? record.properties.url : ""
+
+# --- Observation Mapping (CEL) ---
+observation:
+  latitude: >
+    record.geometry.coordinates[1]
+  longitude: >
+    record.geometry.coordinates[0]
+  altitude: >
+    record.geometry.coordinates[2] * -1000.0
+  timestamp: >
+    unix_ms(record.properties.time)
+  velocity: {}
+  metadata:
+    magnitude: >
+      string(record.properties.mag)
+  content_hash: ""
+
+# --- Recording ---
+recording:
+  mode: upsert
+
+# --- Cache ---
+cache:
+  ttl: "3600s"
+
+# --- Display (consumed by frontend) ---
+display:
+  icon:
+    shape: ripple
+    rotatable: false
+    interpolation: false
+    scale: 1.0
+  trail:
+    color: "#ff006e"
+    width: 1.5
+    opacity: 0.7
+  style:
+    color: "#ff006e"
+    point_size: 6
+  field_renderers:
+    - keys: [magnitude, mag]
+      label: "MAGNITUDE"
+      format:
+        type: float
+        precision: 1
+        prefix: "M"
+      priority: 0
+    - keys: [depth, depth_km]
+      label: "DEPTH"
+      format:
+        type: float
+        precision: 1
+        suffix: " km"
+      priority: 1
+    - keys: [place]
+      label: "LOCATION"
+      format:
+        type: string
+      priority: 2
+    - keys: [type]
+      label: "TYPE"
+      format:
+        type: string
+        transform: upper
+      priority: 3
+    - keys: [alert]
+      label: "ALERT"
+      format:
+        type: string
+        transform: upper
+      priority: 4
+
+# --- History (per-layer time range limits) ---
+history:
+  max_lookback: "2160h"    # 90 days
+  max_range_span: "168h"   # 7 days per query window

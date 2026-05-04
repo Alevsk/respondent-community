@@ -1,0 +1,522 @@
+# analysis.d/TEMPLATE.yaml
+# ============================================================================
+# DECLARATIVE ANALYSIS TEMPLATE — COMPLETE REFERENCE
+# ============================================================================
+# Copy this file and rename it to match your analysis (e.g., my_analysis.yaml).
+# Fields marked <REQUIRED> must be filled in. Commented-out fields are optional.
+#
+# Validate your definition before deploying:
+#   go test ./internal/analyzer/... -run TestValidateAnalysisDefinitions -v
+#
+# This file is disabled (enabled: false) so the loader skips it.
+# See geopolitical_hotspot_index.yaml for the most comprehensive real example.
+# ============================================================================
+
+# Schema version. Always 1 for analysis definitions.
+schema_version: 1
+
+# Unique analysis identifier. Lowercase + underscores only, must match the filename
+# (without the .yaml extension). Must not collide with existing names in analysis.d/.
+name: <REQUIRED>
+
+# Human-readable name shown in the frontend and API.
+display_name: "<REQUIRED>"
+
+# Set to true to activate this analysis. The loader skips disabled definitions.
+# Leave false while developing and testing a new definition.
+enabled: false
+
+# ----------------------------------------------------------------------------
+# SCHEDULE
+# ----------------------------------------------------------------------------
+# At least one of `interval` or `cron` is required. They are mutually exclusive.
+#
+# interval: Run on a fixed cadence. Accepts Go duration strings.
+#   Typical values:
+#     "60s"    — every 1 minute  (lightweight layer-based analyses)
+#     "120s"   — every 2 minutes (moderate spatial joins)
+#     "180s"   — every 3 minutes (multi-layer correlations)
+#     "300s"   — every 5 minutes (heavy SQL with PostGIS joins — default for complex analyses)
+#     "900s"   — every 15 minutes (news/digest analyses, moderate LLM cost)
+#     "3600s"  — every 1 hour (audit and quality checks, low-frequency LLM)
+#
+# cron: 6-field cron expression (sec min hour dom month dow).
+#   Example: "0 */5 * * * *" = every 5 minutes at second 0.
+#   Use cron instead of interval when you need time-of-day or day-of-week
+#   control (e.g., "0 0 8 * * 1-5" = 08:00 UTC on weekdays only).
+#
+# Choosing an interval:
+#   - Estimate SQL execution time on your dataset.
+#   - Estimate LLM latency at your token budget.
+#   - Add 20% headroom. The engine skips ticks that overlap a running job.
+#   - Heavy PostGIS joins (4+ CTEs) warrant >= 300s.
+#   - Light layer queries can run every 60-120s.
+schedule:
+  interval: "300s"
+  # cron: "0 */5 * * * *"
+
+
+# ----------------------------------------------------------------------------
+# DATA CONFIGURATION
+# ----------------------------------------------------------------------------
+# Two data paths are available (mutually exclusive — use one or the other):
+#
+#   PATH A — Layer-based: set `layers: [layer1, layer2]`
+#     The engine calls GetLatestForLayer() for each listed layer, merges the
+#     results, and applies the optional CEL `filter` expression. Good for:
+#       - Analyses that operate on a single layer
+#       - Simple two-layer correlations where the data volume is manageable
+#       - Any analysis where proximity logic can live in the AI prompt
+#     Set `layers: []` to query ALL layers (useful for audit analyses).
+#
+#   PATH B — SQL-based: set `sql: |` with a raw PostgreSQL query
+#     The engine executes the query directly against the PostgreSQL database.
+#     Required for cross-layer spatial joins using PostGIS. The query is
+#     validated as read-only before execution (pg_query_go AST parser rejects
+#     any statement that is not a SELECT).
+#     Platform edition only — not available in analysis-community.d/.
+#
+# See the SQL Reference section below for PostGIS patterns.
+data:
+  # --------------------------------------------------------------------------
+  # PATH A — Layer-based (comment out `sql` to use this path)
+  # --------------------------------------------------------------------------
+  # List of layer_type values to query. Empty list = all layers.
+  # Examples: [conflict_events], [fires_active, air_quality], []
+  layers: [<REQUIRED_LAYER_TYPE>]
+
+  # lookback: Time window for data freshness. Records with ts older than
+  # NOW() - lookback are discarded after the query returns. Set this to match
+  # the meaningful age of data for your analysis. Also set a matching INTERVAL
+  # in your SQL WHERE clause for Path B analyses (SQL filtering is more
+  # efficient than post-query lookback filtering).
+  lookback: "6h"
+
+  # min_records: Minimum rows required to proceed to the AI phase. If fewer
+  # records are returned, the analysis tick is skipped (logged as "insufficient
+  # records"). Use 1 to always proceed when any data exists; use higher values
+  # to require a statistically meaningful dataset.
+  min_records: 1
+
+  # max_records: Hard cap on records sent to the LLM. Prevents token overflow.
+  # For Path B (SQL), set the SQL LIMIT to match this value. For Path A
+  # (layer-based), the engine truncates to this count after filtering.
+  # 0 = use the server default (500). Typical values: 20-50 for complex
+  # multi-signal analyses; up to 100 for simpler single-layer analyses.
+  max_records: 30
+
+  # filter: Optional CEL expression applied to records after the query returns.
+  # Only records where the expression evaluates to true are passed to the AI phase.
+  # Available variables: entity.* and observation.* (see CEL Filter Variables below).
+  # Leave empty to pass all records through.
+  filter: ""
+
+  # --------------------------------------------------------------------------
+  # PATH B — SQL-based (comment out `layers` and `filter` to use this path)
+  # --------------------------------------------------------------------------
+  # Raw PostgreSQL + PostGIS query. Must be a SELECT statement only —
+  # INSERT, UPDATE, DELETE, DROP, and DDL are rejected at load time.
+  #
+  # REQUIRED columns in the SELECT (the engine maps these to AnalysisRecord):
+  #   name        TEXT    — entity display name (maps to .EntityName in prompts)
+  #   layer_type  TEXT    — source layer type (maps to .LayerType)
+  #   lat         FLOAT   — latitude (maps to .Lat)
+  #   lon         FLOAT   — longitude (maps to .Lon)
+  #   altitude_m  FLOAT   — altitude in meters (maps to .Altitude; use 0.0 if N/A)
+  #   ts          TIMESTAMPTZ — observation timestamp (maps to .Timestamp)
+  #
+  # OPTIONAL columns:
+  #   external_id TEXT    — entity external ID (maps to .ExternalID)
+  #   entity_id   UUID    — entity database ID (used for insight ref resolution)
+  #
+  # ALL other columns become entries in the .Metadata map (map[string]string).
+  # Cast non-text columns to text in the SELECT: my_count::text AS my_count
+  # Access them in prompts with: {{index .Metadata "my_count"}}
+  #
+  # ARCHITECTURE PATTERNS:
+  #
+  #   Pattern 1: CROSS JOIN LATERAL — latest observation per entity (standard pattern)
+  #     Use when the anchor layer has moderate entity count and you need the
+  #     most recent position for each entity.
+  #
+  #   SELECT e.id AS entity_id, e.name, e.external_id,
+  #          'my_layer' AS layer_type,
+  #          o.lat, o.lon, o.position, 0.0 AS altitude_m, o.ts
+  #   FROM entities e
+  #   CROSS JOIN LATERAL (
+  #     SELECT lat, lon, position, ts
+  #     FROM observations
+  #     WHERE entity_id = e.id
+  #     ORDER BY ts DESC LIMIT 1
+  #   ) o
+  #   WHERE e.layer_type = 'my_layer'
+  #     AND o.ts > NOW() - INTERVAL '6 hours'
+  #
+  #   Pattern 2: DISTINCT ON — observation-first (efficient for sparse layers)
+  #     Use when the layer has many entities but few are active (e.g., only
+  #     a subset have recent observations). Avoids scanning all entities.
+  #
+  #   SELECT DISTINCT ON (o.entity_id)
+  #     o.entity_id, e.name, e.external_id,
+  #     'my_layer' AS layer_type,
+  #     o.lat, o.lon, o.position, o.altitude_m, o.ts
+  #   FROM observations o
+  #   JOIN entities e ON e.id = o.entity_id AND e.layer_type = 'my_layer'
+  #   WHERE o.ts > NOW() - INTERVAL '6 hours'
+  #   ORDER BY o.entity_id, o.ts DESC
+  #
+  #   Pattern 3: Multi-CTE cross-layer — anchor + signal layers via PostGIS
+  #     Use for composite analyses that need proximity-based signal fusion.
+  #     Each CTE handles one signal layer; the final SELECT LEFT JOINs them.
+  #     See the full SQL example below and geopolitical_hotspot_index.yaml.
+  #
+  # SQL SCHEMA REFERENCE:
+  #   entities(
+  #     id UUID PK, external_id TEXT, layer_type TEXT, name TEXT,
+  #     metadata JSONB, ai_metadata JSONB, source TEXT, created_at TIMESTAMPTZ
+  #   )
+  #   observations(
+  #     id UUID PK, entity_id UUID FK, ts TIMESTAMPTZ,
+  #     event_time TIMESTAMPTZ, event_end TIMESTAMPTZ,
+  #     lat DOUBLE PRECISION, lon DOUBLE PRECISION,
+  #     position GEOGRAPHY(POINT,4326),  -- PostGIS geography column (indexed)
+  #     altitude_m DOUBLE PRECISION, velocity JSONB,
+  #     metadata JSONB, ai_metadata JSONB,
+  #     source_type TEXT, content_hash TEXT, source TEXT, created_at TIMESTAMPTZ
+  #   )
+  #   ai_insights(
+  #     id UUID PK, insight_type TEXT, source_name TEXT, operation_name TEXT,
+  #     layer_type TEXT, attention TEXT, attention_rank INT, dedup_key TEXT,
+  #     result JSONB, expires_at TIMESTAMPTZ, created_at TIMESTAMPTZ
+  #   )
+  #
+  # POSTGIS FUNCTIONS QUICK REFERENCE:
+  #   ST_DWithin(a.position::geography, b.position::geography, <meters>)
+  #     -> true if two points are within the given geodesic distance
+  #     -> uses the GiST spatial index on observations.position
+  #     -> bounding-box pre-filter (cheap) before geodesic check (expensive):
+  #        b.lat BETWEEN a.lat - 0.9 AND a.lat + 0.9
+  #        AND b.lon BETWEEN a.lon - (0.9 / GREATEST(COS(RADIANS(a.lat)), 0.01))
+  #                       AND a.lon + (0.9 / GREATEST(COS(RADIANS(a.lat)), 0.01))
+  #        AND ST_DWithin(a.position::geography, b.position::geography, 100000)
+  #
+  #   ST_Distance(a.position::geography, b.position::geography)
+  #     -> geodesic distance in meters; divide by 1000 for km:
+  #        ROUND(ST_Distance(...) / 1000)::text AS distance_km
+  #
+  #   STRING_AGG(DISTINCT e.metadata->>'field', ', ')
+  #     -> aggregate distinct metadata values into a comma-separated string
+  #
+  # TIPS:
+  #   - Always cast the `position` column to ::geography for geodesic accuracy.
+  #   - Add WHERE ts > NOW() - INTERVAL '...' in each CTE, not just the final SELECT.
+  #   - Use LEFT JOINs in the final SELECT so anchor rows with no signal still appear.
+  #   - COALESCE null signal counts to 0 and null string fields to 'none'.
+  #   - Always add LIMIT <max_records> at the end of the final SELECT.
+  #   - Cast all non-text columns to text (::text) for the Metadata map.
+  sql: |
+    -- ==========================================================================
+    -- EXAMPLE: Cross-layer proximity analysis using PostGIS
+    -- Replace this with your actual query. This example correlates an anchor
+    -- layer (my_anchor_layer) with a signal layer (my_signal_layer) using
+    -- ST_DWithin for spatial proximity detection.
+    -- ==========================================================================
+    WITH anchor_entities AS (
+      -- CTE 1: ANCHOR — entities from the primary layer.
+      -- Use CROSS JOIN LATERAL to get the most recent observation per entity.
+      -- Filter by ts to avoid stale anchor points.
+      SELECT
+        e.id        AS entity_id,
+        e.name      AS entity_name,
+        e.external_id,
+        e.metadata->>'some_field' AS some_field,
+        o.lat, o.lon, o.position, o.ts
+      FROM entities e
+      CROSS JOIN LATERAL (
+        SELECT lat, lon, position, ts
+        FROM observations
+        WHERE entity_id = e.id
+        ORDER BY ts DESC LIMIT 1
+      ) o
+      WHERE e.layer_type = 'my_anchor_layer'
+        AND o.ts > NOW() - INTERVAL '6 hours'
+    ),
+    signal_layer AS (
+      -- CTE 2: SIGNAL — aggregate corroborating data from a second layer.
+      -- For each anchor entity, count nearby signal entities using ST_DWithin.
+      -- The distance threshold (100000 = 100km) should reflect real-world
+      -- relevance (e.g., 100km for local impact, 500km for regional influence).
+      SELECT
+        a.entity_name,
+        COUNT(DISTINCT s.id)                                   AS signal_count,
+        STRING_AGG(DISTINCT s.metadata->>'category', ', ')    AS signal_categories,
+        -- Compute geodesic distance to the nearest signal entity in km.
+        ROUND(
+          MIN(ST_Distance(a.position::geography, o_s.position::geography)) / 1000
+        )::text                                                AS nearest_km
+      FROM anchor_entities a
+      JOIN entities s ON s.layer_type = 'my_signal_layer'
+      CROSS JOIN LATERAL (
+        SELECT position, ts
+        FROM observations
+        WHERE entity_id = s.id
+        ORDER BY ts DESC LIMIT 1
+      ) o_s
+      WHERE o_s.ts > NOW() - INTERVAL '6 hours'
+        -- Bounding-box pre-filter (cheap) before geodesic check (expensive).
+        AND o_s.lat BETWEEN a.lat - 0.9 AND a.lat + 0.9
+        AND o_s.lon BETWEEN a.lon - (0.9 / GREATEST(COS(RADIANS(a.lat)), 0.01))
+                        AND a.lon + (0.9 / GREATEST(COS(RADIANS(a.lat)), 0.01))
+        AND ST_DWithin(a.position::geography, o_s.position::geography, 100000)
+      GROUP BY a.entity_name
+    )
+    -- FINAL SELECT: LEFT JOIN signals onto anchors.
+    -- LEFT JOIN preserves anchor rows that have no nearby signals.
+    -- COALESCE fills defaults for rows with no signal data.
+    SELECT
+      a.entity_id,
+      a.entity_name          AS name,
+      a.external_id,
+      'my_anchor_layer'      AS layer_type,
+      a.lat, a.lon, 0.0      AS altitude_m,
+      a.ts,
+      -- Non-standard columns become .Metadata entries in the prompt template.
+      -- Always cast to text — AnalysisRecord.Metadata is map[string]string.
+      a.some_field                                   AS some_field,
+      COALESCE(sl.signal_count, 0)::text             AS signal_count,
+      COALESCE(sl.signal_categories, 'none')         AS signal_categories,
+      COALESCE(sl.nearest_km, 'N/A')                 AS nearest_km
+    FROM anchor_entities a
+    LEFT JOIN signal_layer sl ON sl.entity_name = a.entity_name
+    -- Require at least one corroborating signal, or include unconditionally.
+    WHERE COALESCE(sl.signal_count, 0) > 0
+    ORDER BY sl.signal_count DESC NULLS LAST
+    LIMIT 30
+
+  # --------------------------------------------------------------------------
+  # DEDUP (optional)
+  # --------------------------------------------------------------------------
+  # Prevents the same insight from being emitted repeatedly when the underlying
+  # data has not meaningfully changed. The engine skips the AI phase for a
+  # record if a matching insight was already stored within the dedup window.
+  #
+  # window: How long to suppress duplicate insights. Must be longer than your
+  #   schedule interval to have any effect. Typical values:
+  #     "1h"  — suppress re-analysis for 1 hour (moderate-cadence analyses)
+  #     "6h"  — suppress for 6 hours (good for event-driven analyses)
+  #     "12h" — suppress for 12 hours (composite scoring analyses)
+  #     "24h" — suppress for 1 day (daily digest or audit analyses)
+  #
+  # key_fields: List of .Metadata field names (or standard fields like
+  #   "external_id") that together form the dedup key. The engine hashes these
+  #   values to identify "the same event." Use the most stable, specific
+  #   identifier for your entity (e.g., external_id for named regions, or a
+  #   combination like ["entity_id", "alert_type"] for typed events).
+  dedup:
+    window: "6h"
+    key_fields: ["external_id"]
+
+
+# ----------------------------------------------------------------------------
+# AI CONFIGURATION
+# ----------------------------------------------------------------------------
+# Defines the LLM operations that run on the fetched data. Multiple operations
+# can be defined — they run sequentially in declaration order. Each operation
+# is independent: it can filter records differently, use a different prompt,
+# and store results to a different insight_type.
+ai:
+  enabled: true
+  operations:
+    - name: <REQUIRED_OPERATION_NAME>
+      # tags: Metadata labels for filtering and grouping insights.
+      # Not used by the engine; consumed by the frontend and API.
+      tags: [analysis, cross-layer]
+
+      # filter: Optional CEL expression to select which records this operation
+      # processes. Applied after data.filter. Useful when one operation should
+      # handle high-severity records while another handles low-severity ones.
+      # Leave empty to process all records passed from the data phase.
+      filter: ""
+
+      # ------------------------------------------------------------------------
+      # PROMPT TEMPLATE
+      # ------------------------------------------------------------------------
+      # Go text/template syntax. The engine renders this before sending to the LLM.
+      #
+      # TOP-LEVEL VARIABLES:
+      #   {{.RecordCount}}   — total number of records after min/max filtering
+      #   {{.Lookback}}      — duration string (e.g., "6h0m0s")
+      #   {{.Records}}       — slice of AnalysisRecord structs (iterate with range)
+      #   {{.LayerCount}}    — number of distinct layer_type values in .Records
+      #   {{.LayerStats}}    — per-layer summary statistics (count, coverage)
+      #   {{.OutputSchema}}  — JSON Schema string, injected by the engine
+      #                        (always end the prompt with this reference)
+      #
+      # PER-RECORD VARIABLES (inside {{range .Records}} ... {{end}}):
+      #   {{.EntityName}}              — entity display name
+      #   {{.ExternalID}}              — entity external ID
+      #   {{.LayerType}}               — source layer type
+      #   {{.Lat}}, {{.Lon}}           — geographic coordinates
+      #   {{.Altitude}}                — altitude in meters
+      #   {{.Timestamp}}               — RFC3339 timestamp
+      #   {{index .Metadata "key"}}    — any non-standard SQL column or metadata field
+      #
+      # PROMPT DESIGN PRINCIPLES:
+      #   1. Open with a clear role statement — tell the LLM what kind of analyst
+      #      it is. Specificity improves output quality consistently.
+      #   2. Present data in a structured, scannable block per record. Use
+      #      consistent indentation inside {{range}} so the LLM can parse rows.
+      #   3. Provide explicit scoring rubrics with numeric thresholds and named
+      #      tiers. The LLM calibrates to your scale better with examples.
+      #   4. Use CRITICAL or IMPORTANT callouts for instructions the LLM must
+      #      not ignore (e.g., "never classify X as Y without evidence of Z").
+      #   5. Ask for explanations in addition to scores. A "reasoning" or
+      #      "assessment" field forces the LLM to ground its output in the data.
+      #   6. End every prompt with:
+      #        Respond with JSON matching this schema:
+      #        {{.OutputSchema}}
+      #      This triggers structured output validation by the engine.
+      #   7. Keep prompts under ~2000 tokens of static text. Variable data
+      #      ({{range .Records}}) expands at runtime — budget accordingly.
+      prompt: |
+        You are a senior intelligence analyst specializing in [DESCRIBE DOMAIN].
+        Your assessments are read by decision-makers who require accurate, calibrated analysis.
+
+        [ANALYSIS TITLE]: Analysis of {{.RecordCount}} records over {{.Lookback}}.
+
+        Data:
+        {{range .Records}}
+        ENTITY: {{.EntityName}} ({{.Lat}}, {{.Lon}}, ID: {{.ExternalID}})
+          Layer: {{.LayerType}}
+          Time:  {{.Timestamp}}
+          Signal count: {{index .Metadata "signal_count"}}
+          Signal types: {{index .Metadata "signal_categories"}}
+          Nearest (km): {{index .Metadata "nearest_km"}}
+        {{end}}
+
+        For each entity, assess:
+        1. [First assessment dimension]
+        2. [Second assessment dimension]
+        3. Overall severity: low / medium / high / critical
+
+        CALIBRATION:
+        - critical: [Define threshold — e.g., "5+ signals within 50km"]
+        - high:     [Define threshold]
+        - medium:   [Define threshold]
+        - low:      [Define threshold — e.g., "1 signal beyond 80km"]
+
+        The `assessment` field MUST be 1-3 sentences explaining what drives the severity rating.
+        Reference specific field values from the data, not generic statements.
+
+        Respond with JSON matching this schema:
+        {{.OutputSchema}}
+
+      # ------------------------------------------------------------------------
+      # OUTPUT SCHEMA — JSON Schema for LLM response validation
+      # ------------------------------------------------------------------------
+      # The engine validates the LLM response against this schema before storing
+      # the insight. Responses that fail validation are rejected and logged.
+      #
+      # SCHEMA DESIGN GUIDELINES:
+      #   - Use `required` to enforce the fields your downstream consumers need.
+      #   - Use `enum` for classification and category fields. Enums prevent the
+      #     LLM from inventing values and make filtering precise.
+      #   - Use `minimum`/`maximum` for bounded numeric scores (0-100, etc.).
+      #   - Include an `entity_external_id` field when you want the engine to
+      #     create an ai_insight_refs row linking the insight to a source entity.
+      #   - Include a top-level summary or narrative field for the global context.
+      #   - Set results_path (below) to the name of the array field whose items
+      #     will be stored as individual insights (one row per array item).
+      output_schema:
+        type: object
+        required: [items, summary]
+        properties:
+          summary:
+            type: string
+            description: "Global narrative covering the full set of analyzed records."
+          items:
+            type: array
+            items:
+              type: object
+              required: [entity_name, severity, assessment, entity_external_id]
+              properties:
+                entity_name:
+                  type: string
+                entity_external_id:
+                  type: string
+                  description: "External ID of the entity. Used by the engine to resolve entity references."
+                lat:
+                  type: number
+                lon:
+                  type: number
+                signal_count:
+                  type: integer
+                  minimum: 0
+                severity:
+                  type: string
+                  enum: [low, medium, high, critical]
+                assessment:
+                  type: string
+                  description: "1-3 sentence explanation of the severity rating."
+                key_drivers:
+                  type: array
+                  items:
+                    type: string
+                  description: "1-3 most important factors driving the severity."
+
+      # max_tokens: LLM response token budget (1-128000).
+      # Budget for max_records * (tokens per item) + overhead.
+      # A detailed per-item response costs roughly 100-200 tokens.
+      # For 30 records: 30 * 150 + 500 overhead ≈ 5000 tokens.
+      # Increase if responses are truncated; decrease to reduce cost.
+      max_tokens: 3000
+
+      # temperature: LLM creativity dial (0.0 = deterministic, 2.0 = creative).
+      # Use 0.0-0.2 for scoring and classification tasks — reproducibility matters.
+      # Use 0.4-0.7 for narrative generation — creative variation is acceptable.
+      temperature: 0.1
+
+      # ------------------------------------------------------------------------
+      # OUTPUT CONFIGURATION — How insights are stored and delivered
+      # ------------------------------------------------------------------------
+      output:
+        # store_insights: Persist results to the ai_insights table.
+        # Set false during development to validate prompts without writing data.
+        store_insights: true
+
+        # insight_type: The type label stored in ai_insights.insight_type.
+        # Keep this stable — changing it breaks existing frontend queries and API
+        # consumers. Use lowercase_underscores. Examples: "hotspot_index",
+        # "weather_impact", "cable_threat", "news_digest".
+        insight_type: "<REQUIRED_INSIGHT_TYPE>"
+
+        # results_path: Dot-path to the array in the LLM response whose items
+        # will be stored as individual insights. The engine stores one ai_insight
+        # row per array item. If the path resolves to an empty array, the full
+        # LLM response (including top-level summary fields) is stored as a single
+        # insight instead. If omitted, the entire response is stored as one insight.
+        # Example: "items" -> response.items[0], response.items[1], ...
+        results_path: "items"
+
+        # websocket_push: Push each stored insight to connected WebSocket clients
+        # as an "ai_insight" message immediately after storage. Enables real-time
+        # dashboard updates without client polling.
+        websocket_push: true
+
+        # retention: How long insights are retained before automatic cleanup.
+        # The engine runs an hourly cleanup goroutine that deletes expired insights.
+        # Choose based on analysis frequency and downstream consumption patterns:
+        #   "1h"   — ultra-high-frequency analyses (every 60s)
+        #   "24h"  — daily operational analyses
+        #   "168h" — weekly strategic analyses (7 days)
+        #   "336h" — long-term reference insights (14 days)
+        retention: "168h"
+
+        # ref_fields: Cross-layer entity references in the LLM output.
+        # When the LLM output contains an external_id for a different layer,
+        # the engine resolves it to a database UUID and stores the link in
+        # ai_insight_refs. Used to create navigable connections between insights
+        # and source entities in the frontend.
+        # ref_fields:
+        #   - field: "related_entity_id"    # Field name in the LLM result
+        #     layer_type: "other_layer"      # Layer to look up the external_id in

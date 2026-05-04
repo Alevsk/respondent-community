@@ -1,0 +1,158 @@
+/* Light theme syntax highlighting (GitHub style) */
+[data-theme="light"] .bg { background-color:#f0f0f0; }
+[data-theme="light"] .chroma { color:#1a1a1a;background-color:#f0f0f0;-webkit-text-size-adjust:none; }
+[data-theme="light"] .chroma .err { color:#f6f8fa;background-color:#82071e }
+[data-theme="light"] .chroma .lnlinks { outline:none;text-decoration:none;color:inherit }
+[data-theme="light"] .chroma .lntd { vertical-align:top;padding:0;margin:0;border:0; }
+[data-theme="light"] .chroma .lntable { border-spacing:0;padding:0;margin:0;border:0; }
+[data-theme="light"] .chroma .hl { background-color:#dedede }
+[data-theme="light"] .chroma .lnt { white-space:pre;-webkit-user-select:none;user-select:none;margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f }
+[data-theme="light"] .chroma .ln { white-space:pre;-webkit-user-select:none;user-select:none;margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f }
+[data-theme="light"] .chroma .line { display:flex; }
+[data-theme="light"] .chroma .k { color:#cf222e }
+[data-theme="light"] .chroma .kc { color:#cf222e }
+[data-theme="light"] .chroma .kd { color:#cf222e }
+[data-theme="light"] .chroma .kn { color:#cf222e }
+[data-theme="light"] .chroma .kp { color:#cf222e }
+[data-theme="light"] .chroma .kr { color:#cf222e }
+[data-theme="light"] .chroma .kt { color:#cf222e }
+[data-theme="light"] .chroma .na { color:#1a1a1a }
+[data-theme="light"] .chroma .nc { color:#1a1a1a }
+[data-theme="light"] .chroma .no { color:#0550ae }
+[data-theme="light"] .chroma .nd { color:#0550ae }
+[data-theme="light"] .chroma .ni { color:#00804d }
+[data-theme="light"] .chroma .nl { color:#900;font-weight:bold }
+[data-theme="light"] .chroma .nn { color:#1a1a1a }
+[data-theme="light"] .chroma .nx { color:#1a1a1a }
+[data-theme="light"] .chroma .nt { color:#0550ae }
+[data-theme="light"] .chroma .nb { color:#00804d }
+[data-theme="light"] .chroma .bp { color:#666666 }
+[data-theme="light"] .chroma .nv { color:#953800 }
+[data-theme="light"] .chroma .vc { color:#953800 }
+[data-theme="light"] .chroma .vg { color:#953800 }
+[data-theme="light"] .chroma .vi { color:#953800 }
+[data-theme="light"] .chroma .vm { color:#953800 }
+[data-theme="light"] .chroma .nf { color:#00804d }
+[data-theme="light"] .chroma .fm { color:#00804d }
+[data-theme="light"] .chroma .s { color:#0a3069 }
+[data-theme="light"] .chroma .sa { color:#0a3069 }
+[data-theme="light"] .chroma .sb { color:#0a3069 }
+[data-theme="light"] .chroma .sc { color:#0a3069 }
+[data-theme="light"] .chroma .dl { color:#0a3069 }
+[data-theme="light"] .chroma .sd { color:#0a3069 }
+[data-theme="light"] .chroma .s2 { color:#0a3069 }
+[data-theme="light"] .chroma .se { color:#0a3069 }
+[data-theme="light"] .chroma .sh { color:#0a3069 }
+[data-theme="light"] .chroma .si { color:#0a3069 }
+[data-theme="light"] .chroma .sx { color:#0a3069 }
+[data-theme="light"] .chroma .sr { color:#0a3069 }
+[data-theme="light"] .chroma .s1 { color:#0a3069 }
+[data-theme="light"] .chroma .ss { color:#032f62 }
+[data-theme="light"] .chroma .m { color:#0550ae }
+[data-theme="light"] .chroma .mb { color:#0550ae }
+[data-theme="light"] .chroma .mf { color:#0550ae }
+[data-theme="light"] .chroma .mh { color:#0550ae }
+[data-theme="light"] .chroma .mi { color:#0550ae }
+[data-theme="light"] .chroma .il { color:#0550ae }
+[data-theme="light"] .chroma .mo { color:#0550ae }
+[data-theme="light"] .chroma .o { color:#0550ae }
+[data-theme="light"] .chroma .ow { color:#0550ae }
+[data-theme="light"] .chroma .p { color:#1a1a1a }
+[data-theme="light"] .chroma .c { color:#666666 }
+[data-theme="light"] .chroma .ch { color:#666666 }
+[data-theme="light"] .chroma .cm { color:#666666 }
+[data-theme="light"] .chroma .c1 { color:#666666 }
+[data-theme="light"] .chroma .cs { color:#666666 }
+[data-theme="light"] .chroma .cp { color:#666666 }
+[data-theme="light"] .chroma .cpf { color:#666666 }
+[data-theme="light"] .chroma .gd { color:#82071e;background-color:#ffebe9 }
+[data-theme="light"] .chroma .ge { color:#1a1a1a }
+[data-theme="light"] .chroma .gi { color:#116329;background-color:#dafbe1 }
+[data-theme="light"] .chroma .go { color:#1a1a1a }
+[data-theme="light"] .chroma .gl { text-decoration:underline }
+
+/* Light theme code block background override */
+[data-theme="light"] pre {
+  background: #f0f0f0;
+}
+
+[data-theme="light"] pre code {
+  color: #1a1a1a;
+}
+
+/* Dark theme syntax highlighting — tactical green-accented palette */
+[data-theme="dark"] .bg { color:#e0e0e0;background-color:#111111; }
+[data-theme="dark"] .chroma { color:#e0e0e0;background-color:#111111;-webkit-text-size-adjust:none; }
+[data-theme="dark"] .chroma .lnlinks { outline:none;text-decoration:none;color:inherit }
+[data-theme="dark"] .chroma .lntd { vertical-align:top;padding:0;margin:0;border:0; }
+[data-theme="dark"] .chroma .lntable { border-spacing:0;padding:0;margin:0;border:0; }
+[data-theme="dark"] .chroma .hl { background-color:#1a2a1a }
+[data-theme="dark"] .chroma .lnt { white-space:pre;-webkit-user-select:none;user-select:none;margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#555555 }
+[data-theme="dark"] .chroma .ln { white-space:pre;-webkit-user-select:none;user-select:none;margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#555555 }
+[data-theme="dark"] .chroma .line { display:flex; }
+[data-theme="dark"] .chroma .k { color:#ff006e }
+[data-theme="dark"] .chroma .kc { color:#ff006e }
+[data-theme="dark"] .chroma .kd { color:#66d9ef;font-style:italic }
+[data-theme="dark"] .chroma .kn { color:#ff006e }
+[data-theme="dark"] .chroma .kp { color:#ff006e }
+[data-theme="dark"] .chroma .kr { color:#ff006e }
+[data-theme="dark"] .chroma .kt { color:#66d9ef }
+[data-theme="dark"] .chroma .na { color:#00ff9d }
+[data-theme="dark"] .chroma .nc { color:#00ff9d }
+[data-theme="dark"] .chroma .nl { color:#66d9ef;font-style:italic }
+[data-theme="dark"] .chroma .nt { color:#ff006e }
+[data-theme="dark"] .chroma .nb { color:#66d9ef;font-style:italic }
+[data-theme="dark"] .chroma .bp { font-style:italic }
+[data-theme="dark"] .chroma .nv { color:#66d9ef;font-style:italic }
+[data-theme="dark"] .chroma .vc { color:#66d9ef;font-style:italic }
+[data-theme="dark"] .chroma .vg { color:#66d9ef;font-style:italic }
+[data-theme="dark"] .chroma .vi { color:#66d9ef;font-style:italic }
+[data-theme="dark"] .chroma .vm { color:#66d9ef;font-style:italic }
+[data-theme="dark"] .chroma .nf { color:#00ff9d }
+[data-theme="dark"] .chroma .fm { color:#00ff9d }
+[data-theme="dark"] .chroma .s { color:#f1fa8c }
+[data-theme="dark"] .chroma .sa { color:#f1fa8c }
+[data-theme="dark"] .chroma .sb { color:#f1fa8c }
+[data-theme="dark"] .chroma .sc { color:#f1fa8c }
+[data-theme="dark"] .chroma .dl { color:#f1fa8c }
+[data-theme="dark"] .chroma .sd { color:#f1fa8c }
+[data-theme="dark"] .chroma .s2 { color:#f1fa8c }
+[data-theme="dark"] .chroma .se { color:#f1fa8c }
+[data-theme="dark"] .chroma .sh { color:#f1fa8c }
+[data-theme="dark"] .chroma .si { color:#f1fa8c }
+[data-theme="dark"] .chroma .sx { color:#f1fa8c }
+[data-theme="dark"] .chroma .sr { color:#f1fa8c }
+[data-theme="dark"] .chroma .s1 { color:#f1fa8c }
+[data-theme="dark"] .chroma .ss { color:#f1fa8c }
+[data-theme="dark"] .chroma .m { color:#bd93f9 }
+[data-theme="dark"] .chroma .mb { color:#bd93f9 }
+[data-theme="dark"] .chroma .mf { color:#bd93f9 }
+[data-theme="dark"] .chroma .mh { color:#bd93f9 }
+[data-theme="dark"] .chroma .mi { color:#bd93f9 }
+[data-theme="dark"] .chroma .il { color:#bd93f9 }
+[data-theme="dark"] .chroma .mo { color:#bd93f9 }
+[data-theme="dark"] .chroma .o { color:#ff006e }
+[data-theme="dark"] .chroma .ow { color:#ff006e }
+[data-theme="dark"] .chroma .c { color:#555555 }
+[data-theme="dark"] .chroma .ch { color:#555555 }
+[data-theme="dark"] .chroma .cm { color:#555555 }
+[data-theme="dark"] .chroma .c1 { color:#555555 }
+[data-theme="dark"] .chroma .cs { color:#555555 }
+[data-theme="dark"] .chroma .cp { color:#ff006e }
+[data-theme="dark"] .chroma .cpf { color:#ff006e }
+[data-theme="dark"] .chroma .gd { color:#f55 }
+[data-theme="dark"] .chroma .ge { text-decoration:underline }
+[data-theme="dark"] .chroma .gh { font-weight:bold }
+[data-theme="dark"] .chroma .gi { color:#00ff9d;font-weight:bold }
+[data-theme="dark"] .chroma .go { color:#333333 }
+[data-theme="dark"] .chroma .gu { font-weight:bold }
+[data-theme="dark"] .chroma .gl { text-decoration:underline }
+
+/* Dark theme code block background override */
+[data-theme="dark"] pre {
+  background: #111111;
+}
+
+[data-theme="dark"] pre code {
+  color: #e0e0e0;
+}

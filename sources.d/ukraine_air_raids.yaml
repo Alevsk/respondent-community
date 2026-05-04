@@ -1,0 +1,172 @@
+# sources.d/ukraine_air_raids.yaml
+# Ukraine Air Raid Alerts — ukrainealarm.com API v3
+# Source: https://api.ukrainealarm.com/api/v3/alerts
+# Auth: API key (free registration at https://api.ukrainealarm.com/)
+# Format: JSON array of region objects with nested activeAlerts
+#
+# Returns all 25 oblasts + Kyiv City + Crimea with their active air raid alerts.
+# Regions without alerts have an empty activeAlerts array and are filtered out.
+# The API does NOT return coordinates — a lookup table maps regionId to oblast centroids.
+schema_version: 1
+
+name: ukraine_air_raids
+labels:
+  category: conflict
+  priority: high
+
+# --- Identity ---
+source_type: ukraine_air_raids
+layer_type: air_raid_alerts
+display_name: "Ukraine Air Raid Alerts"
+
+# --- Operational Controls ---
+# Disabled by default — requires a free API token from https://api.ukrainealarm.com/
+enabled: false
+
+# Static coordinate lookup for Ukrainian oblasts.
+# The API only returns region names/IDs, not coordinates.
+# Centroids are approximate geographic centers of each oblast.
+lookup_tables:
+  - name: "oblasts"
+    key_field: "id"
+    entries:
+      - { id: "31", lat: 49.2331, lon: 28.4682, name: "Vinnytsia" }
+      - { id: "14", lat: 48.4647, lon: 35.0462, name: "Dnipropetrovsk" }
+      - { id: "5",  lat: 48.0159, lon: 37.8028, name: "Donetsk" }
+      - { id: "35", lat: 50.2547, lon: 28.6587, name: "Zhytomyr" }
+      - { id: "6",  lat: 47.8388, lon: 35.1396, name: "Zaporizhzhia" }
+      - { id: "26", lat: 48.9226, lon: 24.7111, name: "Ivano-Frankivsk" }
+      - { id: "12", lat: 50.4501, lon: 30.5234, name: "Kyiv Oblast" }
+      - { id: "38", lat: 50.4501, lon: 30.5234, name: "Kyiv City" }
+      - { id: "18", lat: 48.5079, lon: 32.2623, name: "Kirovohrad" }
+      - { id: "19", lat: 48.5740, lon: 39.3078, name: "Luhansk" }
+      - { id: "10", lat: 49.8397, lon: 24.0297, name: "Lviv" }
+      - { id: "23", lat: 46.9750, lon: 31.9946, name: "Mykolaiv" }
+      - { id: "13", lat: 46.4825, lon: 30.7233, name: "Odesa" }
+      - { id: "17", lat: 49.5883, lon: 34.5514, name: "Poltava" }
+      - { id: "16", lat: 50.6199, lon: 26.2516, name: "Rivne" }
+      - { id: "20", lat: 50.9077, lon: 34.7981, name: "Sumy" }
+      - { id: "21", lat: 49.5535, lon: 25.5948, name: "Ternopil" }
+      - { id: "8",  lat: 49.9935, lon: 36.2304, name: "Kharkiv" }
+      - { id: "22", lat: 46.6354, lon: 32.6169, name: "Kherson" }
+      - { id: "3",  lat: 49.4229, lon: 26.9871, name: "Khmelnytskyi" }
+      - { id: "25", lat: 49.4444, lon: 32.0598, name: "Cherkasy" }
+      - { id: "24", lat: 48.2920, lon: 25.9354, name: "Chernivtsi" }
+      - { id: "27", lat: 51.4982, lon: 31.2893, name: "Chernihiv" }
+      - { id: "32", lat: 50.7472, lon: 25.3254, name: "Volyn" }
+      - { id: "33", lat: 48.6208, lon: 22.2879, name: "Zakarpattia" }
+
+# --- Ingestion ---
+transport:
+  type: http_poll
+  url: "https://api.ukrainealarm.com/api/v3/alerts"
+  method: GET
+  headers:
+    Accept: "application/json"
+  auth:
+    type: api_key
+    header: "Authorization"
+    env_var: "UKRAINE_ALARM_TOKEN"
+  timeout: "15s"
+  interval: "60s"
+  max_response_bytes: 5242880  # 5MB
+  retry:
+    max_attempts: 3
+    backoff: "exponential"
+    initial_delay: "2s"
+    max_delay: "30s"
+
+# --- Response Parsing ---
+# API returns a top-level JSON array of region objects
+parser:
+  format: json
+  records_path: ""
+  max_records: 500
+
+# --- Record Filtering (CEL) ---
+# Only include regions that have at least one active alert
+filter: >
+  has(record.activeAlerts) && size(record.activeAlerts) > 0
+
+# --- Entity Mapping (CEL) ---
+entity:
+  external_id: >
+    record.regionId
+  name: >
+    has(record.regionEngName) && record.regionEngName != ""
+      ? record.regionEngName
+      : record.regionName
+  metadata:
+    region_name: >
+      has(record.regionEngName) && record.regionEngName != ""
+        ? record.regionEngName
+        : record.regionName
+    alert_type: >
+      size(record.activeAlerts) > 0 && has(record.activeAlerts[0].alertType)
+        ? record.activeAlerts[0].alertType
+        : "UNKNOWN"
+    alert_count: >
+      string(size(record.activeAlerts))
+
+# --- Observation Mapping (CEL) ---
+observation:
+  latitude: >
+    lookup("oblasts", record.regionId, "lat")
+  longitude: >
+    lookup("oblasts", record.regionId, "lon")
+  altitude: "0.0"
+  timestamp: >
+    now()
+  velocity: {}
+  metadata:
+    region_name: >
+      has(record.regionEngName) && record.regionEngName != ""
+        ? record.regionEngName
+        : record.regionName
+    alert_type: >
+      size(record.activeAlerts) > 0 && has(record.activeAlerts[0].alertType)
+        ? record.activeAlerts[0].alertType
+        : "UNKNOWN"
+    alert_count: >
+      string(size(record.activeAlerts))
+  content_hash: ""
+
+# --- Recording ---
+recording:
+  mode: upsert
+
+# --- Cache ---
+cache:
+  ttl: "120s"
+
+# --- Display ---
+display:
+  icon:
+    shape: warning
+    rotatable: false
+    interpolation: false
+    scale: 1.5
+  trail:
+    color: "#ff0000"
+    width: 1.5
+    opacity: 0.8
+  style:
+    color: "#ff0000"
+    point_size: 6
+  field_renderers:
+    - keys: [region_name]
+      label: "REGION"
+      format:
+        type: string
+      priority: 0
+    - keys: [alert_type]
+      label: "ALERT TYPE"
+      format:
+        type: string
+        transform: upper
+      priority: 1
+    - keys: [alert_count]
+      label: "ACTIVE ALERTS"
+      format:
+        type: string
+      priority: 2

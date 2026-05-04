@@ -1,0 +1,14 @@
+{{ $type := .Get "type" | default "info" }}
+{{ $title := .Get "title" }}
+{{ $icons := dict "info" "&#9432;" "warning" "&#9888;" "danger" "&#9888;" "tip" "&#10004;" }}
+<div class="callout callout-{{ $type }}">
+  {{ if $title }}
+  <div class="callout-title">
+    <span>{{ index $icons $type | safeHTML }}</span>
+    {{ $title }}
+  </div>
+  {{ end }}
+  <div class="callout-content">
+    {{ .Inner | markdownify }}
+  </div>
+</div>

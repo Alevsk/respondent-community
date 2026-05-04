@@ -1,0 +1,107 @@
+# sources.d/gdelt_events.yaml
+# GDELT GEO 2.0 — Global Event, Language, and Tone Database
+# Source: https://api.gdeltproject.org/api/v2/geo/geo
+# Auth: None required
+# Format: GeoJSON FeatureCollection
+#
+# DISABLED: The GDELT GEO 2.0 API (/api/v2/geo/geo) returns HTTP 404 as of March 2026.
+# The DOC API (/api/v2/doc/doc) works but returns articles without geographic coordinates,
+# making it unusable for globe mapping. Re-enable if GDELT restores the GEO endpoint.
+#
+# schema_version: 1
+#
+# name: gdelt_events
+# labels:
+#   category: conflict
+#   priority: medium
+#
+# source_type: gdelt_events
+# layer_type: global_events
+# display_name: "GDELT Global Events"
+#
+# transport:
+#   type: http_poll
+#   url: "https://api.gdeltproject.org/api/v2/geo/geo?query=conflict&mode=PointData&format=GeoJSON&timespan=15min"
+#   method: GET
+#   headers:
+#     Accept: "application/json"
+#   timeout: "15s"
+#   interval: "900s"
+#   max_response_bytes: 52428800
+#   retry:
+#     max_attempts: 3
+#     backoff: "exponential"
+#     initial_delay: "2s"
+#     max_delay: "30s"
+#
+# parser:
+#   format: geojson
+#   records_path: "features"
+#   max_records: 10000
+#
+# filter: >
+#   has(record.geometry) && has(record.geometry.coordinates)
+#   && size(record.geometry.coordinates) >= 2
+#
+# entity:
+#   external_id: >
+#     has(record.properties.url) ? record.properties.url : string(record.geometry.coordinates[0]) + "_" + string(record.geometry.coordinates[1])
+#   name: >
+#     has(record.properties.name) ? record.properties.name : "GDELT Event"
+#   metadata:
+#     count: >
+#       has(record.properties.count) ? string(record.properties.count) : "0"
+#     url: >
+#       has(record.properties.url) ? record.properties.url : ""
+#     name: >
+#       has(record.properties.name) ? record.properties.name : ""
+#
+# observation:
+#   latitude: >
+#     record.geometry.coordinates[1]
+#   longitude: >
+#     record.geometry.coordinates[0]
+#   altitude: "0.0"
+#   timestamp: >
+#     now()
+#   velocity: {}
+#   metadata:
+#     count: >
+#       has(record.properties.count) ? string(record.properties.count) : "0"
+#   content_hash: ""
+#
+# recording:
+#   mode: append
+#
+# cache:
+#   ttl: "900s"
+#
+# display:
+#   icon:
+#     shape: diamond
+#     rotatable: false
+#     interpolation: false
+#     scale: 1.0
+#   trail:
+#     color: "#ff006e"
+#     width: 1.0
+#     opacity: 0.6
+#   style:
+#     color: "#ff006e"
+#     point_size: 6
+#   field_renderers:
+#     - keys: [name]
+#       label: "LOCATION"
+#       format:
+#         type: string
+#       priority: 0
+#     - keys: [count]
+#       label: "EVENT COUNT"
+#       format:
+#         type: integer
+#       priority: 1
+#     - keys: [url]
+#       label: "SOURCE"
+#       format:
+#         type: string
+#       priority: 2

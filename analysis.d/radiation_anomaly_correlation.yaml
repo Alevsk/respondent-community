@@ -1,0 +1,214 @@
+# =============================================================================
+# RADIATION ANOMALY CORRELATION — Multi-Hazard Nuclear Threat Detection
+# =============================================================================
+# Correlates radiation sensor readings with nearby earthquakes, conflict zones,
+# and active volcanoes to detect potential nuclear incidents. Elevated radiation
+# near an earthquake could indicate damage to a nuclear facility; near a conflict
+# zone could indicate use of depleted uranium or dirty bomb; near a volcano
+# could indicate radon release from geological activity.
+#
+# Data layers: radiation (Safecast) + radiation_us (EPA RadNet) ×
+#              earthquakes ∪ conflict_events ∪ volcanoes
+# =============================================================================
+
+schema_version: 1
+name: radiation_anomaly_correlation
+display_name: "Radiation Anomaly Correlation"
+enabled: false # TODO: enable
+
+schedule:
+  interval: "300s"
+
+data:
+  layers: [radiation, radiation_us]
+  lookback: "24h"
+  min_records: 1
+  max_records: 30
+  dedup:
+    window: "6h"
+    key_fields: ["entity_external_id", "hazard_external_id"]
+  sql: |
+    WITH radiation_sensors AS (
+      -- All radiation sensors (Safecast + EPA RadNet) with readings.
+      SELECT r.id, r.name, r.external_id, r.layer_type, r.metadata,
+             o.lat, o.lon, o.position, o.ts,
+             COALESCE(r.metadata->>'value_cpm', '0') AS cpm_value,
+             COALESCE(r.metadata->>'unit', 'cpm') AS unit
+      FROM entities r
+      CROSS JOIN LATERAL (
+        SELECT lat, lon, position, ts
+        FROM observations WHERE entity_id = r.id ORDER BY ts DESC LIMIT 1
+      ) o
+      WHERE r.layer_type IN ('radiation', 'radiation_us')
+    ),
+    nearby_earthquakes AS (
+      -- Earthquakes M3.0+ within 300km of any radiation sensor.
+      SELECT
+        rs.id AS sensor_id,
+        rs.name AS sensor_name,
+        rs.external_id AS sensor_external_id,
+        rs.cpm_value,
+        eq.name AS hazard_name,
+        'earthquake' AS hazard_type,
+        COALESCE(eq.metadata->>'magnitude', '0') AS hazard_severity,
+        ROUND(ST_Distance(rs.position::geography, o_eq.position::geography) / 1000)::text AS distance_km,
+        eq.external_id AS hazard_external_id
+      FROM radiation_sensors rs
+      JOIN entities eq ON eq.layer_type = 'earthquakes'
+      CROSS JOIN LATERAL (
+        SELECT position, ts FROM observations WHERE entity_id = eq.id ORDER BY ts DESC LIMIT 1
+      ) o_eq
+      WHERE o_eq.ts > NOW() - INTERVAL '24 hours'
+        AND CAST(COALESCE(eq.metadata->>'magnitude', eq.metadata->>'mag', '0') AS float) >= 3.0
+        AND ST_DWithin(rs.position::geography, o_eq.position::geography, 300000)
+    ),
+    nearby_conflicts AS (
+      -- Active conflict zones within 300km of any radiation sensor.
+      SELECT
+        rs.id AS sensor_id,
+        rs.name AS sensor_name,
+        rs.external_id AS sensor_external_id,
+        rs.cpm_value,
+        conf.name AS hazard_name,
+        'conflict' AS hazard_type,
+        conf.metadata->>'fatalities' AS hazard_severity,
+        ROUND(ST_Distance(rs.position::geography, o_conf.position::geography) / 1000)::text AS distance_km,
+        conf.external_id AS hazard_external_id
+      FROM radiation_sensors rs
+      JOIN entities conf ON conf.layer_type = 'conflict_events'
+        AND CAST(COALESCE(conf.metadata->>'fatalities', '0') AS int) > 0
+      CROSS JOIN LATERAL (
+        SELECT position FROM observations WHERE entity_id = conf.id ORDER BY ts DESC LIMIT 1
+      ) o_conf
+      WHERE ST_DWithin(rs.position::geography, o_conf.position::geography, 300000)
+    ),
+    nearby_volcanoes AS (
+      -- Active volcanoes within 300km of any radiation sensor.
+      SELECT
+        rs.id AS sensor_id,
+        rs.name AS sensor_name,
+        rs.external_id AS sensor_external_id,
+        rs.cpm_value,
+        vol.name AS hazard_name,
+        'volcano' AS hazard_type,
+        COALESCE(vol.metadata->>'status', 'unknown') AS hazard_severity,
+        ROUND(ST_Distance(rs.position::geography, o_vol.position::geography) / 1000)::text AS distance_km,
+        vol.external_id AS hazard_external_id
+      FROM radiation_sensors rs
+      JOIN entities vol ON vol.layer_type = 'volcanoes'
+        AND vol.metadata->>'status' != 'Holocene'
+      CROSS JOIN LATERAL (
+        SELECT position FROM observations WHERE entity_id = vol.id ORDER BY ts DESC LIMIT 1
+      ) o_vol
+      WHERE ST_DWithin(rs.position::geography, o_vol.position::geography, 300000)
+    )
+    -- Combine all correlations.
+    SELECT
+      ne.sensor_id AS entity_id,
+      ne.sensor_name AS name,
+      ne.sensor_external_id AS external_id,
+      'radiation' AS layer_type,
+      0.0 AS lat, 0.0 AS lon, 0.0 AS altitude_m, NOW() AS ts,
+      ne.cpm_value,
+      ne.hazard_name,
+      ne.hazard_type,
+      ne.hazard_severity,
+      ne.distance_km,
+      ne.hazard_external_id
+    FROM (
+      SELECT * FROM nearby_earthquakes
+      UNION ALL
+      SELECT * FROM nearby_conflicts
+      UNION ALL
+      SELECT * FROM nearby_volcanoes
+    ) ne
+    ORDER BY CAST(ne.cpm_value AS float) DESC, CAST(ne.distance_km AS int) ASC
+    LIMIT 30
+
+ai:
+  enabled: true
+  operations:
+    - name: radiation_hazard_assessment
+      tags: [osint, radiation, nuclear, earthquake, conflict, volcano, cross-layer]
+      prompt: |
+        You are a nuclear safety and radiological threat analyst. Your assessments inform public safety decisions.
+
+        RADIATION ANOMALY CORRELATION: {{.RecordCount}} radiation sensors detected near
+        active hazards (earthquakes, conflicts, volcanoes) within 300km (last {{.Lookback}}).
+
+        Correlation data:
+        {{range .Records}}
+        - SENSOR: {{.EntityName}} (ID: {{.ExternalID}}) | Reading: {{index .Metadata "cpm_value"}} CPM
+          HAZARD: {{index .Metadata "hazard_name"}} (ref: {{index .Metadata "hazard_external_id"}}) (type: {{index .Metadata "hazard_type"}}, severity: {{index .Metadata "hazard_severity"}})
+          Distance: {{index .Metadata "distance_km"}}km
+        {{end}}
+
+        Radiation reference (CPM): 0-50 normal background, 50-100 slightly elevated,
+        100-200 elevated (investigate), 200+ high (concern), 1000+ emergency.
+
+        CRITICAL: When the same sensor appears correlated with multiple hazards, produce ONE consolidated assessment for that sensor that considers ALL nearby hazards together. Do not produce duplicate entries for the same sensor.
+
+        Use your world knowledge to identify if the sensor is near any known nuclear power plants, research reactors, or nuclear fuel facilities. Factor proximity to known nuclear sites into your assessment — a reading of 174 CPM is far more concerning 50km from a nuclear plant after an earthquake than 300km from a dormant volcano.
+
+        A reading of 100-200 CPM is in the "investigate" range but is often normal background for certain geographic areas (e.g., granite-rich regions, high altitude, certain soil types). State whether the reading is likely explainable by natural background or warrants concern.
+
+        For each sensor (consolidated across all its correlated hazards), assess:
+        1. Is the radiation reading anomalous or within normal background for that geographic area?
+        2. Could any of the nearby hazards explain elevated readings?
+           - Earthquake: possible nuclear facility damage, radon release
+           - Conflict: depleted uranium munitions, nuclear facility targeting
+           - Volcano: natural radon/thoron release from magma movement
+        3. Are there known nuclear facilities nearby that change the risk profile?
+        4. Risk to nearby population
+        5. Alert level: normal/watch/elevated/alert/emergency
+
+        Each assessment MUST be 2-3 sentences explaining your reasoning chain — what the reading means in context, why you believe it is or is not anomalous, and what action (if any) is warranted.
+
+        Respond with JSON matching this schema:
+        {{.OutputSchema}}
+
+      output_schema:
+        type: object
+        required: [correlations, summary]
+        properties:
+          summary:
+            type: string
+          correlations:
+            type: array
+            items:
+              type: object
+              required: [sensor_name, hazard_name, alert_level, assessment, confidence, is_anomalous]
+              properties:
+                sensor_name: { type: string }
+                cpm_reading: { type: number }
+                hazard_name: { type: string }
+                hazard_type:
+                  type: string
+                  enum: [earthquake, conflict, volcano]
+                distance_km: { type: number }
+                alert_level:
+                  type: string
+                  enum: [normal, watch, elevated, alert, emergency]
+                assessment: { type: string }
+                confidence:
+                  type: string
+                  enum: [low, moderate, high]
+                is_anomalous: { type: boolean }
+                nearby_nuclear_facilities: { type: string }
+                entity_external_id: { type: string }
+                hazard_external_id: { type: string }
+      max_tokens: 3000
+      temperature: 0.1
+      output:
+        store_insights: true
+        insight_type: "radiation_anomaly"
+        results_path: "correlations"
+        ref_fields:
+          - field: "hazard_external_id"
+            layer_type: "earthquakes"
+          - field: "hazard_external_id"
+            layer_type: "conflict_events"
+          - field: "hazard_external_id"
+            layer_type: "volcanoes"
+        websocket_push: true
+        retention: "336h"

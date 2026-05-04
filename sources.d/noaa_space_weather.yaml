@@ -1,0 +1,124 @@
+# sources.d/noaa_space_weather.yaml
+# NOAA SWPC Space Weather Scales — Radio Blackout (R), Solar Radiation (S),
+# Geomagnetic Storm (G) severity levels on a 0-5 scale.
+# Source: https://services.swpc.noaa.gov/products/noaa-scales.json
+# Auth: None required
+# Entity type: global_indicator (no lat/lon — rendered as HUD overlay)
+schema_version: 2
+
+name: noaa_space_weather
+labels:
+  category: space_weather
+  priority: medium
+
+# --- Identity ---
+source_type: noaa_space_weather
+layer_type: space_weather
+display_name: "Space Weather"
+entity_type: global_indicator
+
+# --- Ingestion ---
+transport:
+  type: http_poll
+  url: "https://services.swpc.noaa.gov/products/noaa-scales.json"
+  method: GET
+  headers:
+    Accept: "application/json"
+  timeout: "10s"
+  interval: "180s"
+
+# --- Response Parsing ---
+# noaa-scales.json returns a JSON object keyed by time index:
+#   {"0": {current}, "1": {+1 day forecast}, "-1": {previous}, ...}
+# With no records_path, the entire object becomes a single record.
+parser:
+  format: json
+  max_records: 1
+
+# --- Entity Mapping (CEL) ---
+# Singleton entity — one entity represents all space weather scales
+entity:
+  external_id: '"noaa_space_weather"'
+  name: '"NOAA Space Weather Scales"'
+  metadata:
+    source: '"NOAA SWPC"'
+    description: '"R/S/G storm severity scales from NOAA Space Weather Prediction Center"'
+
+# --- Observation Mapping (CEL) ---
+# No lat/lon needed for global_indicator entity_type
+observation:
+  timestamp: 'now()'
+  metadata:
+    r_scale: 'string(record["0"].R.Scale)'
+    r_text: 'string(record["0"].R.Text)'
+    s_scale: 'string(record["0"].S.Scale)'
+    s_text: 'string(record["0"].S.Text)'
+    g_scale: 'string(record["0"].G.Scale)'
+    g_text: 'string(record["0"].G.Text)'
+    date_stamp: 'string(record["0"].DateStamp)'
+    time_stamp: 'string(record["0"].TimeStamp)'
+  content_hash: >
+    string(record["0"].R.Scale) + "_" + string(record["0"].S.Scale) + "_" + string(record["0"].G.Scale) + "_" + string(record["0"].DateStamp) + "_" + string(record["0"].TimeStamp)
+
+# --- Recording ---
+recording:
+  mode: dedupe
+
+# --- Cache ---
+cache:
+  ttl: "300s"
+
+# --- Indicator Configuration ---
+# CEL expressions can override the default level/summary computation:
+#   level_expr: CEL string, variable "value" (string) → returns int level
+#   summary_expr: CEL string, variables "level" (int), "metadata" (map) → returns string
+# Example summary_expr:
+#   summary_expr: 'level >= 5 ? "Extreme" : level >= 4 ? "Severe" : level >= 3 ? "Strong" : level >= 2 ? "Moderate" : level >= 1 ? "Minor Activity" : "Quiet"'
+# When omitted, defaults are used: int(value) clamped to max_level, standard severity labels.
+indicator:
+  values:
+    - key: r_scale
+      label: "Radio Blackout"
+      source_field: r_scale
+      max_level: 5
+    - key: s_scale
+      label: "Solar Radiation"
+      source_field: s_scale
+      max_level: 5
+    - key: g_scale
+      label: "Geomagnetic Storm"
+      source_field: g_scale
+      max_level: 5
+# --- Display ---
+display:
+  icon:
+    shape: dot
+    rotatable: false
+    interpolation: false
+    scale: 1.0
+  trail:
+    color: "#ffcc00"
+    width: 1.0
+    opacity: 0.5
+  style:
+    color: "#ffcc00"
+    point_size: 1
+  field_renderers:
+    - keys: [r_scale, r_text]
+      label: "RADIO BLACKOUT"
+      format:
+        type: string
+        prefix: "R"
+      priority: 0
+    - keys: [s_scale, s_text]
+      label: "SOLAR RADIATION"
+      format:
+        type: string
+        prefix: "S"
+      priority: 1
+    - keys: [g_scale, g_text]
+      label: "GEOMAGNETIC"
+      format:
+        type: string
+        prefix: "G"
+      priority: 2

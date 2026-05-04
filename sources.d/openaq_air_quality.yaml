@@ -1,0 +1,183 @@
+# sources.d/openaq_air_quality.yaml
+# OpenAQ — Global Air Quality Monitoring Network (PM2.5)
+# Source: https://api.openaq.org/v3/parameters/2/latest
+# Auth: REQUIRED — Free API key from https://explore.openaq.org/register
+# Format: JSON paginated response with measurement objects
+#
+# OpenAQ v3 is the current API version. The v1 and v2 endpoints have been
+# retired (410 Gone) as of 2024. A free API key is required and must be
+# passed via the X-API-Key header.
+#
+# To enable this source:
+#   1. Register at https://explore.openaq.org/register
+#   2. Copy your API key
+#   3. Set the environment variable: RESPONDENT_OPENAQ_API_KEY=<your-key>
+#   4. Change `enabled: false` to `enabled: true` below
+#
+# The endpoint /v3/parameters/2/latest fetches the most recent PM2.5
+# readings (parameter ID 2) across all global monitoring stations.
+# Each record contains the sensor value, location coordinates, and
+# station metadata.
+schema_version: 2
+
+name: openaq_air_quality
+labels:
+  category: environmental
+  priority: medium
+
+# --- Identity ---
+source_type: openaq_air_quality
+layer_type: air_quality
+display_name: "Air Quality (PM2.5)"
+
+enabled: true
+
+filtering: viewport
+
+geo_cache:
+  overfetch_ratio: 2.0
+  alive_ratio_threshold: 0.5
+  gc_batch_size: 500
+
+# --- Ingestion ---
+transport:
+  type: http_poll
+  url: "https://api.openaq.org/v3/parameters/2/latest?limit=1000"
+  method: GET
+  headers:
+    Accept: "application/json"
+  auth:
+    type: api_key
+    header: "X-API-Key"
+    env_var: "OPENAQ_API_KEY"
+  timeout: "20s"
+  interval: "900s"  # 15 minutes
+  max_response_bytes: 10485760  # 10MB
+  retry:
+    max_attempts: 3
+    backoff: "exponential"
+    initial_delay: "2s"
+    max_delay: "30s"
+  pagination:
+    type: page_number
+    page_param: "page"
+    size_param: "limit"
+    size: 1000
+    max_pages: 5
+
+# --- Response Parsing ---
+# OpenAQ v3 returns: { "meta": {...}, "results": [...] }
+parser:
+  format: json
+  records_path: "results"
+  max_records: 5000
+
+# --- Record Filtering (CEL) ---
+# Filter out records with missing coordinates.
+# Each result has a nested coordinates object with latitude and longitude.
+filter: >
+  has(record.coordinates)
+  && has(record.coordinates.latitude) && has(record.coordinates.longitude)
+  && record.coordinates.latitude != null && record.coordinates.longitude != null
+  && double(record.coordinates.latitude) >= -90.0 && double(record.coordinates.latitude) <= 90.0
+  && double(record.coordinates.longitude) >= -180.0 && double(record.coordinates.longitude) <= 180.0
+  && has(record.value)
+
+# --- Entity Mapping (CEL) ---
+entity:
+  external_id: >
+    has(record.locationsId) ? string(record.locationsId) + "_" + string(record.sensorsId) : string(record.sensorsId)
+  name: >
+    has(record.value) ? "PM2.5 " + string(record.value) + " µg/m³" : "PM2.5 Station"
+  metadata:
+    pm25: >
+      has(record.value) ? string(record.value) : ""
+    aqi: >
+      has(record.value) ? (
+        double(record.value) <= 12.0 ? "Good"
+        : double(record.value) <= 35.4 ? "Moderate"
+        : double(record.value) <= 55.4 ? "Unhealthy (Sensitive)"
+        : double(record.value) <= 150.4 ? "Unhealthy"
+        : double(record.value) <= 250.4 ? "Very Unhealthy"
+        : "Hazardous"
+      ) : "Unknown"
+    location_name: >
+      has(record.locationsId) ? string(record.locationsId) : ""
+    sensor_id: >
+      has(record.sensorsId) ? string(record.sensorsId) : ""
+
+# --- Observation Mapping (CEL) ---
+observation:
+  latitude: >
+    double(record.coordinates.latitude)
+  longitude: >
+    double(record.coordinates.longitude)
+  altitude: "0.0"
+  timestamp: >
+    has(record.datetime) && has(record.datetime.utc) ? parse_iso8601(record.datetime.utc) : now()
+  velocity: {}
+  metadata:
+    pm25: >
+      has(record.value) ? string(record.value) : ""
+    aqi: >
+      has(record.value) ? (
+        double(record.value) <= 12.0 ? "Good"
+        : double(record.value) <= 35.4 ? "Moderate"
+        : double(record.value) <= 55.4 ? "Unhealthy (Sensitive)"
+        : double(record.value) <= 150.4 ? "Unhealthy"
+        : double(record.value) <= 250.4 ? "Very Unhealthy"
+        : "Hazardous"
+      ) : "Unknown"
+  content_hash: ""
+
+# --- Recording ---
+recording:
+  mode: append
+
+# --- Cache ---
+cache:
+  ttl: "1800s"  # 30 minutes — survives one missed poll
+
+# --- Display ---
+display:
+  icon:
+    shape: cloud
+    rotatable: false
+    interpolation: false
+    scale: 1.0
+  trail:
+    color: "#88cc00"
+    width: 1.0
+    opacity: 0.7
+  style:
+    color: "#88cc00"
+    point_size: 6
+  field_renderers:
+    - keys: [pm25]
+      label: "PM2.5"
+      format:
+        type: float
+        precision: 1
+        suffix: " µg/m³"
+      priority: 0
+    - keys: [aqi]
+      label: "AQI CATEGORY"
+      format:
+        type: string
+        transform: upper
+      priority: 1
+    - keys: [location_name]
+      label: "LOCATION ID"
+      format:
+        type: string
+      priority: 2
+    - keys: [sensor_id]
+      label: "SENSOR"
+      format:
+        type: string
+      priority: 3
+
+# --- History (per-layer time range limits) ---
+history:
+  max_lookback: "2160h"    # 90 days — air quality trends are useful over weeks
+  max_range_span: "168h"   # 7 days per query window

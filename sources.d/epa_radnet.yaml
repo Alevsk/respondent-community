@@ -1,0 +1,325 @@
+# sources.d/epa_radnet.yaml
+# EPA RadNet — US Radiation Air Monitoring Network
+# Source: EPA Envirofacts REST API (ERM_SAMPLE table)
+# Auth: None required (public government data)
+# Format: JSON flat array from Envirofacts service
+#
+# The Envirofacts API serves individual tables without joins. ERM_SAMPLE contains
+# sample collection records with loc_num (location ID), mat_id (medium), and
+# collect_start (date). Coordinates are NOT in the API response — a lookup table
+# maps loc_num to city centroid lat/lon for the ~140 active fixed air monitors.
+#
+# Near-real-time gamma data is available per-station at:
+#   https://radnet.epa.gov/cdx-radnet-rest/api/rest/csv/{year}/fixed/{state}/{city}
+# but that requires per-station polling which doesn't fit the declarative model.
+schema_version: 1
+
+name: epa_radnet
+labels:
+  category: "nuclear"
+  priority: "high"
+
+# --- Identity ---
+source_type: epa_radnet
+layer_type: radiation_us
+display_name: "EPA RadNet"
+
+# --- Operational Controls ---
+enabled: true
+
+# Static coordinate lookup for RadNet fixed air monitoring stations.
+# Coordinates are city centroids — the EPA historically tracked stations by
+# city centroid rather than exact GPS coordinates.
+# This covers the primary fixed air monitors across all 50 states + DC + PR.
+lookup_tables:
+  - name: "stations"
+    key_field: "loc_num"
+    entries:
+      # ── Alabama ──
+      - { loc_num: "1", lat: 32.3668, lon: -86.3000, name: "Montgomery, AL" }
+      - { loc_num: "2", lat: 33.5207, lon: -86.8025, name: "Birmingham, AL" }
+      - { loc_num: "3", lat: 30.6954, lon: -88.0399, name: "Mobile, AL" }
+      - { loc_num: "5", lat: 31.2232, lon: -85.3905, name: "Dothan, AL" }
+      # ── Alaska ──
+      - { loc_num: "37", lat: 64.8378, lon: -147.7164, name: "Fairbanks, AK" }
+      - { loc_num: "79", lat: 61.2181, lon: -149.9003, name: "Anchorage, AK" }
+      - { loc_num: "2727", lat: 58.3005, lon: -134.4197, name: "Juneau, AK" }
+      # ── Arizona ──
+      - { loc_num: "155", lat: 33.4484, lon: -112.0740, name: "Phoenix, AZ" }
+      - { loc_num: "262", lat: 32.2226, lon: -110.9747, name: "Tucson, AZ" }
+      - { loc_num: "1107", lat: 32.6927, lon: -114.6277, name: "Yuma, AZ" }
+      # ── Arkansas ──
+      - { loc_num: "51", lat: 34.7465, lon: -92.2896, name: "Little Rock, AR" }
+      - { loc_num: "179", lat: 36.0822, lon: -94.1719, name: "Fayetteville, AR" }
+      # ── California ──
+      - { loc_num: "48", lat: 34.0522, lon: -118.2437, name: "Los Angeles, CA" }
+      - { loc_num: "131", lat: 37.7749, lon: -122.4194, name: "San Francisco, CA" }
+      - { loc_num: "132", lat: 38.5816, lon: -121.4944, name: "Sacramento, CA" }
+      - { loc_num: "139", lat: 37.8716, lon: -122.2727, name: "Berkeley, CA" }
+      - { loc_num: "222", lat: 40.8021, lon: -124.1637, name: "Eureka, CA" }
+      - { loc_num: "2963", lat: 36.7378, lon: -119.7871, name: "Fresno, CA" }
+      # ── Colorado ──
+      - { loc_num: "80", lat: 39.7392, lon: -104.9903, name: "Denver, CO" }
+      # ── Connecticut ──
+      - { loc_num: "24", lat: 41.7658, lon: -72.6734, name: "Hartford, CT" }
+      # ── Delaware ──
+      - { loc_num: "92", lat: 39.7391, lon: -75.5398, name: "Wilmington, DE" }
+      - { loc_num: "516", lat: 39.1582, lon: -75.5244, name: "Dover, DE" }
+      # ── District of Columbia ──
+      - { loc_num: "23", lat: 38.9072, lon: -77.0369, name: "Washington, DC" }
+      # ── Florida ──
+      - { loc_num: "6", lat: 30.4383, lon: -84.2807, name: "Tallahassee, FL" }
+      - { loc_num: "7", lat: 25.7617, lon: -80.1918, name: "Miami, FL" }
+      - { loc_num: "9", lat: 30.3322, lon: -81.6557, name: "Jacksonville, FL" }
+      - { loc_num: "77", lat: 27.9506, lon: -82.4572, name: "Tampa, FL" }
+      - { loc_num: "487", lat: 28.5383, lon: -81.3792, name: "Orlando, FL" }
+      # ── Georgia ──
+      - { loc_num: "10", lat: 33.7490, lon: -84.3880, name: "Atlanta, GA" }
+      - { loc_num: "11", lat: 32.0809, lon: -81.0912, name: "Savannah, GA" }
+      - { loc_num: "13", lat: 33.4735, lon: -82.0105, name: "Augusta, GA" }
+      # ── Hawaii ──
+      - { loc_num: "75", lat: 21.3069, lon: -157.8583, name: "Honolulu, HI" }
+      # ── Idaho ──
+      - { loc_num: "39", lat: 43.4926, lon: -112.0401, name: "Idaho Falls, ID" }
+      - { loc_num: "186", lat: 43.6150, lon: -116.2023, name: "Boise, ID" }
+      # ── Illinois ──
+      - { loc_num: "111", lat: 41.8781, lon: -87.6298, name: "Chicago, IL" }
+      # ── Indiana ──
+      - { loc_num: "112", lat: 39.7684, lon: -86.1581, name: "Indianapolis, IN" }
+      # ── Iowa ──
+      - { loc_num: "119", lat: 41.5868, lon: -93.6250, name: "Des Moines, IA" }
+      # ── Kansas ──
+      - { loc_num: "159", lat: 37.6872, lon: -97.3301, name: "Wichita, KS" }
+      - { loc_num: "187", lat: 39.0473, lon: -95.6752, name: "Topeka, KS" }
+      # ── Kentucky ──
+      - { loc_num: "109", lat: 38.2527, lon: -85.7585, name: "Louisville, KY" }
+      - { loc_num: "348", lat: 38.2009, lon: -84.8733, name: "Frankfort, KY" }
+      # ── Louisiana ──
+      - { loc_num: "45", lat: 29.9511, lon: -90.0715, name: "New Orleans, LA" }
+      - { loc_num: "2738", lat: 30.4515, lon: -91.1871, name: "Baton Rouge, LA" }
+      # ── Maine ──
+      - { loc_num: "108", lat: 43.6591, lon: -70.2568, name: "Portland, ME" }
+      - { loc_num: "189", lat: 44.3106, lon: -69.7795, name: "Augusta, ME" }
+      # ── Maryland ──
+      - { loc_num: "97", lat: 39.2904, lon: -76.6122, name: "Baltimore, MD" }
+      # ── Massachusetts ──
+      - { loc_num: "33", lat: 42.3601, lon: -71.0589, name: "Boston, MA" }
+      - { loc_num: "333", lat: 42.2626, lon: -71.8023, name: "Worcester, MA" }
+      # ── Michigan ──
+      - { loc_num: "41", lat: 42.3314, lon: -83.0458, name: "Detroit, MI" }
+      - { loc_num: "76", lat: 42.9634, lon: -85.6681, name: "Grand Rapids, MI" }
+      - { loc_num: "135", lat: 42.7325, lon: -84.5555, name: "Lansing, MI" }
+      # ── Minnesota ──
+      - { loc_num: "86", lat: 44.9778, lon: -93.2650, name: "Minneapolis/St. Paul, MN" }
+      # ── Mississippi ──
+      - { loc_num: "100", lat: 32.2988, lon: -90.1848, name: "Jackson, MS" }
+      # ── Missouri ──
+      - { loc_num: "47", lat: 38.5767, lon: -92.1735, name: "Jefferson City, MO" }
+      - { loc_num: "127", lat: 39.0997, lon: -94.5786, name: "Kansas City, MO" }
+      - { loc_num: "142", lat: 38.6270, lon: -90.1994, name: "St. Louis, MO" }
+      # ── Montana ──
+      - { loc_num: "118", lat: 46.5884, lon: -112.0245, name: "Helena, MT" }
+      - { loc_num: "366", lat: 45.7833, lon: -108.5007, name: "Billings, MT" }
+      # ── Nebraska ──
+      - { loc_num: "130", lat: 41.2565, lon: -95.9345, name: "Omaha, NE" }
+      - { loc_num: "192", lat: 40.8136, lon: -96.7026, name: "Lincoln, NE" }
+      # ── Nevada ──
+      - { loc_num: "43", lat: 36.1699, lon: -115.1398, name: "Las Vegas, NV" }
+      - { loc_num: "429", lat: 39.5296, lon: -119.8138, name: "Reno, NV" }
+      # ── New Hampshire ──
+      - { loc_num: "120", lat: 42.9956, lon: -71.4548, name: "Manchester, NH" }
+      - { loc_num: "193", lat: 43.2081, lon: -71.5376, name: "Concord, NH" }
+      # ── New Jersey ──
+      - { loc_num: "55", lat: 40.2206, lon: -74.7699, name: "Trenton, NJ" }
+      - { loc_num: "2747", lat: 40.5187, lon: -74.4121, name: "Edison, NJ" }
+      # ── New Mexico ──
+      - { loc_num: "117", lat: 35.0844, lon: -106.6504, name: "Albuquerque, NM" }
+      - { loc_num: "149", lat: 35.6870, lon: -105.9378, name: "Santa Fe, NM" }
+      # ── New York ──
+      - { loc_num: "25", lat: 40.7128, lon: -74.0060, name: "New York City, NY" }
+      - { loc_num: "115", lat: 42.8864, lon: -78.8784, name: "Buffalo, NY" }
+      - { loc_num: "116", lat: 43.0481, lon: -76.1474, name: "Syracuse, NY" }
+      - { loc_num: "181", lat: 42.6526, lon: -73.7562, name: "Albany, NY" }
+      # ── North Carolina ──
+      - { loc_num: "101", lat: 35.2271, lon: -80.8431, name: "Charlotte, NC" }
+      - { loc_num: "249", lat: 35.7796, lon: -78.6382, name: "Raleigh, NC" }
+      - { loc_num: "2729", lat: 36.0726, lon: -79.7920, name: "Greensboro, NC" }
+      # ── North Dakota ──
+      - { loc_num: "58", lat: 46.8083, lon: -100.7837, name: "Bismarck, ND" }
+      # ── Ohio ──
+      - { loc_num: "46", lat: 39.1031, lon: -84.5120, name: "Cincinnati, OH" }
+      - { loc_num: "113", lat: 41.4993, lon: -81.6944, name: "Cleveland, OH" }
+      - { loc_num: "146", lat: 39.9612, lon: -82.9988, name: "Columbus, OH" }
+      - { loc_num: "196", lat: 41.6528, lon: -83.5379, name: "Toledo, OH" }
+      # ── Oklahoma ──
+      - { loc_num: "96", lat: 35.4676, lon: -97.5164, name: "Oklahoma City, OK" }
+      # ── Oregon ──
+      - { loc_num: "110", lat: 45.5051, lon: -122.6750, name: "Portland, OR" }
+      # ── Pennsylvania ──
+      - { loc_num: "27", lat: 40.2732, lon: -76.8867, name: "Harrisburg, PA" }
+      - { loc_num: "49", lat: 40.4406, lon: -79.9959, name: "Pittsburgh, PA" }
+      - { loc_num: "114", lat: 39.9526, lon: -75.1652, name: "Philadelphia, PA" }
+      # ── Puerto Rico ──
+      - { loc_num: "126", lat: 18.4655, lon: -66.1057, name: "San Juan, PR" }
+      # ── Rhode Island ──
+      - { loc_num: "40", lat: 41.8240, lon: -71.4128, name: "Providence, RI" }
+      # ── South Carolina ──
+      - { loc_num: "128", lat: 32.7765, lon: -79.9311, name: "Charleston, SC" }
+      - { loc_num: "145", lat: 34.0007, lon: -81.0348, name: "Columbia, SC" }
+      # ── South Dakota ──
+      - { loc_num: "136", lat: 44.0805, lon: -103.2310, name: "Rapid City, SD" }
+      - { loc_num: "377", lat: 44.3683, lon: -100.3510, name: "Pierre, SD" }
+      # ── Tennessee ──
+      - { loc_num: "71", lat: 35.0456, lon: -85.3097, name: "Chattanooga, TN" }
+      - { loc_num: "137", lat: 35.1495, lon: -90.0490, name: "Memphis, TN" }
+      - { loc_num: "141", lat: 35.9606, lon: -83.9207, name: "Knoxville, TN" }
+      - { loc_num: "180", lat: 36.1627, lon: -86.7816, name: "Nashville, TN" }
+      - { loc_num: "2748", lat: 36.0104, lon: -84.2696, name: "Oak Ridge, TN" }
+      # ── Texas ──
+      - { loc_num: "44", lat: 31.7619, lon: -106.4850, name: "El Paso, TX" }
+      - { loc_num: "105", lat: 30.2672, lon: -97.7431, name: "Austin, TX" }
+      - { loc_num: "106", lat: 32.7767, lon: -96.7970, name: "Dallas, TX" }
+      - { loc_num: "368", lat: 32.7555, lon: -97.3308, name: "Fort Worth, TX" }
+      - { loc_num: "500", lat: 35.2220, lon: -101.8313, name: "Amarillo, TX" }
+      # ── Utah ──
+      - { loc_num: "107", lat: 40.7608, lon: -111.8910, name: "Salt Lake City, UT" }
+      # ── Vermont ──
+      - { loc_num: "129", lat: 44.4759, lon: -73.2121, name: "Burlington, VT" }
+      - { loc_num: "312", lat: 44.2601, lon: -72.5754, name: "Montpelier, VT" }
+      # ── Virginia ──
+      - { loc_num: "88", lat: 37.0871, lon: -76.4730, name: "Newport News, VA" }
+      - { loc_num: "121", lat: 36.8508, lon: -76.2859, name: "Norfolk, VA" }
+      - { loc_num: "158", lat: 37.4138, lon: -79.1422, name: "Lynchburg, VA" }
+      - { loc_num: "2103", lat: 37.5407, lon: -77.4360, name: "Richmond, VA" }
+      # ── Washington ──
+      - { loc_num: "28", lat: 46.2856, lon: -119.2845, name: "Richland, WA" }
+      - { loc_num: "42", lat: 47.6062, lon: -122.3321, name: "Seattle, WA" }
+      - { loc_num: "125", lat: 47.6588, lon: -117.4260, name: "Spokane, WA" }
+      - { loc_num: "351", lat: 47.0379, lon: -122.9007, name: "Olympia, WA" }
+      # ── West Virginia ──
+      - { loc_num: "102", lat: 38.3498, lon: -81.6326, name: "Charleston, WV" }
+      # ── Wisconsin ──
+      - { loc_num: "95", lat: 43.0389, lon: -87.9065, name: "Milwaukee, WI" }
+      - { loc_num: "199", lat: 43.0731, lon: -89.4012, name: "Madison, WI" }
+      # ── Wyoming ──
+      - { loc_num: "35", lat: 41.3114, lon: -105.5911, name: "Laramie, WY" }
+      - { loc_num: "344", lat: 41.1400, lon: -104.8202, name: "Cheyenne, WY" }
+
+transport:
+  type: http_poll
+  # Query ERM_SAMPLE for recent air filter samples (mat_id = AIR-CHARCOAL or AIR-PARTICULATE).
+  # The Envirofacts API returns a flat JSON array. Sorted by most recent first.
+  # Rows 0:200 fetches up to 200 most recent sample records.
+  url: "https://data.epa.gov/efservice/ERM_SAMPLE/mat_id/AIR-CHARCOAL/ROWS/0:200/JSON"
+  method: GET
+  headers:
+    Accept: "application/json"
+  timeout: "30s"
+  interval: "3600s"  # 1 hour
+  max_response_bytes: 5242880  # 5MB
+  retry:
+    max_attempts: 3
+    backoff: "exponential"
+    initial_delay: "5s"
+    max_delay: "60s"
+
+# --- Response Parsing ---
+# Envirofacts returns a flat JSON array: [{...}, {...}, ...]
+parser:
+  format: json
+  max_records: 5000
+
+# --- Record Filtering (CEL) ---
+# Only process samples from stations we have coordinates for
+filter: >
+  has(record.loc_num) && has_lookup("stations", string(record.loc_num))
+
+# --- Entity Mapping (CEL) ---
+entity:
+  external_id: >
+    "radnet_" + string(record.loc_num)
+  name: >
+    lookup("stations", string(record.loc_num), "name")
+  metadata:
+    station_id: >
+      string(record.loc_num)
+    medium: >
+      has(record.mat_id) ? record.mat_id : ""
+    sample_id: >
+      has(record.samp_id) ? string(record.samp_id) : ""
+    project: >
+      has(record.proj_num) ? string(record.proj_num) : ""
+
+# --- Observation Mapping (CEL) ---
+observation:
+  latitude: >
+    lookup("stations", string(record.loc_num), "lat")
+  longitude: >
+    lookup("stations", string(record.loc_num), "lon")
+  altitude: "0.0"
+  timestamp: >
+    now()
+  event_time: >
+    parse_datetime(record.collect_start, "2006-01-02")
+  velocity: {}
+  metadata:
+    medium: >
+      has(record.mat_id) ? record.mat_id : ""
+    sample_id: >
+      has(record.samp_id) ? string(record.samp_id) : ""
+    collection_date: >
+      has(record.collect_start) ? record.collect_start : ""
+    station_name: >
+      lookup("stations", string(record.loc_num), "name")
+  content_hash: >
+    string(record.samp_num)
+
+# --- Recording ---
+recording:
+  mode: dedupe  # Only record new samples (keyed by samp_num)
+
+# --- Cache ---
+cache:
+  ttl: "7200s"  # 2 hours — survive a missed hourly poll
+
+# --- Display ---
+display:
+  icon:
+    shape: radiation
+    rotatable: false
+    interpolation: false
+    scale: 1.0
+  trail:
+    color: "#ffcc00"
+    width: 1.0
+    opacity: 0.7
+  style:
+    color: "#ffcc00"
+    point_size: 6
+  field_renderers:
+    - keys: [station_name]
+      label: "STATION"
+      format:
+        type: string
+      priority: 0
+    - keys: [medium]
+      label: "MEDIUM"
+      format:
+        type: string
+        transform: upper
+      priority: 1
+    - keys: [collection_date]
+      label: "COLLECTED"
+      format:
+        type: string
+      priority: 2
+    - keys: [sample_id]
+      label: "SAMPLE ID"
+      format:
+        type: string
+      priority: 3
+
+# --- History ---
+history:
+  max_lookback: "8760h"   # 1 year
+  max_range_span: "168h"  # 7 days per query window

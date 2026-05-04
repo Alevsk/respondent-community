@@ -1,0 +1,195 @@
+# sources.d/purpleair_air_quality.yaml
+# PurpleAir — Community Air Quality Sensors (PM2.5)
+# Source: https://api.purpleair.com/v1/sensors
+# Auth: REQUIRED — Free API key from https://develop.purpleair.com/
+# Format: JSON with array-of-arrays (fields[] + data[][])
+#
+# PurpleAir operates 30,000+ low-cost PM2.5 sensors worldwide.
+# The /v1/sensors endpoint returns all sensors matching the query
+# in a columnar format: a `fields` array of column names and a
+# `data` array of value arrays (same layout as OpenSky).
+#
+# To enable this source:
+#   1. Register at https://develop.purpleair.com/
+#   2. Create a READ API key
+#   3. Set the environment variable: RESPONDENT_PURPLEAIR_API_KEY=<your-key>
+#   4. Change `enabled: false` to `enabled: true` below
+#
+# Query params narrow the result set:
+#   - fields: only the columns we need
+#   - location_type=0: outdoor sensors only
+#   - max_age=3600: only sensors that reported in the last hour
+#
+schema_version: 2
+
+name: purpleair_air_quality
+labels:
+  category: environmental
+  priority: medium
+
+# --- Identity ---
+source_type: purpleair_air_quality
+layer_type: air_quality
+display_name: "Air Quality — PurpleAir (PM2.5)"
+
+enabled: true
+
+filtering: viewport
+
+geo_cache:
+  overfetch_ratio: 2.0
+  alive_ratio_threshold: 0.5
+  gc_batch_size: 500
+
+# --- Ingestion ---
+transport:
+  type: http_poll
+  url: "https://api.purpleair.com/v1/sensors?fields=name,latitude,longitude,altitude,pm2.5,humidity,temperature,last_seen&location_type=0&max_age=3600"
+  method: GET
+  headers:
+    Accept: "application/json"
+  auth:
+    type: api_key
+    header: "X-API-Key"
+    env_var: "PURPLEAIR_API_KEY"
+  timeout: "30s"
+  interval: "900s"  # 15 minutes — PurpleAir API has rate limits and point costs
+  max_response_bytes: 52428800  # 50MB — large sensor network
+  retry:
+    max_attempts: 3
+    backoff: "exponential"
+    initial_delay: "2s"
+    max_delay: "30s"
+
+# --- Response Parsing ---
+# PurpleAir returns: { "fields": ["sensor_index", ...], "data": [[123, ...], ...] }
+# The data array contains arrays of values matching the fields order.
+# sensor_index is always the first field even when not requested.
+parser:
+  format: json
+  records_path: "data"
+  max_records: 30000
+  array_columns:
+    - sensor_index       # index 0 — always prepended by the API
+    - last_seen          # index 1
+    - name               # index 2
+    - latitude           # index 3
+    - longitude          # index 4
+    - altitude           # index 5
+    - humidity           # index 6
+    - temperature        # index 7
+    - pm25               # index 8 — field name "pm2.5" in the API
+
+# --- Record Filtering (CEL) ---
+# Filter out sensors with invalid coordinates or missing PM2.5.
+filter: >
+  has(record.latitude) && has(record.longitude)
+  && record.latitude != null && record.longitude != null
+  && double(record.latitude) != 0.0 && double(record.longitude) != 0.0
+  && has(record.pm25) && record.pm25 != null
+
+# --- Entity Mapping (CEL) ---
+entity:
+  external_id: >
+    "pa_" + string(record.sensor_index)
+  name: >
+    has(record.name) && record.name != null ? string(record.name) : "PurpleAir #" + string(record.sensor_index)
+  metadata:
+    pm25: >
+      string(record.pm25)
+    aqi: >
+      double(record.pm25) <= 12.0 ? "Good"
+      : double(record.pm25) <= 35.4 ? "Moderate"
+      : double(record.pm25) <= 55.4 ? "Unhealthy (Sensitive)"
+      : double(record.pm25) <= 150.4 ? "Unhealthy"
+      : double(record.pm25) <= 250.4 ? "Very Unhealthy"
+      : "Hazardous"
+    humidity: >
+      has(record.humidity) && record.humidity != null ? string(record.humidity) : ""
+    temperature: >
+      has(record.temperature) && record.temperature != null ? string(record.temperature) : ""
+    sensor_id: >
+      string(record.sensor_index)
+
+# --- Observation Mapping (CEL) ---
+observation:
+  latitude: >
+    double(record.latitude)
+  longitude: >
+    double(record.longitude)
+  altitude: >
+    has(record.altitude) && record.altitude != null ? double(record.altitude) * 0.3048 : 0.0
+  timestamp: >
+    has(record.last_seen) && record.last_seen != null ? unix_s(record.last_seen) : now()
+  velocity: {}
+  metadata:
+    pm25: >
+      string(record.pm25)
+    aqi: >
+      double(record.pm25) <= 12.0 ? "Good"
+      : double(record.pm25) <= 35.4 ? "Moderate"
+      : double(record.pm25) <= 55.4 ? "Unhealthy (Sensitive)"
+      : double(record.pm25) <= 150.4 ? "Unhealthy"
+      : double(record.pm25) <= 250.4 ? "Very Unhealthy"
+      : "Hazardous"
+    humidity: >
+      has(record.humidity) && record.humidity != null ? string(record.humidity) : ""
+    temperature: >
+      has(record.temperature) && record.temperature != null ? string(record.temperature) : ""
+  content_hash: ""
+
+# --- Recording ---
+recording:
+  mode: append
+
+# --- Cache ---
+cache:
+  ttl: "1800s"  # 30 minutes — survives one missed poll
+
+# --- Display ---
+display:
+  icon:
+    shape: cloud
+    rotatable: false
+    interpolation: false
+    scale: 1.0
+  trail:
+    color: "#88cc00"
+    width: 1.0
+    opacity: 0.7
+  style:
+    color: "#88cc00"
+    point_size: 6
+  field_renderers:
+    - keys: [pm25]
+      label: "PM2.5"
+      format:
+        type: float
+        precision: 1
+        suffix: " µg/m³"
+      priority: 0
+    - keys: [aqi]
+      label: "AQI CATEGORY"
+      format:
+        type: string
+        transform: upper
+      priority: 1
+    - keys: [humidity]
+      label: "HUMIDITY"
+      format:
+        type: float
+        precision: 0
+        suffix: "%"
+      priority: 2
+    - keys: [temperature]
+      label: "TEMPERATURE"
+      format:
+        type: float
+        precision: 0
+        suffix: "°F"
+      priority: 3
+
+# --- History (per-layer time range limits) ---
+history:
+  max_lookback: "2160h"    # 90 days
+  max_range_span: "168h"   # 7 days per query window

@@ -1,0 +1,171 @@
+# sources.d/aprs_fi_stations.yaml
+# APRS.fi Amateur Radio Station Tracking
+# Source: https://aprs.fi/
+# API: https://api.aprs.fi/api/get
+#
+# Displays APRS (Automatic Packet Reporting System) stations reported via
+# the aprs.fi aggregation service. APRS is used by amateur radio operators
+# worldwide for real-time position reporting, weather stations, and messaging.
+#
+# Authentication:
+#   A free API key is required. Register at https://aprs.fi/ and request
+#   a key from your account page (https://aprs.fi/page/api).
+#   Export the key as the APRS_FI_API_KEY environment variable.
+#
+# API notes:
+#   GET /api/get?name=*&what=loc&apikey=KEY&format=json&limit=200
+#     -> returns up to 200 station locations
+#   Response: { "command":"get", "result":"ok", "found":N, "entries":[...] }
+#   Free tier is limited to a few hundred requests per day.
+#
+# Sample record fields from entries[]:
+#   name (callsign), lat, lng, altitude, course, speed, comment,
+#   lasttime, path, symbol, srccall, dstcall, type
+schema_version: 2
+
+name: aprs_fi_stations
+labels:
+  category: radio
+  priority: low
+
+# --- Identity ---
+source_type: aprs_fi_stations
+layer_type: radio_aprs
+display_name: "APRS Radio Stations"
+
+# Disabled by default — requires a free API key from https://aprs.fi/page/api
+enabled: true
+
+# --- Ingestion ---
+transport:
+  type: http_poll
+  url: "https://api.aprs.fi/api/get?name=*&what=loc&apikey=${APRS_FI_API_KEY}&format=json&limit=200"
+  method: GET
+  headers:
+    Accept: "application/json"
+  timeout: "15s"
+  interval: "300s"
+  max_response_bytes: 10485760  # 10MB
+  retry:
+    max_attempts: 3
+    backoff: "exponential"
+    initial_delay: "5s"
+    max_delay: "60s"
+
+# --- Response Parsing ---
+parser:
+  format: json
+  records_path: "entries"
+  max_records: 5000
+
+# --- Record Filtering (CEL) ---
+# Only process records with valid coordinates.
+filter: >
+  has(record.lat) && has(record.lng)
+  && record.lat != "" && record.lng != ""
+
+# --- Entity Mapping (CEL) ---
+entity:
+  external_id: >
+    record.name
+  name: >
+    has(record.comment) && record.comment != ""
+      ? record.name + " — " + record.comment
+      : record.name
+  metadata:
+    callsign: >
+      record.name
+    type: >
+      has(record.type) ? record.type : ""
+    symbol: >
+      has(record.symbol) ? record.symbol : ""
+    path: >
+      has(record.path) ? record.path : ""
+    srccall: >
+      has(record.srccall) ? record.srccall : ""
+    dstcall: >
+      has(record.dstcall) ? record.dstcall : ""
+
+# --- Observation Mapping (CEL) ---
+observation:
+  latitude: >
+    double(record.lat)
+  longitude: >
+    double(record.lng)
+  altitude: >
+    has(record.altitude) ? double(record.altitude) : 0.0
+  timestamp: >
+    now()
+  velocity:
+    heading: >
+      has(record.course) ? double(record.course) : 0.0
+    speed: >
+      has(record.speed) ? double(record.speed) : 0.0
+  metadata:
+    callsign: >
+      record.name
+    speed: >
+      has(record.speed) ? string(record.speed) : ""
+    course: >
+      has(record.course) ? string(record.course) : ""
+    comment: >
+      has(record.comment) ? record.comment : ""
+    symbol: >
+      has(record.symbol) ? record.symbol : ""
+    type: >
+      has(record.type) ? record.type : ""
+  content_hash: ""
+
+# --- Recording ---
+recording:
+  mode: upsert
+
+# --- Cache ---
+cache:
+  ttl: "600s"
+
+# --- Display (consumed by frontend) ---
+display:
+  icon:
+    shape: radio
+    rotatable: false
+    interpolation: false
+    scale: 1.0
+  trail:
+    color: "#00ff88"
+    width: 1.5
+    opacity: 0.7
+  style:
+    color: "#00ff88"
+    point_size: 6
+  field_renderers:
+    - keys: [callsign]
+      label: "CALLSIGN"
+      format:
+        type: string
+        transform: upper
+      priority: 0
+    - keys: [speed]
+      label: "SPEED"
+      format:
+        type: float
+        precision: 1
+        suffix: " km/h"
+      priority: 1
+    - keys: [course]
+      label: "COURSE"
+      format:
+        type: float
+        precision: 0
+        suffix: " deg"
+      priority: 2
+    - keys: [comment]
+      label: "COMMENT"
+      format:
+        type: string
+      priority: 3
+
+# --- History (per-layer time range limits) ---
+history:
+  max_lookback: "48h"
+  max_range_span: "24h"

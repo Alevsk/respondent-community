@@ -1,0 +1,131 @@
+# sources.d/safecast_radiation.yaml
+# Safecast — Crowdsourced Radiation Monitoring Network
+# Source: https://api.safecast.org/measurements.json
+# Auth: None required (CC0 public domain data)
+# Format: JSON flat array of measurement objects
+schema_version: 2
+
+name: safecast_radiation
+labels:
+  category: nuclear
+  priority: medium
+
+# --- Identity ---
+source_type: safecast_radiation
+layer_type: radiation
+display_name: "Safecast Radiation"
+
+filtering: viewport
+
+geo_cache:
+  overfetch_ratio: 2.0
+  alive_ratio_threshold: 0.5
+  gc_batch_size: 500
+
+# --- Ingestion ---
+transport:
+  type: http_poll
+  url: "https://api.safecast.org/measurements.json?limit=1000"
+  method: GET
+  headers:
+    Accept: "application/json"
+  timeout: "15s"
+  interval: "900s"  # 15 minutes
+  max_response_bytes: 10485760  # 10MB
+  retry:
+    max_attempts: 3
+    backoff: "exponential"
+    initial_delay: "2s"
+    max_delay: "30s"
+
+# --- Response Parsing ---
+# Safecast returns a flat JSON array: [{...}, {...}, ...]
+# No records_path needed for a top-level array.
+parser:
+  format: json
+  max_records: 5000
+
+# --- Record Filtering (CEL) ---
+# Filter out records with missing or zero coordinates
+filter: >
+  has(record.latitude) && has(record.longitude)
+  && double(record.latitude) != 0.0 && double(record.longitude) != 0.0
+
+# --- Entity Mapping (CEL) ---
+entity:
+  external_id: >
+    has(record.id) ? string(record.id) : string(record.device_id) + "_" + string(record.latitude) + "_" + string(record.longitude)
+  name: >
+    "Radiation " + string(record.value) + " CPM"
+  metadata:
+    value_cpm: >
+      string(record.value)
+    unit: >
+      has(record.unit) ? record.unit : "cpm"
+    device_id: >
+      has(record.device_id) ? string(record.device_id) : ""
+
+# --- Observation Mapping (CEL) ---
+observation:
+  latitude: >
+    double(record.latitude)
+  longitude: >
+    double(record.longitude)
+  altitude: "0.0"
+  timestamp: >
+    has(record.captured_at) ? parse_rfc3339(record.captured_at) : now()
+  velocity: {}
+  metadata:
+    value_cpm: >
+      string(record.value)
+    unit: >
+      has(record.unit) ? record.unit : "cpm"
+  content_hash: ""
+
+# --- Recording ---
+recording:
+  mode: append
+
+# --- Cache ---
+cache:
+  ttl: "1800s"
+
+# --- Display ---
+display:
+  icon:
+    shape: radiation
+    rotatable: false
+    interpolation: false
+    scale: 1.0
+  trail:
+    color: "#00ff00"
+    width: 1.0
+    opacity: 0.7
+  style:
+    color: "#00ff00"
+    point_size: 6
+  field_renderers:
+    - keys: [value_cpm]
+      label: "RADIATION"
+      format:
+        type: float
+        precision: 1
+        suffix: " CPM"
+      priority: 0
+    - keys: [unit]
+      label: "UNIT"
+      format:
+        type: string
+        transform: upper
+      priority: 1
+    - keys: [device_id]
+      label: "DEVICE"
+      format:
+        type: string
+      priority: 2
+
+
+# --- History (per-layer time range limits) ---
+history:
+  max_lookback: "8760h"    # 1 year — radiation data has long-term analytical value
+  max_range_span: "168h"   # 7 days per query window

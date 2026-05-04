@@ -1,0 +1,178 @@
+# =============================================================================
+# ENVIRONMENTAL CASCADE DETECTION — Fire-to-Air-Quality Correlation
+# =============================================================================
+# Detects active fires that are degrading air quality in nearby areas by
+# spatially correlating NASA FIRMS fire hotspots with OpenAQ/PurpleAir sensors.
+# Identifies smoke plume impacts on population health.
+#
+# Thresholds tuned for sensitivity:
+#   - FRP > 10 MW (moderate fires — catches agricultural burns and wildfires)
+#   - PM2.5 > 35 µg/m³ (Unhealthy for Sensitive Groups and above)
+#   - 200km radius (smoke plumes travel far, especially with wind)
+# =============================================================================
+
+schema_version: 1
+name: environmental_cascade
+display_name: "Environmental Cascade Detection"
+enabled: false # TODO: enable
+
+schedule:
+  interval: "180s"
+
+data:
+  layers: [fires_active, air_quality]
+  lookback: "6h"
+  min_records: 1
+  max_records: 30
+  dedup:
+    window: "2h"
+    key_fields: ["entity_external_id", "sensor_external_id"]
+  sql: |
+    WITH active_fires AS (
+      SELECT e.id, e.name, e.external_id, e.metadata,
+             o.lat, o.lon, o.position, o.ts,
+             -- FRP threshold lowered from 20 to 10 MW to catch moderate fires
+             -- that can still produce significant smoke plumes.
+             CAST(COALESCE(e.metadata->>'frp', '0') AS float) AS frp
+      FROM entities e
+      CROSS JOIN LATERAL (
+        SELECT lat, lon, position, ts
+        FROM observations WHERE entity_id = e.id ORDER BY ts DESC LIMIT 1
+      ) o
+      WHERE e.layer_type = 'fires_active'
+        AND o.ts > NOW() - INTERVAL '6 hours'
+        AND CAST(COALESCE(e.metadata->>'frp', '0') AS float) > 10
+    ),
+    degraded_air AS (
+      SELECT e.id, e.name, e.external_id, e.metadata,
+             o.lat, o.lon, o.position,
+             CAST(COALESCE(e.metadata->>'pm25', '0') AS float) AS pm25,
+             e.metadata->>'aqi' AS aqi_level
+      FROM entities e
+      CROSS JOIN LATERAL (
+        SELECT lat, lon, position
+        FROM observations WHERE entity_id = e.id ORDER BY ts DESC LIMIT 1
+      ) o
+      WHERE e.layer_type = 'air_quality'
+        AND CAST(COALESCE(e.metadata->>'pm25', '0') AS float) > 35
+    )
+    SELECT
+      f.id AS entity_id,
+      f.name,
+      f.external_id AS external_id,
+      'fires_active' AS layer_type,
+      f.lat, f.lon, 0.0 AS altitude_m, f.ts,
+      f.frp::text AS fire_power_mw,
+      f.metadata->>'confidence' AS fire_confidence,
+      f.metadata->>'satellite' AS fire_satellite,
+      a.name AS affected_sensor,
+      a.pm25::text AS pm25_ugm3,
+      a.aqi_level,
+      a.metadata->>'temperature' AS temperature,
+      a.metadata->>'humidity' AS humidity,
+      -- Widened from 100km to 200km — smoke plumes travel hundreds of
+      -- kilometers, especially with prevailing winds.
+      ROUND(ST_Distance(f.position::geography, a.position::geography) / 1000)::text AS distance_km,
+      a.external_id AS sensor_external_id
+    FROM active_fires f
+    JOIN degraded_air a ON ST_DWithin(f.position::geography, a.position::geography, 200000)
+    ORDER BY a.pm25 DESC, f.frp DESC
+    LIMIT 30
+
+ai:
+  enabled: true
+  operations:
+    - name: environmental_impact_assessment
+      tags: [osint, environment, fires, air_quality, health, cross-layer]
+      prompt: |
+        You are an environmental health analyst assessing the public health impact of wildfire smoke on nearby populations.
+
+        ENVIRONMENTAL CASCADE DETECTION: {{.RecordCount}} active fire hotspots correlated
+        with degraded air quality sensors within 200km (last {{.Lookback}}).
+
+        Fire-to-air-quality correlation data:
+        {{range .Records}}
+        - FIRE: {{.EntityName}} (ID: {{.ExternalID}}) | FRP: {{index .Metadata "fire_power_mw"}} MW | Satellite: {{index .Metadata "fire_satellite"}}
+          Position: {{.Lat}}, {{.Lon}}
+          SENSOR: {{index .Metadata "affected_sensor"}} (ref: {{index .Metadata "sensor_external_id"}}) | PM2.5: {{index .Metadata "pm25_ugm3"}} µg/m³ | AQI: {{index .Metadata "aqi_level"}}
+          {{if index .Metadata "temperature"}}Temp: {{index .Metadata "temperature"}}°C | Humidity: {{index .Metadata "humidity"}}%{{end}}
+          Distance: {{index .Metadata "distance_km"}}km
+        {{end}}
+
+        PM2.5 reference: 0-12 Good, 12-35 Moderate, 35-55 Unhealthy(Sensitive), 55-150 Unhealthy, 150-250 Very Unhealthy, 250+ Hazardous.
+        FRP (Fire Radiative Power) reference: <10 MW minor, 10-50 MW moderate, 50-200 MW significant, 200+ MW major.
+
+        PM2.5 HEALTH IMPACT BY CONCENTRATION:
+        - 35-55 µg/m³ (Unhealthy for Sensitive Groups): Children, elderly, and those with respiratory conditions should limit outdoor activity
+        - 55-150 µg/m³ (Unhealthy): Everyone should reduce prolonged outdoor exertion. Schools may restrict outdoor activities.
+        - 150-250 µg/m³ (Very Unhealthy): Health warnings of emergency conditions. Active outdoor activities should be avoided by all.
+        - 250+ µg/m³ (Hazardous): Health alert — everyone may experience serious health effects. Stay indoors. Hospital ERs see surge.
+
+        Use your knowledge of the sensor location to assess population exposure:
+        - Is the affected sensor in a densely populated urban area or a rural/remote location?
+        - Are there hospitals, schools, or vulnerable populations nearby?
+        - What is the likely wind direction carrying smoke toward populated areas?
+        Name the nearest city or populated area when possible.
+
+        Distinguish between fire types based on FRP, location, and satellite:
+        - Agricultural burn: Low FRP (<20MW), regular pattern, cropland regions, seasonal
+        - Wildfire: High/variable FRP, irregular, forested/scrub terrain
+        - Industrial: Point source, urban/industrial zone
+        - Prescribed burn: Moderate FRP, known burn season, managed land
+
+        For each fire-sensor cluster, assess:
+        1. Fire intensity classification and likely fire type (wildfire, agricultural burn, industrial, prescribed burn)
+        2. Air quality health impact on nearby population (provide 2-3 sentence assessments)
+        3. Population exposure level and nearest city or populated area
+        4. Specific public health advisory recommendation
+        5. Smoke plume direction estimate (if wind/weather data available from temperature/humidity)
+        6. Expected duration: short-term (hours) or sustained (days)
+        7. Overall severity: minor/moderate/serious/severe/emergency
+
+        Respond with JSON matching this schema:
+        {{.OutputSchema}}
+
+      output_schema:
+        type: object
+        required: [cascades, summary]
+        properties:
+          summary:
+            type: string
+          cascades:
+            type: array
+            items:
+              type: object
+              required: [fire_name, fire_classification, affected_area, health_impact, severity, population_exposure]
+              properties:
+                fire_name: { type: string }
+                fire_classification:
+                  type: string
+                  enum: [wildfire, agricultural_burn, industrial, prescribed_burn, unknown]
+                fire_power_mw: { type: number }
+                affected_area: { type: string }
+                pm25_reading: { type: number }
+                health_impact: { type: string }
+                population_exposure:
+                  type: string
+                  enum: [low_rural, moderate_suburban, high_urban, critical_dense_urban]
+                nearest_city: { type: string }
+                public_health_advisory: { type: string }
+                expected_duration:
+                  type: string
+                  enum: [hours, days, unknown]
+                severity:
+                  type: string
+                  enum: [minor, moderate, serious, severe, emergency]
+                entity_external_id: { type: string }
+                sensor_external_id: { type: string }
+      max_tokens: 3000
+      temperature: 0.1
+      output:
+        store_insights: true
+        insight_type: "environmental_cascade"
+        results_path: "cascades"
+        ref_fields:
+          - field: "sensor_external_id"
+            layer_type: "air_quality"
+        websocket_push: true
+        retention: "168h"

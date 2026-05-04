@@ -1,0 +1,87 @@
+# Respondent — Example Configuration
+# Copy and modify for your deployment.
+
+database:
+  path: "./respondent.db"          # SQLite file path (created if missing; overridden by RESPONDENT_DATABASE_PATH env var in compose.yaml)
+
+server:
+  port: 8090                       # Single port for API + WebSocket + Earth UI
+
+ingest:
+  sources_dir: "./sources.d"       # Path to source definition YAML files
+
+ai:
+  enabled: false                  # Set to true + configure llm section to enable AI features
+  analysis_dir: "./analysis.d"  # SQLite-compatible analysis definitions
+  workers:
+    enrichment: 2                  # Concurrent enrichment workers
+    analysis: 1                    # Concurrent analysis workers
+
+llm:
+  provider: "zai"
+
+  zai:
+    model: "glm-4.7"
+    max_tokens: 2048
+    base_url: "https://api.z.ai/api/paas/v4"
+    # api_key: set via RESPONDENT_LLM_ZAI_API_KEY env var
+
+# Geocoder configuration for AI geo-enrichment coordinate resolution.
+# Tier 2: Nominatim geocoding API. Tier 3: Country centroid fallback.
+geocoder:
+  provider: "nominatim"
+  nominatim:
+    base_url: "https://nominatim.openstreetmap.org"
+    user_agent: "respondent/1.0 (geospatial-intelligence)"
+  rate_limit:
+    requests_per_second: 1.0
+    burst: 5
+  cache:
+    enabled: true
+    ttl: "168h"
+    key_prefix: "geocoder:"
+  country_centroids:
+    - { iso3: "AFG", lat: 33.94, lon: 67.71 }
+    - { iso3: "AGO", lat: -11.20, lon: 17.87 }
+    - { iso3: "BDI", lat: -3.37, lon: 29.92 }
+    - { iso3: "BFA", lat: 12.24, lon: -1.56 }
+    - { iso3: "BGD", lat: 23.68, lon: 90.36 }
+    - { iso3: "CAF", lat: 6.61, lon: 20.94 }
+    - { iso3: "CMR", lat: 7.37, lon: 12.35 }
+    - { iso3: "COD", lat: -4.04, lon: 21.76 }
+    - { iso3: "COL", lat: 4.57, lon: -74.30 }
+    - { iso3: "ETH", lat: 9.15, lon: 40.49 }
+    - { iso3: "GTM", lat: 15.78, lon: -90.23 }
+    - { iso3: "HND", lat: 15.20, lon: -86.24 }
+    - { iso3: "HTI", lat: 18.97, lon: -72.29 }
+    - { iso3: "IDN", lat: -0.79, lon: 113.92 }
+    - { iso3: "IRN", lat: 35.70, lon: 51.38 }
+    - { iso3: "IRQ", lat: 33.22, lon: 43.68 }
+    - { iso3: "KEN", lat: -0.02, lon: 37.91 }
+    - { iso3: "LBN", lat: 33.87, lon: 35.84 }
+    - { iso3: "LBY", lat: 26.34, lon: 17.23 }
+    - { iso3: "MDG", lat: -18.77, lon: 46.87 }
+    - { iso3: "MLI", lat: 17.57, lon: -4.00 }
+    - { iso3: "MMR", lat: 21.91, lon: 95.96 }
+    - { iso3: "MOZ", lat: -18.67, lon: 35.53 }
+    - { iso3: "NER", lat: 17.61, lon: 8.08 }
+    - { iso3: "NGA", lat: 9.08, lon: 7.49 }
+    - { iso3: "PAK", lat: 30.38, lon: 69.35 }
+    - { iso3: "PHL", lat: 12.88, lon: 121.77 }
+    - { iso3: "PSE", lat: 31.95, lon: 35.23 }
+    - { iso3: "SDN", lat: 12.86, lon: 30.22 }
+    - { iso3: "SLV", lat: 13.79, lon: -88.90 }
+    - { iso3: "SOM", lat: 5.15, lon: 46.20 }
+    - { iso3: "SSD", lat: 6.88, lon: 31.31 }
+    - { iso3: "SYR", lat: 34.80, lon: 39.00 }
+    - { iso3: "TCD", lat: 15.45, lon: 18.73 }
+    - { iso3: "TUR", lat: 38.96, lon: 35.24 }
+    - { iso3: "UKR", lat: 48.38, lon: 31.17 }
+    - { iso3: "VEN", lat: 6.42, lon: -66.59 }
+    - { iso3: "YEM", lat: 15.55, lon: 48.52 }
+    - { iso3: "ZMB", lat: -13.13, lon: 27.85 }
+    - { iso3: "ZWE", lat: -19.02, lon: 29.15 }
+
+
+logging:
+  level: "info"                    # debug, info, warn, error

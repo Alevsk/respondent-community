@@ -1,0 +1,187 @@
+schema_version: 1
+name: cbp_border_wait
+labels:
+  category: "transportation"
+  priority: "medium"
+source_type: cbp_border_wait
+layer_type: border_crossings
+display_name: "CBP Border Wait Times"
+enabled: true
+
+# Static coordinate lookup for US border ports of entry.
+# Port numbers are 6-digit codes matching the CBP API response format.
+lookup_tables:
+  - name: "ports"
+    key_field: "port_number"
+    entries:
+      # ── US-Canada Border ──────────────────────────────────────────────
+      - { port_number: "010401", lat: 45.6302, lon: -70.2539, name: "Jackman" }
+      - { port_number: "010601", lat: 46.1259, lon: -67.8362, name: "Houlton" }
+      - { port_number: "011501", lat: 45.1847, lon: -67.2764, name: "Calais - Ferry Point" }
+      - { port_number: "011502", lat: 45.1733, lon: -67.2844, name: "Calais - Milltown" }
+      - { port_number: "011503", lat: 45.1869, lon: -67.2781, name: "Calais - International Ave" }
+      - { port_number: "020901", lat: 44.9782, lon: -72.1022, name: "Derby Line" }
+      - { port_number: "021101", lat: 45.0118, lon: -71.8388, name: "Norton" }
+      - { port_number: "021201", lat: 44.9778, lon: -73.1078, name: "Highgate Springs" }
+      - { port_number: "070101", lat: 44.7141, lon: -75.4865, name: "Ogdensburg" }
+      - { port_number: "070401", lat: 44.9679, lon: -74.8918, name: "Massena" }
+      - { port_number: "070801", lat: 44.3357, lon: -75.9852, name: "Alexandria Bay" }
+      - { port_number: "071201", lat: 44.9866, lon: -73.4494, name: "Champlain" }
+      - { port_number: "090101", lat: 42.9064, lon: -78.8984, name: "Peace Bridge" }
+      - { port_number: "090102", lat: 43.0885, lon: -79.0667, name: "Rainbow Bridge" }
+      - { port_number: "090103", lat: 43.1120, lon: -79.0472, name: "Whirlpool Bridge" }
+      - { port_number: "090104", lat: 43.1623, lon: -79.0377, name: "Lewiston Bridge" }
+      - { port_number: "300401", lat: 49.0023, lon: -122.7563, name: "Blaine - Pacific Highway" }
+      - { port_number: "300402", lat: 49.0024, lon: -122.7584, name: "Blaine - Peace Arch" }
+      - { port_number: "300403", lat: 48.9863, lon: -123.0636, name: "Point Roberts" }
+      - { port_number: "300901", lat: 49.0000, lon: -122.2632, name: "Sumas" }
+      - { port_number: "302301", lat: 48.9467, lon: -122.4550, name: "Lynden" }
+      - { port_number: "331001", lat: 48.9990, lon: -111.9558, name: "Sweetgrass" }
+      - { port_number: "340101", lat: 48.9666, lon: -97.2434, name: "Pembina" }
+      - { port_number: "360401", lat: 48.6008, lon: -93.4117, name: "International Falls" }
+      - { port_number: "380001", lat: 42.3122, lon: -83.0735, name: "Ambassador Bridge" }
+      - { port_number: "380002", lat: 42.3172, lon: -83.0364, name: "Windsor Tunnel" }
+      - { port_number: "380201", lat: 42.9996, lon: -82.4224, name: "Port Huron" }
+      - { port_number: "380301", lat: 46.5078, lon: -84.3468, name: "Sault Ste. Marie" }
+      - { port_number: "L01901", lat: 47.3463, lon: -68.3339, name: "Madawaska" }
+      # ── US-Mexico Border ──────────────────────────────────────────────
+      - { port_number: "202401", lat: 31.7587, lon: -106.4413, name: "Paso Del Norte" }
+      - { port_number: "230103", lat: 31.7564, lon: -106.4528, name: "Gateway" }
+      - { port_number: "230201", lat: 29.3709, lon: -100.8960, name: "Del Rio" }
+      - { port_number: "230301", lat: 28.7091, lon: -100.4995, name: "Eagle Pass I" }
+      - { port_number: "230302", lat: 28.7064, lon: -100.4846, name: "Eagle Pass II" }
+      - { port_number: "230401", lat: 27.5006, lon: -99.5075, name: "Laredo I" }
+      - { port_number: "230402", lat: 27.5005, lon: -99.5041, name: "Laredo II" }
+      - { port_number: "230403", lat: 27.2676, lon: -99.5724, name: "Laredo - Colombia" }
+      - { port_number: "230404", lat: 27.4346, lon: -99.4867, name: "Laredo - World Trade" }
+      - { port_number: "230501", lat: 26.1004, lon: -98.2300, name: "Hidalgo" }
+      - { port_number: "230502", lat: 26.1752, lon: -98.1825, name: "Pharr" }
+      - { port_number: "230503", lat: 26.1413, lon: -98.3397, name: "Anzalduas" }
+      - { port_number: "230701", lat: 26.3815, lon: -98.8221, name: "Rio Grande City" }
+      - { port_number: "230901", lat: 26.0574, lon: -97.9470, name: "Progreso" }
+      - { port_number: "230902", lat: 26.1522, lon: -98.0574, name: "Donna" }
+      - { port_number: "231001", lat: 26.4050, lon: -99.0140, name: "Roma" }
+      - { port_number: "231002", lat: 26.4050, lon: -99.0140, name: "Roma" }
+      - { port_number: "240201", lat: 31.7587, lon: -106.4530, name: "El Paso - BOTA" }
+      - { port_number: "240202", lat: 31.7587, lon: -106.4413, name: "El Paso - PDN" }
+      - { port_number: "240203", lat: 31.6817, lon: -106.3078, name: "El Paso - Ysleta" }
+      - { port_number: "240204", lat: 31.7592, lon: -106.4508, name: "El Paso - Stanton" }
+      - { port_number: "240207", lat: 31.7587, lon: -106.4530, name: "El Paso - BOTA" }
+      - { port_number: "240215", lat: 31.7587, lon: -106.4530, name: "El Paso - BOTA Cargo" }
+      - { port_number: "240301", lat: 29.5608, lon: -104.3691, name: "Presidio" }
+      - { port_number: "240401", lat: 31.4476, lon: -106.0744, name: "Tornillo" }
+      - { port_number: "240601", lat: 31.8277, lon: -107.6375, name: "Columbus" }
+      - { port_number: "240801", lat: 31.8619, lon: -106.6505, name: "Santa Teresa" }
+      - { port_number: "250201", lat: 32.7205, lon: -114.7268, name: "Andrade" }
+      - { port_number: "250301", lat: 32.6731, lon: -115.4983, name: "Calexico East" }
+      - { port_number: "250302", lat: 32.6696, lon: -115.5002, name: "Calexico West" }
+      - { port_number: "250401", lat: 32.5423, lon: -117.0292, name: "San Ysidro" }
+      - { port_number: "250407", lat: 32.5410, lon: -117.0310, name: "San Ysidro PedWest" }
+      - { port_number: "250409", lat: 32.5418, lon: -117.0283, name: "San Ysidro CBX" }
+      - { port_number: "250501", lat: 32.5781, lon: -116.6268, name: "Tecate" }
+      - { port_number: "250601", lat: 32.5490, lon: -116.9431, name: "Otay Mesa" }
+      - { port_number: "250602", lat: 32.5497, lon: -116.9383, name: "Otay Mesa Commercial" }
+      - { port_number: "250608", lat: 32.5490, lon: -116.9431, name: "Otay Mesa" }
+      - { port_number: "250609", lat: 32.5490, lon: -116.9431, name: "Otay Mesa" }
+      - { port_number: "260101", lat: 31.3325, lon: -109.5453, name: "Douglas" }
+      - { port_number: "260201", lat: 31.8817, lon: -112.8082, name: "Lukeville" }
+      - { port_number: "260301", lat: 31.3357, lon: -110.0462, name: "Naco" }
+      - { port_number: "260305", lat: 31.3357, lon: -110.0462, name: "Naco" }
+      - { port_number: "260401", lat: 31.3322, lon: -110.9447, name: "Nogales - DeConcini" }
+      - { port_number: "260402", lat: 31.3507, lon: -110.9577, name: "Nogales - Mariposa" }
+      - { port_number: "260403", lat: 31.3370, lon: -110.9361, name: "Nogales - Morley" }
+      - { port_number: "260801", lat: 32.4869, lon: -114.7824, name: "San Luis I" }
+      - { port_number: "260802", lat: 32.4793, lon: -114.7639, name: "San Luis II" }
+      - { port_number: "535501", lat: 25.8989, lon: -97.4975, name: "Brownsville B&M" }
+      - { port_number: "535502", lat: 25.9186, lon: -97.4869, name: "Brownsville Veterans" }
+      - { port_number: "535503", lat: 26.0497, lon: -97.6870, name: "Los Indios" }
+      - { port_number: "535504", lat: 25.9059, lon: -97.4971, name: "Brownsville Gateway" }
+      - { port_number: "l24501", lat: 31.2983, lon: -105.8579, name: "Fort Hancock" }
+
+transport:
+  type: http_poll
+  url: "https://bwt.cbp.gov/api/waittimes"
+  method: GET
+  headers:
+    Accept: "application/json"
+  timeout: "15s"
+  interval: "300s"
+  max_response_bytes: 1048576
+
+parser:
+  format: json
+  max_records: 200
+
+# Only process ports we have coordinates for
+filter: 'has_lookup("ports", string(record.port_number))'
+
+entity:
+  external_id: 'string(record.port_number)'
+  name: 'lookup("ports", string(record.port_number), "name")'
+  metadata:
+    border: 'has(record.border) ? record.border : ""'
+    crossing_name: 'has(record.crossing_name) ? record.crossing_name : ""'
+    hours: 'has(record.hours) ? record.hours : ""'
+
+observation:
+  latitude: 'lookup("ports", string(record.port_number), "lat")'
+  longitude: 'lookup("ports", string(record.port_number), "lon")'
+  altitude: "0.0"
+  timestamp: 'now()'
+  metadata:
+    passenger_delay: >
+      has(record.passenger_vehicle_lanes) && has(record.passenger_vehicle_lanes.standard_lanes) ?
+      string(record.passenger_vehicle_lanes.standard_lanes.delay_minutes) : ""
+    commercial_delay: >
+      has(record.commercial_vehicle_lanes) && has(record.commercial_vehicle_lanes.standard_lanes) ?
+      string(record.commercial_vehicle_lanes.standard_lanes.delay_minutes) : ""
+    pedestrian_delay: >
+      has(record.pedestrian_lanes) && has(record.pedestrian_lanes.standard_lanes) ?
+      string(record.pedestrian_lanes.standard_lanes.delay_minutes) : ""
+  content_hash: >
+    string(record.port_number) + "_" + (has(record.passenger_vehicle_lanes) && has(record.passenger_vehicle_lanes.standard_lanes) ? string(record.passenger_vehicle_lanes.standard_lanes.delay_minutes) : "") + "_" + (has(record.commercial_vehicle_lanes) && has(record.commercial_vehicle_lanes.standard_lanes) ? string(record.commercial_vehicle_lanes.standard_lanes.delay_minutes) : "") + "_" + (has(record.pedestrian_lanes) && has(record.pedestrian_lanes.standard_lanes) ? string(record.pedestrian_lanes.standard_lanes.delay_minutes) : "")
+
+recording:
+  mode: dedupe
+
+cache:
+  ttl: "600s"
+
+display:
+  icon:
+    shape: shield
+    rotatable: false
+    interpolation: false
+    scale: 1.0
+  trail:
+    color: "#ff9500"
+    width: 1.5
+    opacity: 0.7
+  style:
+    color: "#ff9500"
+    point_size: 6
+  field_renderers:
+    - keys: [passenger_delay]
+      label: "PASSENGER WAIT"
+      format:
+        type: string
+        suffix: " min"
+      priority: 0
+    - keys: [commercial_delay]
+      label: "COMMERCIAL WAIT"
+      format:
+        type: string
+        suffix: " min"
+      priority: 1
+    - keys: [pedestrian_delay]
+      label: "PEDESTRIAN WAIT"
+      format:
+        type: string
+        suffix: " min"
+      priority: 2
+    - keys: [hours]
+      label: "STATUS"
+      format:
+        type: string
+        transform: upper
+      priority: 3

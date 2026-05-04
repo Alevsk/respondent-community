@@ -1,0 +1,153 @@
+# sources.d/noaa_weather_alerts.yaml
+# NWS Weather Alerts — National Weather Service (NOAA)
+# Source: https://api.weather.gov/alerts/active
+# Auth: None required (User-Agent header is mandatory per NWS API policy)
+# Format: GeoJSON FeatureCollection
+#
+# NOTE: NWS alerts often have polygon geometries defining the warned area.
+# The declarative system maps point entities only. For polygon alerts, we extract
+# the first coordinate of the polygon as a representative point. Proper polygon
+# rendering requires frontend changes (see OSINT_SOURCES.md notes).
+schema_version: 2
+
+name: noaa_weather_alerts
+labels:
+  category: weather
+  priority: high
+
+# --- Identity ---
+source_type: noaa_weather_alerts
+layer_type: weather_alerts
+display_name: "NWS Weather Alerts"
+
+filtering: viewport
+
+geo_cache:
+  overfetch_ratio: 2.0
+  alive_ratio_threshold: 0.5
+  gc_batch_size: 500
+
+# --- Ingestion ---
+transport:
+  type: http_poll
+  url: "https://api.weather.gov/alerts/active?status=actual&severity=Extreme,Severe"
+  method: GET
+  headers:
+    Accept: "application/geo+json"
+    User-Agent: "Respondent/1.0 (https://github.com/Alevsk/respondent)"
+  timeout: "15s"
+  interval: "60s"
+  max_response_bytes: 52428800  # 50MB
+  retry:
+    max_attempts: 3
+    backoff: "exponential"
+    initial_delay: "2s"
+    max_delay: "30s"
+
+# --- Response Parsing ---
+parser:
+  format: geojson
+  records_path: "features"
+  max_records: 5000
+
+# --- Record Filtering (CEL) ---
+# Most NWS alerts have null geometry (186/228 typical). We can only map alerts
+# with Polygon geometry. We filter for non-null geometry with coordinates.
+filter: >
+  has(record.properties) && has(record.properties.event)
+  && has(record.geometry) && record.geometry != null
+  && has(record.geometry.coordinates)
+  && size(record.geometry.coordinates) > 0
+
+# --- Entity Mapping (CEL) ---
+entity:
+  # NWS alert IDs are URN-style strings embedded in the properties
+  external_id: >
+    has(record.properties.id) ? record.properties.id : record.id
+  name: >
+    has(record.properties.headline) ? record.properties.headline : record.properties.event
+  metadata:
+    event: >
+      record.properties.event
+    severity: >
+      has(record.properties.severity) ? record.properties.severity : ""
+    certainty: >
+      has(record.properties.certainty) ? record.properties.certainty : ""
+    urgency: >
+      has(record.properties.urgency) ? record.properties.urgency : ""
+    area_desc: >
+      has(record.properties.areaDesc) ? record.properties.areaDesc : ""
+    sender: >
+      has(record.properties.senderName) ? record.properties.senderName : ""
+
+# --- Observation Mapping (CEL) ---
+# NWS alerts use Polygon geometry: coordinates is [[[lon,lat], ...], ...].
+# We extract the first point of the first ring as a representative point.
+# coordinates[0] is the first ring, coordinates[0][0] is the first point [lon,lat].
+observation:
+  latitude: >
+    record.geometry.coordinates[0][0][1]
+  longitude: >
+    record.geometry.coordinates[0][0][0]
+  altitude: "0.0"
+  timestamp: >
+    has(record.properties.sent) ? parse_rfc3339(record.properties.sent) : now()
+  velocity: {}
+  metadata:
+    severity: >
+      has(record.properties.severity) ? record.properties.severity : ""
+    event: >
+      record.properties.event
+  content_hash: ""
+
+# --- Recording ---
+recording:
+  mode: upsert
+
+# --- Cache ---
+cache:
+  ttl: "300s"
+
+# --- Display ---
+display:
+  icon:
+    shape: warning
+    rotatable: false
+    interpolation: false
+    scale: 1.0
+  trail:
+    color: "#ffab40"
+    width: 1.5
+    opacity: 0.8
+  style:
+    color: "#ffab40"
+    point_size: 6
+  field_renderers:
+    - keys: [event]
+      label: "EVENT"
+      format:
+        type: string
+        transform: upper
+      priority: 0
+    - keys: [severity]
+      label: "SEVERITY"
+      format:
+        type: string
+        transform: upper
+      priority: 1
+    - keys: [urgency]
+      label: "URGENCY"
+      format:
+        type: string
+        transform: upper
+      priority: 2
+    - keys: [area_desc]
+      label: "AREA"
+      format:
+        type: string
+      priority: 3
+    - keys: [sender]
+      label: "SOURCE"
+      format:
+        type: string
+      priority: 4

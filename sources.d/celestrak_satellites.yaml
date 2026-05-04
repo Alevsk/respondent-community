@@ -1,0 +1,105 @@
+# sources.d/celestrak_satellites.yaml
+# Migration of the imperative CelesTrak satellites adapter to declarative YAML.
+# Source: CelesTrak NORAD TLE data (SGP4 orbital propagation via CEL builtins)
+# Phase 2 of the declarative feeder migration spec.
+schema_version: 2
+
+name: celes_trak_satellites
+labels:
+  category: space
+  priority: medium
+
+# --- Identity ---
+source_type: celes_trak_satellites
+layer_type: satellites
+display_name: "CelesTrak Satellites"
+
+
+# --- Ingestion ---
+transport:
+  type: http_poll
+  url: "https://celestrak.org/NORAD/elements/gp.php?GROUP=active&FORMAT=tle"
+  method: GET
+  headers:
+    User-Agent: "Respondent/1.0 (satellite-tracker; +https://github.com/Alevsk/respondent)"
+  timeout: "90s"
+  interval: "300s"
+  max_response_bytes: 10485760  # 10MB
+  retry:
+    max_attempts: 3
+    backoff: exponential
+    initial_delay: "2s"
+    max_delay: "30s"
+
+# --- Response Parsing ---
+parser:
+  format: tle
+  max_records: 10000
+
+# --- Record Filtering (CEL) ---
+# TLE parser produces: name, line1, line2, norad_id
+# Filter out records with missing TLE lines or failed propagation (returns 0.0).
+filter: >
+  has(record.line1) && has(record.line2)
+  && sgp4_lat(record.line1, record.line2) != 0.0
+
+# --- Entity Mapping (CEL) ---
+entity:
+  external_id: >
+    record.norad_id
+  name: >
+    record.name
+  metadata:
+    norad_id: >
+      record.norad_id
+    tle_line1: >
+      record.line1
+    tle_line2: >
+      record.line2
+
+# --- Observation Mapping (CEL) ---
+observation:
+  latitude: >
+    sgp4_lat(record.line1, record.line2)
+  longitude: >
+    sgp4_lon(record.line1, record.line2)
+  altitude: >
+    sgp4_alt_m(record.line1, record.line2)
+  timestamp: >
+    now()
+  velocity:
+    speed: >
+      string(sgp4_vel_mps(record.line1, record.line2))
+  metadata:
+    timestamp: >
+      string(now())
+  content_hash: ""
+
+# --- Recording ---
+recording:
+  mode: append
+
+# --- Cache ---
+cache:
+  ttl: "600s"
+
+# --- Display (consumed by frontend) ---
+display:
+  icon:
+    shape: diamond
+    rotatable: false
+    interpolation: true
+    scale: 1.0
+  trail:
+    color: "#00bfff"
+    width: 1.0
+    opacity: 0.5
+  style:
+    color: "#00bfff"
+    point_size: 6
+  field_renderers:
+    - keys: [norad_id]
+      label: "NORAD ID"
+      format:
+        type: string
+      priority: 0

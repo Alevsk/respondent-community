@@ -1,0 +1,209 @@
+# =============================================================================
+# LIGHTNING-FIRE PREDICTION — Strike-to-Ignition Correlation
+# =============================================================================
+# Correlates lightning strike locations with subsequent fire ignitions to
+# identify lightning-caused wildfires. Lightning is the #1 natural cause of
+# wildfires. By detecting fires that appear near recent lightning strikes,
+# we can classify fire origin and predict where new fires may start.
+#
+# Data layers: lightning (Blitzortung) × fires_active (NASA FIRMS)
+# =============================================================================
+
+schema_version: 1
+name: lightning_fire_prediction
+display_name: "Lightning-Fire Prediction"
+enabled: false # TODO: enable
+
+schedule:
+  interval: "180s"
+
+data:
+  layers: [fires_active, lightning]
+  lookback: "12h"
+  min_records: 1
+  max_records: 30
+  dedup:
+    window: "6h"
+    key_fields: ["entity_external_id", "lightning_external_id"]
+  sql: |
+    WITH recent_lightning AS (
+      -- Observation-first: only ~4,600 active lightning entities vs 32K total.
+      SELECT DISTINCT ON (o.entity_id)
+        e.id, e.name, e.external_id, e.metadata,
+        o.lat, o.lon, o.position, o.ts,
+        COALESCE(e.metadata->>'polarity', 'unknown') AS polarity,
+        COALESCE(e.metadata->>'station_count', '0') AS station_count
+      FROM observations o
+      JOIN entities e ON e.id = o.entity_id AND e.layer_type = 'lightning'
+      WHERE o.ts > NOW() - INTERVAL '12 hours'
+      ORDER BY o.entity_id, o.ts DESC
+    ),
+    recent_fires AS (
+      -- Observation-first: only ~900 active fire entities vs 222K total.
+      -- This eliminates 222K unnecessary LATERAL lookups.
+      SELECT DISTINCT ON (o.entity_id)
+        e.id, e.name, e.external_id, e.metadata,
+        o.lat, o.lon, o.position, o.ts
+      FROM observations o
+      JOIN entities e ON e.id = o.entity_id AND e.layer_type = 'fires_active'
+      WHERE o.ts > NOW() - INTERVAL '12 hours'
+      ORDER BY o.entity_id, o.ts DESC
+    ),
+    nearby_fires AS (
+      -- Active fires within 50km of lightning strikes.
+      -- 50km accounts for fire spread from ignition point.
+      SELECT
+        rl.name AS lightning_name,
+        rl.external_id AS lightning_external_id,
+        rl.lat AS lightning_lat, rl.lon AS lightning_lon,
+        rl.ts AS lightning_ts,
+        rl.polarity,
+        rl.station_count,
+        rf.id AS fire_id,
+        rf.name AS fire_name,
+        rf.external_id AS fire_external_id,
+        rf.lat AS fire_lat, rf.lon AS fire_lon,
+        rf.ts AS fire_ts,
+        CAST(COALESCE(rf.metadata->>'frp', '0') AS float) AS fire_frp,
+        rf.metadata->>'confidence' AS fire_confidence,
+        rf.metadata->>'satellite' AS fire_satellite,
+        ROUND((ST_Distance(rl.position::geography, rf.position::geography) / 1000)::numeric, 1)::text AS distance_km,
+        -- Time delta: how long after lightning did fire appear?
+        EXTRACT(EPOCH FROM (rf.ts - rl.ts))::int AS time_delta_seconds
+      FROM recent_lightning rl
+      JOIN recent_fires rf ON
+        -- Bounding box pre-filter for 50km (~0.45 degrees latitude)
+        rf.lat BETWEEN rl.lat - 0.45 AND rl.lat + 0.45
+        AND rf.lon BETWEEN rl.lon - (0.45 / GREATEST(COS(RADIANS(rl.lat)), 0.01))
+                       AND rl.lon + (0.45 / GREATEST(COS(RADIANS(rl.lat)), 0.01))
+        AND ST_DWithin(rl.position::geography, rf.position::geography, 50000)
+    )
+    SELECT
+      nf.fire_id AS entity_id,
+      nf.fire_name AS name,
+      nf.fire_external_id AS external_id,
+      'fires_active' AS layer_type,
+      nf.fire_lat AS lat, nf.fire_lon AS lon,
+      0.0 AS altitude_m,
+      nf.fire_ts AS ts,
+      nf.lightning_name,
+      nf.lightning_lat::text AS lightning_lat,
+      nf.lightning_lon::text AS lightning_lon,
+      nf.polarity AS lightning_polarity,
+      nf.station_count AS detection_stations,
+      nf.fire_frp::text AS fire_power_mw,
+      COALESCE(nf.fire_confidence, 'unknown') AS fire_confidence,
+      nf.distance_km,
+      nf.time_delta_seconds::text AS time_delta_seconds,
+      CASE
+        WHEN nf.time_delta_seconds > 0 AND nf.time_delta_seconds < 21600 THEN 'likely_caused'
+        WHEN nf.time_delta_seconds >= 21600 THEN 'possible_delayed'
+        ELSE 'pre_existing_fire'
+      END AS causation_flag,
+      nf.lightning_external_id
+    FROM nearby_fires nf
+    ORDER BY
+      CASE WHEN nf.time_delta_seconds > 0 THEN 0 ELSE 1 END,
+      nf.fire_frp DESC
+    LIMIT 30
+
+ai:
+  enabled: true
+  operations:
+    - name: lightning_fire_assessment
+      tags: [osint, environment, lightning, fires, prediction, cross-layer]
+      prompt: |
+        You are a wildfire prediction analyst specializing in lightning-caused ignition
+        detection. Your assessments inform early warning systems and fire response
+        prioritization.
+
+        LIGHTNING-FIRE PREDICTION: {{.RecordCount}} fires detected within 50km of
+        recent lightning strikes (last {{.Lookback}}).
+
+        Lightning-to-fire correlation data:
+        {{range .Records}}
+        - FIRE: {{.EntityName}} (ID: {{.ExternalID}}) | FRP: {{index .Metadata "fire_power_mw"}} MW | Confidence: {{index .Metadata "fire_confidence"}}
+          Position: {{.Lat}}, {{.Lon}}
+          LIGHTNING: {{index .Metadata "lightning_name"}} (ref: {{index .Metadata "lightning_external_id"}}) at ({{index .Metadata "lightning_lat"}}, {{index .Metadata "lightning_lon"}})
+          Polarity: {{index .Metadata "lightning_polarity"}} | Stations: {{index .Metadata "detection_stations"}}
+          Distance: {{index .Metadata "distance_km"}}km | Time delta: {{index .Metadata "time_delta_seconds"}}s
+          Causation flag: {{index .Metadata "causation_flag"}}
+        {{end}}
+
+        Lightning-fire causation reference:
+        - Positive polarity lightning is more likely to cause fires (longer duration)
+        - Fires appearing 0-6h after nearby lightning = likely lightning-caused
+        - Fires appearing >6h after = possible delayed ignition (smoldering)
+        - Fires that predate lightning = coincidental proximity
+
+        Use your knowledge of the fire's geographic location to assess:
+        - Vegetation type: Forest, grassland, scrubland, agricultural, urban fringe
+        - Season: Is this fire season for the region? (e.g., June-October for western US, dry season for tropics)
+        - Drought conditions: Is the region known to be in drought? Dry conditions dramatically increase ignition probability from lightning.
+        - Terrain: Mountainous terrain channels fire upslope; flat grassland allows rapid spread.
+
+        Fire growth potential assessment:
+        - FRP < 10 MW with positive time delta > 6h = smoldering, may self-extinguish
+        - FRP 10-50 MW with positive time delta 1-6h = establishing fire, response window closing
+        - FRP > 50 MW = fully established fire, suppression difficult
+        - FRP > 200 MW = major fire event, evacuation concerns
+
+        For each prediction, estimate population exposure: is the fire in a remote
+        wilderness area (low concern) or near populated areas, roads, or structures
+        (high concern)?
+
+        For each fire-lightning pair, assess:
+        1. Probability that the fire was caused by the lightning strike
+        2. Fire growth potential (based on FRP and time since ignition)
+        3. Whether this could be an early detection of a new wildfire
+        4. Risk classification: coincidental/possible/probable/confirmed_natural
+
+        Provide 2-3 sentence assessments for each prediction.
+
+        Respond with JSON matching this schema:
+        {{.OutputSchema}}
+
+      output_schema:
+        type: object
+        required: [predictions, summary]
+        properties:
+          summary:
+            type: string
+          predictions:
+            type: array
+            items:
+              type: object
+              required: [fire_name, causation_probability, risk_classification, assessment, response_urgency]
+              properties:
+                fire_name: { type: string }
+                fire_power_mw: { type: number }
+                lightning_distance_km: { type: number }
+                time_delta_hours: { type: number }
+                causation_probability:
+                  type: string
+                  enum: [unlikely, possible, probable, high]
+                risk_classification:
+                  type: string
+                  enum: [coincidental, possible, probable, confirmed_natural]
+                growth_potential: { type: string }
+                terrain_vegetation: { type: string }
+                population_exposure:
+                  type: string
+                  enum: [remote_wilderness, rural, suburban_interface, urban_proximate]
+                response_urgency:
+                  type: string
+                  enum: [monitor, dispatch_recon, immediate_suppression, evacuation_alert]
+                assessment: { type: string }
+                entity_external_id: { type: string }
+                lightning_external_id: { type: string }
+      max_tokens: 3000
+      temperature: 0.1
+      output:
+        store_insights: true
+        insight_type: "lightning_fire"
+        results_path: "predictions"
+        ref_fields:
+          - field: "lightning_external_id"
+            layer_type: "lightning"
+        websocket_push: true
+        retention: "168h"

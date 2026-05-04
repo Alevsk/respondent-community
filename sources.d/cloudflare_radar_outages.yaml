@@ -1,0 +1,241 @@
+# sources.d/cloudflare_radar_outages.yaml
+# Cloudflare Radar — Internet Outage Annotations
+# Source: https://api.cloudflare.com/client/v4/radar/annotations/outages
+# Auth: Bearer token via RESPONDENT_CLOUDFLARE_RADAR_TOKEN env var
+# Format: JSON object with result.annotations array
+#
+# Tracks internet outages and disruptions worldwide as detected by Cloudflare's
+# global network. Locations are ISO 3166-1 alpha-2 country codes resolved to
+# centroids via lookup table.
+schema_version: 1
+
+name: cloudflare_radar_outages
+labels:
+  category: "infrastructure"
+  priority: "high"
+
+# --- Identity ---
+source_type: cloudflare_radar_outages
+layer_type: internet_outages
+display_name: "Cloudflare Radar Internet Outages"
+
+# --- Operational Controls ---
+enabled: true  # Requires Cloudflare account API token
+
+# Country centroid lookup table — maps ISO 3166-1 alpha-2 codes to lat/lon.
+# ~60 countries by internet presence / geopolitical relevance.
+lookup_tables:
+  - name: "countries"
+    key_field: "code"
+    entries:
+      # ── North America ──
+      - { code: "US", lat: 39.8283, lon: -98.5795, name: "United States" }
+      - { code: "CA", lat: 56.1304, lon: -106.3468, name: "Canada" }
+      - { code: "MX", lat: 23.6345, lon: -102.5528, name: "Mexico" }
+      # ── South America ──
+      - { code: "BR", lat: -14.2350, lon: -51.9253, name: "Brazil" }
+      - { code: "AR", lat: -38.4161, lon: -63.6167, name: "Argentina" }
+      - { code: "CO", lat: 4.5709, lon: -74.2973, name: "Colombia" }
+      - { code: "CL", lat: -35.6751, lon: -71.5430, name: "Chile" }
+      - { code: "VE", lat: 6.4238, lon: -66.5897, name: "Venezuela" }
+      - { code: "PE", lat: -9.1900, lon: -75.0152, name: "Peru" }
+      - { code: "PY", lat: -23.4425, lon: -58.4438, name: "Paraguay" }
+      - { code: "DO", lat: 18.7357, lon: -70.1627, name: "Dominican Republic" }
+      - { code: "CU", lat: 21.5218, lon: -77.7812, name: "Cuba" }
+      # ── Europe ──
+      - { code: "GB", lat: 55.3781, lon: -3.4360, name: "United Kingdom" }
+      - { code: "DE", lat: 51.1657, lon: 10.4515, name: "Germany" }
+      - { code: "FR", lat: 46.2276, lon: 2.2137, name: "France" }
+      - { code: "IT", lat: 41.8719, lon: 12.5674, name: "Italy" }
+      - { code: "ES", lat: 40.4637, lon: -3.7492, name: "Spain" }
+      - { code: "PL", lat: 51.9194, lon: 19.1451, name: "Poland" }
+      - { code: "UA", lat: 48.3794, lon: 31.1656, name: "Ukraine" }
+      - { code: "RO", lat: 45.9432, lon: 24.9668, name: "Romania" }
+      - { code: "NL", lat: 52.1326, lon: 5.2913, name: "Netherlands" }
+      - { code: "SE", lat: 60.1282, lon: 18.6435, name: "Sweden" }
+      - { code: "NO", lat: 60.4720, lon: 8.4689, name: "Norway" }
+      - { code: "FI", lat: 61.9241, lon: 25.7482, name: "Finland" }
+      - { code: "CZ", lat: 49.8175, lon: 15.4730, name: "Czech Republic" }
+      - { code: "PT", lat: 39.3999, lon: -8.2245, name: "Portugal" }
+      # ── Asia ──
+      - { code: "CN", lat: 35.8617, lon: 104.1954, name: "China" }
+      - { code: "IN", lat: 20.5937, lon: 78.9629, name: "India" }
+      - { code: "JP", lat: 36.2048, lon: 138.2529, name: "Japan" }
+      - { code: "KR", lat: 35.9078, lon: 127.7669, name: "South Korea" }
+      - { code: "ID", lat: -0.7893, lon: 113.9213, name: "Indonesia" }
+      - { code: "PK", lat: 30.3753, lon: 69.3451, name: "Pakistan" }
+      - { code: "BD", lat: 23.6850, lon: 90.3563, name: "Bangladesh" }
+      - { code: "TH", lat: 15.8700, lon: 100.9925, name: "Thailand" }
+      - { code: "VN", lat: 14.0583, lon: 108.2772, name: "Vietnam" }
+      - { code: "PH", lat: 12.8797, lon: 121.7740, name: "Philippines" }
+      - { code: "MM", lat: 21.9162, lon: 95.9560, name: "Myanmar" }
+      - { code: "IR", lat: 32.4279, lon: 53.6880, name: "Iran" }
+      - { code: "IQ", lat: 33.2232, lon: 43.6793, name: "Iraq" }
+      - { code: "SA", lat: 23.8859, lon: 45.0792, name: "Saudi Arabia" }
+      - { code: "AF", lat: 33.9391, lon: 67.7100, name: "Afghanistan" }
+      - { code: "SY", lat: 34.8021, lon: 38.9968, name: "Syria" }
+      - { code: "YE", lat: 15.5527, lon: 48.5164, name: "Yemen" }
+      - { code: "UZ", lat: 41.3775, lon: 64.5853, name: "Uzbekistan" }
+      - { code: "KZ", lat: 48.0196, lon: 66.9237, name: "Kazakhstan" }
+      # ── Middle East / Central Asia ──
+      - { code: "TR", lat: 38.9637, lon: 35.2433, name: "Turkey" }
+      - { code: "AE", lat: 23.4241, lon: 53.8478, name: "United Arab Emirates" }
+      # ── Africa ──
+      - { code: "NG", lat: 9.0820, lon: 8.6753, name: "Nigeria" }
+      - { code: "EG", lat: 26.8206, lon: 30.8025, name: "Egypt" }
+      - { code: "ZA", lat: -30.5595, lon: 22.9375, name: "South Africa" }
+      - { code: "KE", lat: -0.0236, lon: 37.9062, name: "Kenya" }
+      - { code: "ET", lat: 9.1450, lon: 40.4897, name: "Ethiopia" }
+      - { code: "CD", lat: -4.0383, lon: 21.7587, name: "DR Congo" }
+      - { code: "TZ", lat: -6.3690, lon: 34.8888, name: "Tanzania" }
+      - { code: "SD", lat: 12.8628, lon: 30.2176, name: "Sudan" }
+      - { code: "LY", lat: 26.3351, lon: 17.2283, name: "Libya" }
+      - { code: "GH", lat: 7.9465, lon: -1.0232, name: "Ghana" }
+      - { code: "CI", lat: 7.5400, lon: -5.5471, name: "Côte d'Ivoire" }
+      - { code: "CM", lat: 7.3697, lon: 12.3547, name: "Cameroon" }
+      - { code: "CG", lat: -0.2280, lon: 15.8277, name: "Congo" }
+      - { code: "AO", lat: -11.2027, lon: 17.8739, name: "Angola" }
+      - { code: "MZ", lat: -18.6657, lon: 35.5296, name: "Mozambique" }
+      - { code: "MG", lat: -18.7669, lon: 46.8691, name: "Madagascar" }
+      - { code: "SN", lat: 14.4974, lon: -14.4524, name: "Senegal" }
+      - { code: "ML", lat: 17.5707, lon: -3.9962, name: "Mali" }
+      - { code: "NE", lat: 17.6078, lon: 8.0817, name: "Niger" }
+      # ── Oceania ──
+      - { code: "AU", lat: -25.2744, lon: 133.7751, name: "Australia" }
+      # ── Russia ──
+      - { code: "RU", lat: 61.5240, lon: 105.3188, name: "Russia" }
+
+transport:
+  type: http_poll
+  url: "https://api.cloudflare.com/client/v4/radar/annotations/outages?limit=100&dateRange=30d"
+  method: GET
+  headers:
+    Accept: "application/json"
+  auth:
+    type: bearer
+    env_var: "CLOUDFLARE_RADAR_TOKEN"
+  timeout: "30s"
+  interval: "900s"  # 15 minutes
+  max_response_bytes: 5242880  # 5MB
+  retry:
+    max_attempts: 3
+    backoff: "exponential"
+    initial_delay: "5s"
+    max_delay: "60s"
+
+# --- Response Parsing ---
+parser:
+  format: json
+  records_path: "result.annotations"
+  max_records: 500
+
+# --- Record Filtering (CEL) ---
+# Only process annotations that have at least one location we can resolve
+filter: >
+  has(record.locations) && size(record.locations) > 0
+  && has_lookup("countries", record.locations[0])
+
+# --- Entity Mapping (CEL) ---
+entity:
+  external_id: >
+    record.id
+  name: >
+    has(record.description) && record.description != ""
+      ? record.description
+      : (has(record.outage) && has(record.outage.outageType) ? record.outage.outageType : "OUTAGE") + " — " + record.locations[0]
+  metadata:
+    outage_type: >
+      has(record.outage) && has(record.outage.outageType) ? record.outage.outageType : ""
+    scope: >
+      has(record.scope) ? record.scope : ""
+    description: >
+      has(record.description) ? record.description : ""
+    start_date: >
+      has(record.startDate) ? record.startDate : ""
+    end_date: >
+      has(record.endDate) ? record.endDate : ""
+    linked_url: >
+      has(record.linkedUrl) ? record.linkedUrl : ""
+
+# --- Observation Mapping (CEL) ---
+observation:
+  latitude: >
+    lookup("countries", record.locations[0], "lat")
+  longitude: >
+    lookup("countries", record.locations[0], "lon")
+  altitude: "0.0"
+  timestamp: >
+    now()
+  event_time: >
+    parse_iso8601(record.startDate)
+  event_end: >
+    has(record.endDate) && record.endDate != "null" ? parse_iso8601(record.endDate) : now()
+  velocity: {}
+  metadata:
+    outage_type: >
+      has(record.outage) && has(record.outage.outageType) ? record.outage.outageType : ""
+    scope: >
+      has(record.scope) ? record.scope : ""
+    description: >
+      has(record.description) ? record.description : ""
+    start_date: >
+      has(record.startDate) ? record.startDate : ""
+    end_date: >
+      has(record.endDate) ? record.endDate : ""
+    country_code: >
+      record.locations[0]
+    country_name: >
+      lookup("countries", record.locations[0], "name")
+  content_hash: >
+    record.id
+
+# --- Recording ---
+recording:
+  mode: upsert
+
+# --- Cache ---
+cache:
+  ttl: "1800s"  # 30 minutes
+
+# --- Display ---
+display:
+  icon:
+    shape: warning
+    rotatable: false
+    interpolation: false
+    scale: 1.2
+  trail:
+    color: "#ff6600"
+    width: 1.5
+    opacity: 0.7
+  style:
+    color: "#ff6600"
+    point_size: 6
+  field_renderers:
+    - keys: [outage_type]
+      label: "OUTAGE TYPE"
+      format:
+        type: string
+        transform: upper
+      priority: 0
+    - keys: [scope]
+      label: "SCOPE"
+      format:
+        type: string
+        transform: upper
+      priority: 1
+    - keys: [description]
+      label: "DESCRIPTION"
+      format:
+        type: string
+      priority: 2
+    - keys: [start_date]
+      label: "START"
+      format:
+        type: string
+      priority: 3
+
+# --- History ---
+history:
+  max_lookback: "720h"     # 30 days
+  max_range_span: "168h"   # 7 days per query window

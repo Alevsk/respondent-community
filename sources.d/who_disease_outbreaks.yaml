@@ -1,0 +1,129 @@
+# sources.d/who_disease_outbreaks.yaml
+# WHO Disease Outbreak News (DON) — World Health Organization
+# Source: https://www.who.int/api/news/diseaseoutbreaknews
+# Auth: None required
+# Format: JSON (OData v4)
+#
+# DISABLED: The WHO DON API does not return geographic coordinates (lat/lon).
+# The response includes only text fields: Title, Summary, Overview, Assessment,
+# DonId, PublicationDate, etc. Country names appear only within free-text content
+# (Title, Overview) — not as structured fields with coordinates.
+#
+# To enable this source, one of the following would be needed:
+#   1. WHO adds structured country/region fields with coordinates to the API
+#   2. Implement NLP-based country extraction from Title + lookup table enrichment
+#      (not supported by the declarative ingest system)
+#   3. A different WHO API endpoint that provides geographic metadata
+#
+# Keeping this file as a placeholder for future implementation.
+schema_version: 1
+
+name: who_disease_outbreaks
+labels:
+  category: humanitarian
+  priority: high
+
+# --- Identity ---
+source_type: who_disease_outbreaks
+layer_type: disease_outbreaks
+display_name: "WHO Disease Outbreak News"
+
+# --- Operational Controls ---
+# DISABLED: No geographic coordinates available in API response.
+# See header comment for details.
+enabled: false
+
+# --- Ingestion ---
+transport:
+  type: http_poll
+  # OData endpoint; $top controls page size, $orderby gets latest first.
+  url: "https://www.who.int/api/news/diseaseoutbreaknews?$top=50&$orderby=PublicationDate%20desc"
+  method: GET
+  headers:
+    Accept: "application/json"
+  timeout: "15s"
+  interval: "21600s"  # 6 hours
+  max_response_bytes: 10485760  # 10MB
+  retry:
+    max_attempts: 3
+    backoff: "exponential"
+    initial_delay: "2s"
+    max_delay: "30s"
+
+# --- Response Parsing ---
+# WHO DON API returns OData format: { "value": [ { ... }, ... ] }
+parser:
+  format: json
+  records_path: "value"
+  max_records: 500
+
+# --- Record Filtering (CEL) ---
+filter: >
+  has(record.Title) && record.Title != ""
+
+# --- Entity Mapping (CEL) ---
+entity:
+  external_id: >
+    has(record.DonId) && record.DonId != "" ? record.DonId : record.Id
+  name: >
+    record.Title
+  metadata:
+    summary: >
+      has(record.Summary) ? record.Summary : ""
+    don_id: >
+      has(record.DonId) ? record.DonId : ""
+    url: >
+      has(record.ItemDefaultUrl) ? "https://www.who.int" + record.ItemDefaultUrl : ""
+
+# --- Observation Mapping (CEL) ---
+# No coordinates available — using 0,0 as placeholder (source is disabled).
+observation:
+  latitude: "0.0"
+  longitude: "0.0"
+  altitude: "0.0"
+  timestamp: >
+    has(record.PublicationDate) ? parse_rfc3339(record.PublicationDate) : now()
+  velocity: {}
+  metadata:
+    don_id: >
+      has(record.DonId) ? record.DonId : ""
+  content_hash: ""
+
+# --- Recording ---
+recording:
+  mode: upsert
+
+# --- Cache ---
+cache:
+  ttl: "43200s"  # 12 hours
+
+# --- Display ---
+display:
+  icon:
+    shape: warning
+    rotatable: false
+    interpolation: false
+    scale: 1.0
+  trail:
+    color: "#ff0044"
+    width: 1.5
+    opacity: 0.8
+  style:
+    color: "#ff0044"
+    point_size: 6
+  field_renderers:
+    - keys: [don_id]
+      label: "DON ID"
+      format:
+        type: string
+      priority: 0
+    - keys: [summary]
+      label: "SUMMARY"
+      format:
+        type: string
+      priority: 1
+    - keys: [url]
+      label: "LINK"
+      format:
+        type: string
+      priority: 2

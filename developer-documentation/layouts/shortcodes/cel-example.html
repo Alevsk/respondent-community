@@ -1,0 +1,24 @@
+{{ $expression := .Get "expression" }}
+{{ $input := .Get "input" }}
+{{ $output := .Get "output" }}
+<div class="cel-example">
+  <div class="cel-expression">
+    <span class="cel-label">Expression</span>
+    <code>{{ $expression }}</code>
+  </div>
+  {{ if $input }}
+  <div class="cel-io">
+    <span class="cel-label">Input</span>
+    <code>{{ $input }}</code>
+  </div>
+  {{ end }}
+  {{ if $output }}
+  <div class="cel-io">
+    <span class="cel-label">Output</span>
+    <code>{{ $output }}</code>
+  </div>
+  {{ end }}
+  {{ if .Inner }}
+  <div class="cel-desc">{{ .Inner | markdownify }}</div>
+  {{ end }}
+</div>
