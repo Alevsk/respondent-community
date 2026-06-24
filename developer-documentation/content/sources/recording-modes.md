@@ -35,7 +35,7 @@ Each poll creates a new row even if nothing changed. The observation history gro
 
 ## Upsert
 
-Each poll inserts a new observation or updates the existing one based on `entity.external_id`. Only the latest state is kept per entity.
+Each poll inserts a new observation or updates an existing row on a conflict against the composite key `(entity_id, ts)` (`ON CONFLICT (entity_id, ts) DO UPDATE`). When an entity's observation timestamp stays the same across polls, the existing row is overwritten in place. When the observation timestamp advances between polls, the upsert inserts a new row -- so for an entity whose timestamp changes every poll, upsert behaves like append for that entity.
 
 ```yaml
 recording:
@@ -45,9 +45,10 @@ recording:
 Use `upsert` when:
 - You only care about the current state, not historical positions
 - Entities are relatively static (their position rarely changes)
+- The observation timestamp is stable across polls so updates land on the same row
 - You want to minimize storage
 
-Each entity has at most one observation row. New data overwrites the previous observation.
+New data overwrites the previous observation only when the `(entity_id, ts)` pair matches; a changed timestamp produces an additional row rather than replacing the prior one.
 
 **Example use cases:** earthquakes, weather stations, sensor readings, infrastructure status.
 

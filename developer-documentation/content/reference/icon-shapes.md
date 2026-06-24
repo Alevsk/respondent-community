@@ -1,10 +1,10 @@
 ---
 title: "Icon Shapes"
-description: "All 57 available icon shapes for entity display"
+description: "All 56 available icon shapes for entity display"
 weight: 4
 ---
 
-Respondent provides 57 icon shapes for entity rendering on the 3D globe. Set the shape in your source definition's `display.icon.shape` field. Unknown shape names fall back to `dot`.
+Respondent provides 56 icon shapes for entity rendering on the 3D globe. Set the shape in your source definition's `display.icon.shape` field. Unknown shape names fall back to `dot`.
 
 ```yaml
 display:

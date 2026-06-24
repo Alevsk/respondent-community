@@ -42,15 +42,11 @@ Metadata labels for filtering and searching analysis definitions. Used by the UI
 {{< /field >}}
 
 {{< field name="max_tokens" type="integer" required="false" >}}
-LLM response token budget. Set this high enough to avoid truncation but low enough to control cost. 2000 is usually sufficient for single-record analyses. For multi-record analyses producing per-record assessments, use 4000-5000.
+LLM response token budget (validator range: 1-128000). Set this high enough to avoid truncation but low enough to control cost. Most analysis definitions in `analysis.d/` that emit per-item assessment arrays use `8000`-`16000` (commonly `12000`); single-summary analyses can run much lower. The hard cap is far higher than typical needs, so size it to your schema rather than to the ceiling.
 {{< /field >}}
 
 {{< field name="temperature" type="float" required="false" default="0" >}}
-LLM creativity dial. Range: 0.0 (deterministic) to 1.0 (creative). Use `0` or `0.1` for scoring and classification tasks where reproducibility matters. Use `0.3`-`0.5` for open-ended narrative generation.
-{{< /field >}}
-
-{{< field name="cache_ttl" type="duration" required="false" >}}
-Cache LLM responses for this duration to avoid redundant calls. Example: `"1h"`, `"24h"`. If the same input data produces the same prompt, the cached response is returned without an LLM call.
+LLM creativity dial. Range: 0.0 (deterministic) to 2.0 (validator `min=0,max=2`). Use `0` or `0.1` for scoring and classification tasks where reproducibility matters. Use `0.3`-`0.5` for open-ended narrative generation.
 {{< /field >}}
 
 ---
@@ -81,7 +77,13 @@ These are the same template variables described in [Data Queries](../data-querie
 - `{{.RecordCount}}` -- total records
 - `{{.Lookback}}` -- time window as a duration string
 - `{{.Records}}` -- iterate with `{{range .Records}}...{{end}}`
+- `{{.LayerCount}}` -- number of distinct `layer_type` values in `.Records`
+- `{{.LayerStats}}` -- per-layer statistics (count, field coverage, coordinate/altitude percentages, unique/duplicate external IDs)
 - `{{.OutputSchema}}` -- auto-injected JSON Schema string
+
+{{< callout type="info" title="Attention suffix is appended automatically" >}}
+When an operation defines an `output_schema`, the engine appends a base-schema instruction block to your rendered prompt before sending it to the LLM. This block tells the model to emit the required `attention` field (`info`/`low`/`medium`/`high`/`critical`) on every item, and injects the matching `attention` property into your schema. You do not write this yourself -- author your prompt and schema as if `attention` were already there.
+{{< /callout >}}
 
 Inside `{{range .Records}}`:
 
@@ -223,6 +225,27 @@ How long insights are kept before automatic cleanup. The engine runs an hourly c
 JSON path to an array field in the LLM response. When set, the engine iterates the array and stores **one `ai_insight` per array item**. If the array is empty, a single summary insight is stored instead (the full LLM response). If omitted, the entire LLM response is stored as a single insight.
 {{< /field >}}
 
+{{< field name="output.min_attention" type="string" required="false" >}}
+Minimum attention level a result must carry to be stored and pushed. One of `info`, `low`, `medium`, `high`, `critical`. Results below this floor -- including results with absent or unclassified attention, which are treated as `info` -- are dropped before storage and notification. When `results_path` points at an empty array, the all-clear summary insight is also suppressed if a floor is configured (an empty result is `info` by definition). When unset, the engine-wide `ai.min_attention` default applies (community default: `low`); a per-operation value here overrides that default.
+{{< /field >}}
+
+{{< field name="output.ref_fields" type="object[]" required="false" >}}
+Cross-layer entity references. Each entry links a field in the LLM result item -- whose value is an `external_id` -- to an entity in another layer, creating an additional `ai_insight_refs` row. Both keys are required per entry:
+
+- `field` (string, required) -- the result-item property holding the external ID
+- `layer_type` (string, required) -- the layer to scope the `external_id` lookup, preventing collisions when different layers share the same ID
+
+This is how an insight is linked to entities it references but did not iterate over -- e.g. linking an infrastructure-threat insight to both the hazard entity and the affected infrastructure entity.
+
+```yaml
+output:
+  results_path: "assessments"
+  ref_fields:
+    - field: "conflict_external_id"
+      layer_type: "conflict_events"
+```
+{{< /field >}}
+
 ### results_path behavior
 
 When your LLM returns a response like:
@@ -245,8 +268,6 @@ Omit `results_path` when your analysis produces a single overall assessment (e.g
 
 ### Entity linking
 
-When your output schema includes an `entity_external_id` field and you have `data.layers` configured, the engine resolves each external ID to a database entity UUID and creates an `ai_insight_refs` row. This links the insight to the source entity, enabling "show all insights for this entity" queries in the frontend.
+When a `results_path` item includes an `entity_external_id` field (optionally scoped by `entity_layer_type`), the engine matches it against the fetched records and creates an `ai_insight_refs` row for each matched entity. This links the insight to its source entity, enabling "show all insights for this entity" queries in the frontend.
 
-{{< callout type="info" title="SQL-path analyses skip entity linking" >}}
-For SQL-based analyses without `data.layers`, entity external ID resolution is skipped. This is expected behavior -- the debug log message "no layers configured for external ID resolution" is harmless.
-{{< /callout >}}
+This works on **both** data paths. Layer-based fetches set each record's `EntityID` from the queried entity; SQL-based fetches (`data.sql`) populate it from the result's `entity_id`/`external_id` columns (`rowToAnalysisRecord`). Matching is by `external_id` value, scoped to `entity_layer_type` when the item provides it, so SQL-path analyses link entities exactly like layer-path analyses. For broader links to entities an item references but did not iterate over, use [`output.ref_fields`](#output-configuration).

@@ -72,9 +72,9 @@ observation:
     unix_ms(record.time)
   velocity:
     speed: >
-      has(record.speed) ? string(record.speed) : "0"
+      has(record.speed) ? double(record.speed) : 0.0
     heading: >
-      has(record.heading) ? string(record.heading) : "0"
+      has(record.heading) ? double(record.heading) : 0.0
   metadata:
     status: >
       has(record.status) ? record.status : ""
@@ -164,18 +164,18 @@ observation:
 
 ### Velocity fields
 
-{{< field name="velocity" type="map[string]CEL -> string" required="false" >}}
-Velocity components for moving entities. Keys are arbitrary names (commonly `speed`, `heading`, `climb`). Values must be CEL expressions returning strings.
+{{< field name="velocity" type="map[string]CEL -> number" required="false" >}}
+Velocity components for moving entities. Keys are arbitrary names (commonly `speed`, `heading`, `climb`). Each value is a CEL expression that must evaluate to a number -- it is stored as `map[string]float64` via numeric evaluation. A component whose expression returns a non-numeric value (or errors) is silently dropped from the velocity map.
 {{< /field >}}
 
 ```yaml
 velocity:
   speed: >
-    has(record.speed) ? string(record.speed) : "0"
+    has(record.speed) ? double(record.speed) : 0.0
   heading: >
-    has(record.heading) ? string(record.heading) : "0"
+    has(record.heading) ? double(record.heading) : 0.0
   climb: >
-    has(record.vertical_rate) ? string(record.vertical_rate) : "0"
+    has(record.vertical_rate) ? double(record.vertical_rate) : 0.0
 ```
 
 {{< callout type="info" title="Velocity enables smooth interpolation" >}}
@@ -259,13 +259,36 @@ entity:
 ```
 
 {{< cel-example expression="lookup(\"country_codes\", record.country, \"name\")" input="record.country = \"US\"" output="\"United States\"" >}}
-Lookup table query -- retrieves a field from a named lookup table by key.
+Lookup table query -- retrieves a field from a named lookup table by key. Returns `dyn` (the entry value's native type), or a CEL error if the table, key, or field is not found.
+{{< /cel-example >}}
+
+The lookup family also includes a presence check and a default-aware variant:
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `lookup(table, key, field)` | dyn | Retrieve a field from a lookup table entry. Errors if the table, key, or field is missing. |
+| `has_lookup(table, key)` | bool | Report whether `key` exists in the named lookup table. Returns `false` if the table is unknown. |
+| `lookup_or(table, key, field, default)` | dyn | Like `lookup`, but returns `default` instead of erroring when the table, key, or field is missing. |
+
+{{< cel-example expression="has_lookup(\"country_codes\", record.country)" input="record.country = \"US\"" output="true" >}}
+Presence check -- safe to call before `lookup` when a key may be absent.
+{{< /cel-example >}}
+
+{{< cel-example expression="lookup_or(\"country_codes\", record.country, \"name\", \"unknown\")" input="record.country = \"ZZ\"" output="\"unknown\"" >}}
+Default-aware lookup -- returns the supplied default rather than erroring on a missing key.
 {{< /cel-example >}}
 
 ### TLE orbital functions
 
-For satellite TLE data, use SGP4 propagation functions:
+For satellite TLE data, use SGP4 propagation functions. Each propagates the TLE to the current time. All four return `0.0` on a malformed or invalid TLE.
+
+| CEL Function | Returns | Description |
+|-------------|---------|-------------|
+| `sgp4_lat(line1, line2)` | double | Current latitude in degrees |
+| `sgp4_lon(line1, line2)` | double | Current longitude in degrees |
+| `sgp4_alt_m(line1, line2)` | double | Current altitude in meters |
+| `sgp4_vel_mps(line1, line2)` | double | Current velocity in meters per second |
 
 {{< cel-example expression="sgp4_lat(record.line1, record.line2)" input="record.line1 = \"1 25544U ...\"" output="42.35" >}}
-Propagate the TLE to the current time and return the satellite's latitude.
+Propagate the TLE to the current time and return the satellite's latitude in degrees.
 {{< /cel-example >}}

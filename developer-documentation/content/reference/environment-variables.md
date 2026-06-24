@@ -17,6 +17,12 @@ For example, `server.port` in `respondent.yaml` maps to `RESPONDENT_SERVER_PORT`
 | Variable | Config Key | Type | Default | Description |
 |----------|-----------|------|---------|-------------|
 | `RESPONDENT_DATABASE_PATH` | `database.path` | string | `./respondent.db` | Path to the SQLite database file |
+| `RESPONDENT_DATABASE_RETENTION_MAX_SIZE` | `database.retention.max_size` | string | `""` | High watermark as a humanized size (e.g. `50GB`); empty disables retention (opt-in) |
+| `RESPONDENT_DATABASE_RETENTION_LOW_WATER_RATIO` | `database.retention.low_water_ratio` | float | `0.90` | Prune down to `max_size * this ratio` |
+| `RESPONDENT_DATABASE_RETENTION_CHECK_INTERVAL` | `database.retention.check_interval` | duration | `10m` | How often size is measured and pruning runs |
+| `RESPONDENT_DATABASE_RETENTION_BATCH_SIZE` | `database.retention.batch_size` | integer | `5000` | Observation rows deleted per transaction |
+| `RESPONDENT_DATABASE_RETENTION_MAX_BATCHES_PER_TICK` | `database.retention.max_batches_per_tick` | integer | `200` | Max delete batches per tick |
+| `RESPONDENT_DATABASE_RETENTION_INCREMENTAL_VACUUM_PAGES` | `database.retention.incremental_vacuum_pages` | integer | `10000` | Pages reclaimed to the OS per tick |
 
 ## Server
 
@@ -28,14 +34,14 @@ For example, `server.port` in `respondent.yaml` maps to `RESPONDENT_SERVER_PORT`
 
 | Variable | Config Key | Type | Default | Description |
 |----------|-----------|------|---------|-------------|
-| `RESPONDENT_FRONTEND_CESIUM_ION_TOKEN` | `frontend.cesium_ion_token` | string | `""` | Cesium Ion access token for 3D globe terrain and imagery |
-| `RESPONDENT_FRONTEND_MAPBOX_TOKEN` | `frontend.mapbox_token` | string | `""` | Mapbox access token for geocoding and map tiles |
+| `RESPONDENT_FRONTEND_CESIUM_ION_TOKEN` | `frontend.cesium_ion_token` | string | `""` | Cesium ion client token for 3D globe terrain and imagery; served to the browser via `GET /config.json` |
 
 ## Ingest
 
 | Variable | Config Key | Type | Default | Description |
 |----------|-----------|------|---------|-------------|
-| `RESPONDENT_INGEST_SOURCES_DIR` | `ingest.sources_dir` | string | `./sources.d` | Directory containing source definition YAML files |
+| `RESPONDENT_INGEST_ENABLED` | `ingest.enabled` | boolean | `true` | Gates the live feeder; set `false` to serve a fully static instance (no source fetching) |
+| `RESPONDENT_INGEST_SOURCES_DIR` | `ingest.sources_dir` | string | _(none)_ | Directory containing source definition YAML files; no code-backed default — empty unless set (the shipped `respondent.yaml` uses `./sources.d`) |
 | `RESPONDENT_INGEST_DEV_MODE` | `ingest.dev_mode` | boolean | `false` | Enable dev mode for dry-run testing |
 
 ## AI
@@ -43,7 +49,8 @@ For example, `server.port` in `respondent.yaml` maps to `RESPONDENT_SERVER_PORT`
 | Variable | Config Key | Type | Default | Description |
 |----------|-----------|------|---------|-------------|
 | `RESPONDENT_AI_ENABLED` | `ai.enabled` | boolean | `false` | Enable AI enrichment and analysis features |
-| `RESPONDENT_AI_ANALYSIS_DIR` | `ai.analysis_dir` | string | `analysis.d/` | Directory containing analysis definition YAML files |
+| `RESPONDENT_AI_MIN_ATTENTION` | `ai.min_attention` | string | `low` | Engine-wide noise floor (`info`/`low`/`medium`/`high`/`critical`); insights below it are not stored or notified unless an analysis sets `output.min_attention` |
+| `RESPONDENT_AI_ANALYSIS_DIR` | `ai.analysis_dir` | string | _(none)_ | Directory containing analysis definition YAML files; no code-backed default — empty unless set (the shipped `respondent.yaml` uses `./analysis.d`) |
 | `RESPONDENT_AI_WORKERS_ENRICHMENT` | `ai.workers.enrichment` | integer | `2` | Concurrent AI enrichment workers |
 | `RESPONDENT_AI_WORKERS_ANALYSIS` | `ai.workers.analysis` | integer | `1` | Concurrent AI analysis workers |
 
@@ -96,10 +103,12 @@ Each provider has its own set of configuration variables. Only the active provid
 
 | Variable | Config Key | Description |
 |----------|-----------|-------------|
-| `RESPONDENT_LLM_ZAI_API_KEY` | `llm.zai.api_key` | ZAI API key |
-| `RESPONDENT_LLM_ZAI_MODEL` | `llm.zai.model` | Model name |
+| `RESPONDENT_LLM_ZAI_API_KEY` | `llm.zai.api_key` | ZAI (GLM) API key |
+| `RESPONDENT_LLM_ZAI_MODEL` | `llm.zai.model` | Model name (e.g. `glm-5.2`) |
 | `RESPONDENT_LLM_ZAI_MAX_TOKENS` | `llm.zai.max_tokens` | Max response tokens |
 | `RESPONDENT_LLM_ZAI_BASE_URL` | `llm.zai.base_url` | Custom API base URL |
+| `RESPONDENT_LLM_ZAI_TIMEOUT` | `llm.zai.timeout` | Per-request HTTP timeout (default `120s`) |
+| `RESPONDENT_LLM_ZAI_ENABLE_THINKING` | `llm.zai.enable_thinking` | Enable the GLM reasoning phase (default `false`) |
 
 **Ollama**
 
@@ -121,7 +130,10 @@ Each provider has its own set of configuration variables. Only the active provid
 | Variable | Config Key | Type | Default | Description |
 |----------|-----------|------|---------|-------------|
 | `RESPONDENT_LOGGING_LEVEL` | `logging.level` | string | `info` | Log level: `debug`, `info`, `warn`, `error` |
-| `RESPONDENT_LOGGING_FORMAT` | `logging.format` | string | `json` | Log format: `json` or `console` |
+
+{{< callout type="info" title="Log format is always console" >}}
+The community binary always emits human-readable console output; there is no log-format setting. `RESPONDENT_LOGGING_FORMAT` is not honored.
+{{< /callout >}}
 
 ## Source Credentials
 

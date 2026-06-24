@@ -50,19 +50,19 @@ data:
   min_records: 5
   max_records: 50
   filter: >
-    double(metadata.magnitude) >= 4.0
+    double(entity.metadata.magnitude) >= 4.0
 ```
 
 {{< field name="data.layers" type="string[]" required="true" >}}
 Array of layer types to query. The engine fetches the latest entities for each layer and combines the results. Example: `[earthquakes]`, `[flights_military, conflict_events]`.
 {{< /field >}}
 
-{{< field name="data.lookback" type="duration" required="false" >}}
+{{< field name="data.lookback" type="duration" required="true" >}}
 Time window for data freshness. Records with timestamps older than `now() - lookback` are discarded. Example: `"24h"`, `"6h"`, `"168h"`.
 {{< /field >}}
 
 {{< field name="data.filter" type="string" required="false" >}}
-CEL expression to filter records after fetching. The expression receives `metadata` as a map of entity metadata fields. Records where the expression evaluates to `false` are excluded.
+CEL expression to filter records after fetching. The expression receives `entity` and `observation` as maps; access entity metadata via `entity.metadata.<field>` and observation metadata via `observation.metadata.<field>`. Records where the expression evaluates to `false` are excluded.
 {{< /field >}}
 
 {{< field name="data.min_records" type="integer" required="false" >}}
@@ -81,7 +81,7 @@ Layer-based queries are the right choice when you analyze data from one or two l
 
 ## SQL-based queries
 
-SQL-based queries give you direct access to the database with PostGIS spatial functions. This is required for cross-layer analysis where you correlate entities from different layers based on geographic proximity.
+SQL-based queries give you direct access to the database. The engine runs on read-only **SQLite** (the `modernc.org/sqlite` pure-Go driver) -- there is **no PostGIS**. Spatial proximity is computed with a registered `haversine_km()` SQLite function plus a lat/lon bounding-box prefilter. SQL is the right tool for cross-layer analysis where you correlate entities from different layers based on geographic proximity.
 
 ```yaml
 data:
@@ -89,124 +89,146 @@ data:
   min_records: 1
   max_records: 30
   sql: |
+    WITH latest_quake AS (
+      SELECT o.entity_id, o.lat, o.lon, o.altitude_m, o.ts,
+             ROW_NUMBER() OVER (PARTITION BY o.entity_id ORDER BY o.ts DESC) AS rn
+      FROM observations o
+      JOIN entities e ON e.id = o.entity_id AND e.layer_type = 'earthquakes'
+      WHERE julianday(o.ts) > julianday('now','-24 hours')
+    )
     SELECT
       e.id AS entity_id,
       e.name AS name,
       e.external_id AS external_id,
-      e.layer_type AS layer_type,
-      o.lat, o.lon, 0.0 AS altitude_m,
-      o.ts,
-      e.metadata->>'magnitude' AS magnitude
-    FROM entities e
-    CROSS JOIN LATERAL (
-      SELECT lat, lon, position, ts
-      FROM observations
-      WHERE entity_id = e.id
-      ORDER BY ts DESC LIMIT 1
-    ) o
-    WHERE e.layer_type = 'earthquakes'
-      AND o.ts > NOW() - INTERVAL '24 hours'
-    ORDER BY (e.metadata->>'magnitude')::float DESC
+      'earthquakes' AS layer_type,
+      lq.lat, lq.lon, lq.altitude_m,
+      lq.ts,
+      json_extract(e.metadata,'$.magnitude') AS magnitude
+    FROM latest_quake lq
+    JOIN entities e ON e.id = lq.entity_id
+    WHERE lq.rn = 1
+    ORDER BY CAST(json_extract(e.metadata,'$.magnitude') AS REAL) DESC
     LIMIT 30
 ```
 
 {{< field name="data.sql" type="string" required="true" >}}
-Raw SQL query executed via the read-only QueryExecutor. The SQL is validated before execution -- no `INSERT`, `UPDATE`, `DELETE`, or `DROP` statements are allowed.
+Raw SQL query executed via the read-only `ReadOnlyQueryExecutor`. The SQL is parsed by `pg_query_go` (the PostgreSQL parser) for validation but **executed on SQLite**, so write PostgreSQL-parseable SQL that uses only SQLite-compatible runtime features. No `INSERT`, `UPDATE`, `DELETE`, `DROP`, or other mutation/DDL statements are allowed -- only a single `SELECT` (a `WITH ... SELECT` CTE counts as one statement).
 {{< /field >}}
 
 {{< callout type="warning" title="SQL is read-only" >}}
-The engine validates your SQL as read-only before execution. Any mutation statements will be rejected with an error.
+The query is validated as read-only at **run time** (not at config-load time). Validation rejects mutations, DDL, multiple statements, `SELECT ... INTO`, locking clauses, `COPY`/`EXECUTE`/`CALL`, `SET`, and `EXPLAIN`. The executor also wraps every query with a hard **500-row cap** and a **~30-second timeout** so a runaway spatial join cannot hang an analysis tick.
+{{< /callout >}}
+
+{{< callout type="info" title="Parsed as PostgreSQL, executed on SQLite" >}}
+The validator parses your SQL with the real PostgreSQL grammar, but the query actually runs on SQLite via `modernc.org/sqlite`. Use SQLite runtime functions: `json_extract()`, `julianday()`, `strftime()`, `group_concat()`, `max()`/`min()`, `CAST(... AS REAL|INTEGER|TEXT)`, and the registered `haversine_km()`. Do **not** use PostgreSQL-only runtime features like `::geography` casts, `ST_DWithin`, `NOW()`, `INTERVAL`, `->>`, `STRING_AGG`, or `GREATEST`/`LEAST` -- they parse but fail (or behave wrongly) at execution.
 {{< /callout >}}
 
 ### Required output columns
 
-Your SQL query must return these standard columns. The engine maps them to the `AnalysisRecord` struct used in prompt templates.
+Your SQL query should return these standard columns. The engine maps them by name to the `AnalysisRecord` struct used in prompt templates.
 
 | Column | Type | Maps to |
 |--------|------|---------|
+| `entity_id` | text | `{{.EntityID}}` (also `{{index .Metadata "entity_id"}}`) |
+| `external_id` | text | `{{.ExternalID}}` (also `{{index .Metadata "entity_external_id"}}`) |
+| `layer_type` | text | `{{.LayerType}}` |
 | `name` | text | `{{.EntityName}}` |
-| `lat` | float | `{{.Lat}}` |
-| `lon` | float | `{{.Lon}}` |
-| `altitude_m` | float | `{{.Altitude}}` |
-| `ts` | timestamp | `{{.Timestamp}}` |
+| `lat` | real | `{{.Lat}}` |
+| `lon` | real | `{{.Lon}}` |
+| `altitude_m` | real | `{{.Altitude}}` |
+| `ts` | text (RFC 3339) | `{{.Timestamp}}` |
 
-Any additional columns beyond these become entries in the `.Metadata` map, accessible in prompts via `{{index .Metadata "column_name"}}`. All metadata values are cast to strings.
+`entity_id`, `external_id`, and `layer_type` matter for cross-layer analyses: they let the engine link insights back to the correct source entity. Any additional columns beyond the standard set become entries in the `.Metadata` map, accessible in prompts via `{{index .Metadata "column_name"}}`. All metadata values are surfaced as strings.
 
 {{< callout type="tip" title="Cast extra columns to text" >}}
-The metadata map stores `map[string]string`. Cast all non-standard columns to text in your SQL: `rs.fatalities::text AS fatalities`. This avoids type mismatch errors at runtime.
+The metadata map stores `map[string]string`. Cast all non-standard columns to text in your SQL with SQLite's `CAST`: `CAST(rs.fatalities AS TEXT) AS fatalities`. This avoids type-coercion surprises in prompt rendering.
 {{< /callout >}}
 
-### CROSS JOIN LATERAL pattern
+### Latest-observation pattern (ROW_NUMBER window CTE)
 
-The most common SQL pattern is using `CROSS JOIN LATERAL` to get the latest observation for each entity. This is the standard approach because entities can have multiple observations (in `append` recording mode), and you typically want only the most recent position.
-
-```sql
-SELECT
-  e.name, o.lat, o.lon, 0.0 AS altitude_m, o.ts
-FROM entities e
-CROSS JOIN LATERAL (
-  SELECT lat, lon, position, ts
-  FROM observations
-  WHERE entity_id = e.id
-  ORDER BY ts DESC LIMIT 1
-) o
-WHERE e.layer_type = 'earthquakes'
-```
-
-{{< callout type="info" title="Why CROSS JOIN LATERAL?" >}}
-`CROSS JOIN LATERAL` allows the subquery to reference `e.id` from the outer query. It returns exactly one row per entity (the latest observation), which is what you want for point-in-time analysis. Without `LATERAL`, you would need a more complex correlated subquery or window function.
-{{< /callout >}}
-
-### ST_DWithin for spatial proximity
-
-To correlate entities across layers by geographic proximity, use `ST_DWithin()` with the `geography` type.
+The most common SQL pattern is fetching the latest observation for each entity. Entities can have multiple observations (in `append` recording mode), and you typically want only the most recent position. There is no `CROSS JOIN LATERAL` in SQLite -- use a `ROW_NUMBER() OVER (PARTITION BY entity_id ORDER BY ts DESC)` window CTE and join on `rn = 1`.
 
 ```sql
-ST_DWithin(
-  point_a.position::geography,
-  point_b.position::geography,
-  500000  -- distance in meters (500km)
+WITH latest_quake AS (
+  SELECT o.entity_id, o.lat, o.lon, o.altitude_m, o.ts,
+         ROW_NUMBER() OVER (PARTITION BY o.entity_id ORDER BY o.ts DESC) AS rn
+  FROM observations o
+  JOIN entities e ON e.id = o.entity_id AND e.layer_type = 'earthquakes'
 )
+SELECT e.name, lq.lat, lq.lon, lq.altitude_m, lq.ts
+FROM latest_quake lq
+JOIN entities e ON e.id = lq.entity_id
+WHERE lq.rn = 1
 ```
 
-{{< callout type="info" title="Geography vs. geometry" >}}
-The `::geography` cast is important. Without it, PostGIS uses planar geometry (degrees), which produces incorrect distances on a spherical earth. With `::geography`, `ST_DWithin` computes great-circle distances in meters using the WGS84 spheroid. The `position` column in the observations table stores a PostGIS `geometry(Point, 4326)` that you cast to `geography` for accurate distance calculations.
+{{< callout type="info" title="Why a window CTE?" >}}
+`ROW_NUMBER() OVER (PARTITION BY entity_id ORDER BY ts DESC)` ranks each entity's observations newest-first; filtering `rn = 1` keeps exactly one row per entity (the latest), which is what you want for point-in-time analysis. For large layers, prefer the **observation-first** form (scan `observations`, then `JOIN entities`) and bound it with a recency filter so the window only ranks recent rows. The schema's `observations` table stores plain `lat REAL` / `lon REAL` (no `position` geometry column).
 {{< /callout >}}
 
-A typical cross-layer spatial join uses CTEs (Common Table Expressions) to structure the query:
+### haversine_km for spatial proximity
+
+There is no PostGIS. To correlate entities across layers by geographic proximity, use the registered `haversine_km(lat1, lon1, lat2, lon2)` function (great-circle distance in **kilometres**) gated by a radius, **plus a lat/lon bounding-box prefilter** so the expensive geodesic call only runs on plausible candidates.
 
 ```sql
-WITH anchor AS (
-  -- CTE 1: Primary layer (geographic anchor points)
-  SELECT e.id, e.name, o.lat, o.lon, o.position
-  FROM entities e
-  CROSS JOIN LATERAL (
-    SELECT lat, lon, position FROM observations WHERE entity_id = e.id ORDER BY ts DESC LIMIT 1
-  ) o
-  WHERE e.layer_type = 'earthquakes'
+-- bounding-box prefilter (cheap), THEN precise haversine gate (expensive)
+WHERE b.lat BETWEEN a.lat - (500.0/111.32) AND a.lat + (500.0/111.32)
+  AND b.lon BETWEEN a.lon - (500.0 / (111.32 * max(COS(RADIANS(a.lat)), 0.01)))
+                AND a.lon + (500.0 / (111.32 * max(COS(RADIANS(a.lat)), 0.01)))
+  AND haversine_km(a.lat, a.lon, b.lat, b.lon) <= 500   -- radius in km
+```
+
+{{< callout type="warning" title="Bounding box first, then haversine" >}}
+`haversine_km` is a deterministic scalar evaluated per row pair; running it across every entity in a second layer is millions of `COS`/`RADIANS` calls. Always pre-filter with the bounding box first. The latitude bound is `radius_km / 111.32` (degrees per km); the longitude bound divides by `max(COS(RADIANS(lat)), 0.01)` to widen the box near the poles. Use SQLite's `max()` for the floor -- **never** `GREATEST`, which does not exist in SQLite. NULL lat/lon are naturally excluded by the `<= radius` predicate.
+{{< /callout >}}
+
+A typical cross-layer spatial join uses CTEs (Common Table Expressions) to structure the query. Force the heavy inner hazard/anchor set with `AS MATERIALIZED` so SQLite computes it once instead of re-running it per candidate in the spatial join:
+
+```sql
+WITH latest_alert AS (
+  -- Latest observation per disaster entity (replaces LATERAL).
+  SELECT o.entity_id, o.lat, o.lon,
+         ROW_NUMBER() OVER (PARTITION BY o.entity_id ORDER BY o.ts DESC) AS rn
+  FROM observations o
+  JOIN entities e ON e.id = o.entity_id AND e.layer_type = 'disaster_alerts'
+),
+anchor AS MATERIALIZED (
+  -- CTE: Primary layer (geographic anchor points), latest position per entity.
+  SELECT e.id, e.name, e.external_id, lq.lat, lq.lon
+  FROM (
+    SELECT o.entity_id, o.lat, o.lon,
+           ROW_NUMBER() OVER (PARTITION BY o.entity_id ORDER BY o.ts DESC) AS rn
+    FROM observations o
+    JOIN entities e ON e.id = o.entity_id AND e.layer_type = 'earthquakes'
+    WHERE julianday(o.ts) > julianday('now','-24 hours')
+  ) lq
+  JOIN entities e ON e.id = lq.entity_id
+  WHERE lq.rn = 1
 ),
 nearby_alerts AS (
-  -- CTE 2: Secondary layer correlated by proximity
+  -- Secondary layer correlated by proximity (bbox prefilter + haversine gate).
   SELECT
     a.name AS anchor_name,
     COUNT(DISTINCT d.id) AS alert_count
   FROM anchor a
   JOIN entities d ON d.layer_type = 'disaster_alerts'
-  CROSS JOIN LATERAL (
-    SELECT position FROM observations WHERE entity_id = d.id ORDER BY ts DESC LIMIT 1
-  ) o_d
-  WHERE ST_DWithin(a.position::geography, o_d.position::geography, 500000)
+  JOIN latest_alert o_d ON o_d.entity_id = d.id AND o_d.rn = 1
+  WHERE o_d.lat BETWEEN a.lat - (500.0/111.32) AND a.lat + (500.0/111.32)
+    AND o_d.lon BETWEEN a.lon - (500.0 / (111.32 * max(COS(RADIANS(a.lat)), 0.01)))
+                    AND a.lon + (500.0 / (111.32 * max(COS(RADIANS(a.lat)), 0.01)))
+    AND haversine_km(a.lat, a.lon, o_d.lat, o_d.lon) <= 500
   GROUP BY a.name
 )
 SELECT
-  a.name, a.lat, a.lon, 0.0 AS altitude_m, NOW() AS ts,
-  COALESCE(na.alert_count, 0)::text AS nearby_alerts
+  a.id AS entity_id, a.external_id AS external_id, 'earthquakes' AS layer_type,
+  a.name, a.lat, a.lon, 0.0 AS altitude_m,
+  strftime('%Y-%m-%dT%H:%M:%SZ','now') AS ts,
+  CAST(COALESCE(na.alert_count, 0) AS TEXT) AS nearby_alerts
 FROM anchor a
 LEFT JOIN nearby_alerts na ON na.anchor_name = a.name
 ```
 
 {{< callout type="tip" title="Use LEFT JOINs in the final SELECT" >}}
-Use `LEFT JOIN` when merging signal CTEs back to anchor entities. This ensures anchor entities appear even when they have no matches in a secondary layer. Use `COALESCE` to fill in defaults (`0` for counts, `'none'` for strings) for missing signals.
+Use `LEFT JOIN` when merging signal CTEs back to anchor entities. This ensures anchor entities appear even when they have no matches in a secondary layer. Use `COALESCE` to fill in defaults (`0` for counts, `'none'` for strings) for missing signals. When a row has no real observation timestamp to report (e.g. an aggregated anchor), synthesize one with `strftime('%Y-%m-%dT%H:%M:%SZ','now') AS ts`.
 {{< /callout >}}
 
 ---
@@ -252,6 +274,7 @@ Inside `{{range .Records}}...{{end}}`, each record exposes:
 
 | Variable | Type | Description |
 |----------|------|-------------|
+| `{{.EntityID}}` | string | Entity ID (internal UUID) |
 | `{{.EntityName}}` | string | Entity name |
 | `{{.ExternalID}}` | string | Entity external ID |
 | `{{.LayerType}}` | string | Source layer type |
@@ -262,5 +285,5 @@ Inside `{{range .Records}}...{{end}}`, each record exposes:
 | `{{index .Metadata "key"}}` | string | Any non-standard SQL column or entity metadata field |
 
 {{< callout type="info" title="Metadata comes from extra columns" >}}
-For layer-based queries, `.Metadata` contains the entity's metadata fields. For SQL-based queries, any column beyond the standard set (`name`, `lat`, `lon`, `altitude_m`, `ts`) becomes a `.Metadata` entry. The column name becomes the map key.
+For layer-based queries, `.Metadata` contains the entity's metadata fields. For SQL-based queries, any column beyond the standard set (`entity_id`, `external_id`, `name`, `layer_type`, `lat`, `lon`, `altitude_m`, `ts`) becomes a `.Metadata` entry; the column name becomes the map key. The engine also mirrors the structural fields into `.Metadata` as `entity_id`, `entity_external_id`, `entity_name`, and `layer_type`, so `dedup.key_fields` and CEL filters can reference them uniformly.
 {{< /callout >}}

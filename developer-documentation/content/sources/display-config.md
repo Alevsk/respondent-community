@@ -20,6 +20,11 @@ display:
   style:
     color: "#ffffff"
     point_size: 6
+  color_by:
+    field: status
+    values:
+      operational: "#00ff9d"
+    default_color: "#888888"
   field_renderers: []
 ```
 
@@ -128,6 +133,37 @@ Base point size in pixels. Range: 1 to 32. A value of 6-8 is standard.
 style:
   color: "#ff006e"
   point_size: 6
+```
+
+---
+
+## Color by
+
+Colors each entity by the value of a metadata field instead of applying a single base color. When present, `color_by` overrides `style.color` per entity: the client looks up the entity's `field` value in `values` and uses the matched hex color, falling back to `default_color`.
+
+{{< field name="color_by.field" type="string" required="true" >}}
+Metadata field name whose value selects the color.
+{{< /field >}}
+
+{{< field name="color_by.values" type="map[string]string" required="true" >}}
+Map of field value to hex color (`#rrggbb`). At least one entry is required, and each value must be a valid hex color.
+{{< /field >}}
+
+{{< field name="color_by.default_color" type="string" required="false" >}}
+Hex color used when the entity's field value is not found in `values`.
+{{< /field >}}
+
+This example, from `sources.d/wikidata_nuclear_facilities.yaml`, colors each facility by its operational status:
+
+```yaml
+color_by:
+  field: status
+  values:
+    operational: "#00ff9d"
+    under_construction: "#ffcc00"
+    shutdown: "#ff9900"
+    decommissioned: "#ff4444"
+  default_color: "#888888"
 ```
 
 ---

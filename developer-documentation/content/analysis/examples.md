@@ -4,7 +4,11 @@ description: "Complete analysis definitions — from simple anomaly detection to
 weight: 3
 ---
 
-This page provides two complete analysis definitions that you can copy into your `analysis.d/` directory. The first is a straightforward layer-based analysis; the second demonstrates cross-layer SQL with PostGIS spatial joins.
+This page provides two complete analysis definitions that you can copy into your `analysis.d/` directory. The first is a straightforward layer-based analysis; the second demonstrates cross-layer SQL on the read-only SQLite engine using `haversine_km()` proximity joins (there is **no PostGIS**).
+
+{{< callout type="info" title="These examples ship disabled" >}}
+Both definitions below ship in the repo under `analysis.d/disabled/` (`ocean_buoy_anomaly.yaml` and `geopolitical_hotspot_index.yaml`) so they don't run out of the box. Files in `disabled/` are not loaded by the engine. To run one, copy it into `analysis.d/` and set `enabled: true`.
+{{< /callout >}}
 
 ---
 
@@ -67,6 +71,9 @@ ai:
         Classify each finding as: normal, watch, warning, or critical.
         Only include buoys with non-normal classifications in the results.
 
+        Set "attention" DIRECTLY from each finding's classification (do not
+        auto-elevate): watch -> low, warning -> medium, critical -> critical.
+
         Respond with JSON matching this schema:
         {{.OutputSchema}}
       output_schema:
@@ -79,7 +86,7 @@ ai:
             type: array
             items:
               type: object
-              required: [buoy_name, classification, assessment]
+              required: [buoy_name, classification, attention, assessment]
               properties:
                 buoy_name: { type: string }
                 lat: { type: number }
@@ -87,17 +94,25 @@ ai:
                 classification:
                   type: string
                   enum: [watch, warning, critical]
+                attention:
+                  type: string
+                  enum: [info, low, medium, high, critical]
                 assessment: { type: string }
                 entity_external_id: { type: string }
       max_tokens: 3000
       temperature: 0.1
       output:
         store_insights: true
+        min_attention: "low"   # noise gate: drop results below this attention
         insight_type: "ocean_buoy_anomaly"
         results_path: "results"
         websocket_push: true
         retention: "168h"
 ```
+
+{{< callout type="info" title="min_attention is the noise gate" >}}
+`min_attention: "low"` tells the engine to store and push only results whose `attention` is `low` or higher (the ranking is `info < low < medium < high < critical`). Results below the floor -- and any unclassified result, treated as `info` -- are dropped before storage and before the WebSocket notify. Set the `attention` field from the model's own per-result severity; the gate then suppresses the analysis's own routine/"all clear" conclusions instead of paging the operator with them. When no per-operation floor is set, the engine-wide `ai.min_attention` default applies.
+{{< /callout >}}
 
 {{< callout type="info" title="results_path creates per-buoy insights" >}}
 Setting `results_path: "results"` tells the engine to iterate the `results` array and store one `ai_insight` per anomalous buoy. If no anomalies are found (empty array), a single summary insight is stored instead. This makes it possible to query "show all buoy warnings" from the API.
@@ -109,7 +124,7 @@ Temperature `0.1` keeps the LLM deterministic for classification tasks. If you f
 
 ### Complete definition
 
-Save this as `analysis.d/ocean_buoy_anomaly.yaml`:
+Save this as `analysis.d/ocean_buoy_anomaly.yaml` (the repo ships a placeholder version under `analysis.d/disabled/`; set `enabled: true` to run it):
 
 ```yaml
 # analysis.d/ocean_buoy_anomaly.yaml
@@ -156,6 +171,9 @@ ai:
         Classify each finding as: normal, watch, warning, or critical.
         Only include buoys with non-normal classifications in the results.
 
+        Set "attention" DIRECTLY from each finding's classification (do not
+        auto-elevate): watch -> low, warning -> medium, critical -> critical.
+
         Respond with JSON matching this schema:
         {{.OutputSchema}}
       output_schema:
@@ -168,7 +186,7 @@ ai:
             type: array
             items:
               type: object
-              required: [buoy_name, classification, assessment]
+              required: [buoy_name, classification, attention, assessment]
               properties:
                 buoy_name: { type: string }
                 lat: { type: number }
@@ -176,12 +194,16 @@ ai:
                 classification:
                   type: string
                   enum: [watch, warning, critical]
+                attention:
+                  type: string
+                  enum: [info, low, medium, high, critical]
                 assessment: { type: string }
                 entity_external_id: { type: string }
       max_tokens: 3000
       temperature: 0.1
       output:
         store_insights: true
+        min_attention: "low"   # noise gate: drop results below this attention
         insight_type: "ocean_buoy_anomaly"
         results_path: "results"
         websocket_push: true
@@ -192,10 +214,10 @@ ai:
 
 ## Advanced: Geopolitical Hotspot Index
 
-This analysis fuses two data layers -- conflict events and military aircraft -- into a composite threat score per region. It demonstrates SQL-based queries with PostGIS spatial joins, weighted scoring rubrics, and array output.
+This analysis fuses **four** data layers -- conflict events, military aircraft, disaster alerts, and internet outages -- into a composite threat score per region. It demonstrates SQL-based queries on the SQLite engine using `haversine_km()` proximity joins (no PostGIS), weighted scoring rubrics, and array output. It ships disabled at `analysis.d/disabled/geopolitical_hotspot_index.yaml`.
 
 {{< callout type="info" title="Cross-layer signal fusion" >}}
-The core idea: anchor on conflict regions, then spatially search for corroborating signals from other layers within a radius. Military aircraft near a conflict zone is a stronger signal than a conflict zone alone. This multi-signal approach produces more accurate threat assessments than single-layer analysis.
+The core idea: anchor on conflict regions with fatalities, then spatially search for corroborating signals from three other layers within a radius -- military aircraft (300km), disaster alerts (500km), and internet outages (500km). A conflict zone with military aircraft overhead, a compounding disaster, and internet blackouts is a far stronger signal than a conflict zone alone. This multi-signal approach produces more accurate threat assessments than single-layer analysis.
 {{< /callout >}}
 
 ### Schedule and data
@@ -227,75 +249,131 @@ The `dedup` block ensures that if the same set of conflict regions is returned w
 
 ```yaml
   sql: |
-    WITH region_signals AS (
+    WITH latest_conf AS (
+      -- Latest observation position per conflict entity (replaces LATERAL).
+      SELECT o.entity_id, o.lat, o.lon,
+        ROW_NUMBER() OVER (PARTITION BY o.entity_id ORDER BY o.ts DESC) AS rn
+      FROM observations o
+      JOIN entities e ON e.id = o.entity_id
+      WHERE e.layer_type = 'conflict_events'
+    ),
+    latest_mil AS (
+      SELECT o.entity_id, o.lat, o.lon, o.ts,
+        ROW_NUMBER() OVER (PARTITION BY o.entity_id ORDER BY o.ts DESC) AS rn
+      FROM observations o
+      JOIN entities e ON e.id = o.entity_id
+      WHERE e.layer_type = 'flights_military'
+    ),
+    latest_dis AS (
+      SELECT o.entity_id, o.lat, o.lon,
+        ROW_NUMBER() OVER (PARTITION BY o.entity_id ORDER BY o.ts DESC) AS rn
+      FROM observations o
+      JOIN entities e ON e.id = o.entity_id
+      WHERE e.layer_type = 'disaster_alerts'
+    ),
+    latest_out AS (
+      SELECT o.entity_id, o.lat, o.lon,
+        ROW_NUMBER() OVER (PARTITION BY o.entity_id ORDER BY o.ts DESC) AS rn
+      FROM observations o
+      JOIN entities e ON e.id = o.entity_id
+      WHERE e.layer_type = 'internet_outages'
+    ),
+    region_signals AS (
+      -- CTE 1: ANCHOR — Conflict regions with confirmed fatalities.
       SELECT
         conf.id, conf.name AS region_name, conf.external_id,
-        o_conf.lat, o_conf.lon, o_conf.position,
-        CAST(COALESCE(conf.metadata->>'fatalities', '0') AS int) AS fatalities,
-        CAST(COALESCE(conf.metadata->>'events', '0') AS int) AS event_count
+        o_conf.lat, o_conf.lon,
+        CAST(COALESCE(json_extract(conf.metadata,'$.fatalities'), '0') AS INTEGER) AS fatalities,
+        CAST(COALESCE(json_extract(conf.metadata,'$.events'), '0') AS INTEGER) AS event_count
       FROM entities conf
-      CROSS JOIN LATERAL (
-        SELECT lat, lon, position
-        FROM observations
-        WHERE entity_id = conf.id
-        ORDER BY ts DESC LIMIT 1
-      ) o_conf
+      JOIN latest_conf o_conf ON o_conf.entity_id = conf.id AND o_conf.rn = 1
       WHERE conf.layer_type = 'conflict_events'
-        AND CAST(COALESCE(conf.metadata->>'fatalities', '0') AS int) > 0
+        AND CAST(COALESCE(json_extract(conf.metadata,'$.fatalities'), '0') AS INTEGER) > 0
     ),
     military_presence AS (
+      -- CTE 2: SIGNAL — Military aircraft within 300km, observed in last 24h.
       SELECT
         rs.region_name,
         COUNT(DISTINCT mil.id) AS military_aircraft_count,
-        STRING_AGG(DISTINCT mil.metadata->>'type', ', ') AS aircraft_types
+        group_concat(DISTINCT json_extract(mil.metadata,'$.type')) AS aircraft_types
       FROM region_signals rs
       JOIN entities mil ON mil.layer_type = 'flights_military'
-      CROSS JOIN LATERAL (
-        SELECT position, ts
-        FROM observations
-        WHERE entity_id = mil.id
-        ORDER BY ts DESC LIMIT 1
-      ) o_mil
-      WHERE o_mil.ts > NOW() - INTERVAL '24 hours'
-        AND ST_DWithin(
-            rs.position::geography,
-            o_mil.position::geography,
-            300000
-        )
+      JOIN latest_mil o_mil ON o_mil.entity_id = mil.id AND o_mil.rn = 1
+      WHERE julianday(o_mil.ts) > julianday('now','-24 hours')
+        AND o_mil.lat BETWEEN rs.lat-(300/111.32) AND rs.lat+(300/111.32)
+        AND o_mil.lon BETWEEN rs.lon-(300/(111.32*max(COS(RADIANS(rs.lat)),0.01))) AND rs.lon+(300/(111.32*max(COS(RADIANS(rs.lat)),0.01)))
+        AND haversine_km(rs.lat, rs.lon, o_mil.lat, o_mil.lon) <= 300
+      GROUP BY rs.region_name
+    ),
+    nearby_disasters AS (
+      -- CTE 3: SIGNAL — Disaster alerts within 500km.
+      SELECT
+        rs.region_name,
+        COUNT(DISTINCT d.id) AS disaster_count,
+        group_concat(DISTINCT json_extract(d.metadata,'$.eventtype')) AS disaster_types
+      FROM region_signals rs
+      JOIN entities d ON d.layer_type = 'disaster_alerts'
+      JOIN latest_dis o_d ON o_d.entity_id = d.id AND o_d.rn = 1
+      WHERE o_d.lat BETWEEN rs.lat-(500/111.32) AND rs.lat+(500/111.32)
+        AND o_d.lon BETWEEN rs.lon-(500/(111.32*max(COS(RADIANS(rs.lat)),0.01))) AND rs.lon+(500/(111.32*max(COS(RADIANS(rs.lat)),0.01)))
+        AND haversine_km(rs.lat, rs.lon, o_d.lat, o_d.lon) <= 500
+      GROUP BY rs.region_name
+    ),
+    nearby_outages AS (
+      -- CTE 4: SIGNAL — Internet outages within 500km.
+      SELECT
+        rs.region_name,
+        COUNT(DISTINCT io.id) AS outage_count,
+        group_concat(DISTINCT json_extract(io.metadata,'$.outage_type')) AS outage_types
+      FROM region_signals rs
+      JOIN entities io ON io.layer_type = 'internet_outages'
+      JOIN latest_out o_io ON o_io.entity_id = io.id AND o_io.rn = 1
+      WHERE o_io.lat BETWEEN rs.lat-(500/111.32) AND rs.lat+(500/111.32)
+        AND o_io.lon BETWEEN rs.lon-(500/(111.32*max(COS(RADIANS(rs.lat)),0.01))) AND rs.lon+(500/(111.32*max(COS(RADIANS(rs.lat)),0.01)))
+        AND haversine_km(rs.lat, rs.lon, o_io.lat, o_io.lon) <= 500
       GROUP BY rs.region_name
     )
+    -- FINAL SELECT: Merge all signals per region via LEFT JOINs.
     SELECT
       rs.id AS entity_id,
       rs.region_name AS name,
       rs.external_id AS external_id,
       'conflict_events' AS layer_type,
       rs.lat, rs.lon, 0.0 AS altitude_m,
-      NOW() AS ts,
-      rs.fatalities::text AS fatalities,
-      rs.event_count::text AS event_count,
-      COALESCE(mp.military_aircraft_count, 0)::text AS military_aircraft,
-      COALESCE(mp.aircraft_types, 'none') AS aircraft_types
+      strftime('%Y-%m-%dT%H:%M:%SZ','now') AS ts,
+      CAST(rs.fatalities AS TEXT) AS fatalities,
+      CAST(rs.event_count AS TEXT) AS event_count,
+      CAST(COALESCE(mp.military_aircraft_count, 0) AS TEXT) AS military_aircraft,
+      COALESCE(mp.aircraft_types, 'none') AS aircraft_types,
+      CAST(COALESCE(nd.disaster_count, 0) AS TEXT) AS disaster_count,
+      COALESCE(nd.disaster_types, 'none') AS disaster_types,
+      CAST(COALESCE(no2.outage_count, 0) AS TEXT) AS internet_outages,
+      COALESCE(no2.outage_types, 'none') AS outage_types
     FROM region_signals rs
     LEFT JOIN military_presence mp ON mp.region_name = rs.region_name
+    LEFT JOIN nearby_disasters nd ON nd.region_name = rs.region_name
+    LEFT JOIN nearby_outages no2 ON no2.region_name = rs.region_name
     WHERE rs.fatalities > 0
       AND (COALESCE(mp.military_aircraft_count, 0) > 0
+           OR COALESCE(nd.disaster_count, 0) > 0
+           OR COALESCE(no2.outage_count, 0) > 0
            OR rs.fatalities >= 10)
     ORDER BY rs.fatalities DESC
     LIMIT 15
 ```
 
 {{< callout type="info" title="SQL structure walkthrough" >}}
-This query has two CTEs:
+The query opens with four `latest_*` window CTEs -- one per layer -- that rank each entity's observations with `ROW_NUMBER() OVER (PARTITION BY entity_id ORDER BY ts DESC)` and are joined on `rn = 1` to get the latest position (the SQLite replacement for `CROSS JOIN LATERAL`). Then:
 
-**CTE 1 (`region_signals`)** -- Anchors on conflict regions with confirmed fatalities. Uses `CROSS JOIN LATERAL` to get each region's latest geographic position.
+**`region_signals` (anchor)** -- Conflict regions with confirmed fatalities (`json_extract(metadata,'$.fatalities')` cast to INTEGER, `> 0`).
 
-**CTE 2 (`military_presence`)** -- For each anchor region, counts distinct military aircraft within 300km using `ST_DWithin`. The 300km radius represents the operational range where aircraft could be supporting or monitoring the conflict zone. Only aircraft observed in the last 24 hours are included.
+**`military_presence`, `nearby_disasters`, `nearby_outages` (signals)** -- For each anchor region, count distinct entities from the other layer within radius. Each uses a **lat/lon bounding-box prefilter** (the lon bound divides by `max(COS(RADIANS(rs.lat)), 0.01)`) followed by a precise `haversine_km(...) <= radius` gate: 300km for military, 500km for disasters and outages. Military presence is additionally time-filtered to the last 24h via `julianday(o_mil.ts) > julianday('now','-24 hours')`. Distinct type codes are aggregated with `group_concat(DISTINCT ...)`.
 
-**Final SELECT** -- Merges signals via `LEFT JOIN` so regions without military presence still appear. The `WHERE` clause requires either a corroborating military signal OR high fatalities (>= 10) to reduce noise.
+**Final SELECT** -- Merges all signals via `LEFT JOIN` so regions without a given signal still appear, casting every extra column to TEXT and synthesizing `ts` with `strftime('%Y-%m-%dT%H:%M:%SZ','now')`. The `WHERE` clause requires at least one corroborating signal OR high fatalities (>= 10) to reduce noise.
 {{< /callout >}}
 
 {{< callout type="tip" title="Adding more signal layers" >}}
-To add a third signal (e.g., disaster alerts), add another CTE following the same pattern as `military_presence`, then add a `LEFT JOIN` in the final SELECT. The CTE structure scales cleanly -- each signal layer is isolated in its own CTE.
+Each signal layer is isolated: a `latest_*` window CTE plus an aggregating CTE, joined back with a `LEFT JOIN` in the final SELECT. To add a fifth signal, follow the same pattern. For heavy anchor or hazard sets feeding a spatial join, mark the CTE `AS MATERIALIZED` so SQLite computes it once instead of re-running it per candidate.
 {{< /callout >}}
 
 ### AI operation
@@ -313,19 +391,23 @@ ai:
 
         GEOPOLITICAL HOTSPOT INDEX: Composite threat scoring for
         {{.RecordCount}} regions using cross-layer signal fusion
-        (conflict + military) over {{.Lookback}}.
+        (conflict + military + disasters + comms) over {{.Lookback}}.
 
         Multi-signal regional data:
         {{range .Records}}
         REGION: {{.EntityName}} ({{.Lat}}, {{.Lon}}, ID: {{.ExternalID}})
           Conflict: {{index .Metadata "fatalities"}} fatalities / {{index .Metadata "event_count"}} events
           Military: {{index .Metadata "military_aircraft"}} aircraft ({{index .Metadata "aircraft_types"}})
+          Disasters: {{index .Metadata "disaster_count"}} ({{index .Metadata "disaster_types"}})
+          Comms disruption: {{index .Metadata "internet_outages"}} outages ({{index .Metadata "outage_types"}})
         {{end}}
 
         For each region, compute a composite Hotspot Index (0-100) using
         these weighted signals:
-        - Conflict intensity (fatalities + events): 60% weight
-        - Military presence (aircraft count + type significance): 40% weight
+        - Conflict intensity (fatalities + events): 40% weight
+        - Military presence (aircraft count + types — ISR/AWACS higher than transport): 25% weight
+        - Disaster overlay (compounding humanitarian crisis): 20% weight
+        - Communications disruption (internet outages indicate escalation/censorship): 15% weight
 
         CALIBRATION:
         - critical (81-100): Active large-scale war, 1000+ fatalities, confirmed military ops
@@ -338,8 +420,12 @@ ai:
         fatality count is low relative to active war zones. Use your world
         knowledge of the region's chronic instability.
 
-        The strategic_assessment MUST be 2-3 sentences explaining what drives
+        The strategic_assessment MUST be 2-4 sentences explaining what drives
         the score, referencing specific signals from the data.
+
+        Set "attention" DIRECTLY from each region's classification (do not
+        auto-elevate): stable -> info, elevated -> low, volatile -> medium,
+        crisis -> high, critical -> critical.
 
         Respond with JSON matching this schema:
         {{.OutputSchema}}
@@ -362,7 +448,7 @@ The CALIBRATION section provides concrete examples for each classification brack
             type: array
             items:
               type: object
-              required: [region, hotspot_index, classification, strategic_assessment]
+              required: [region, hotspot_index, classification, attention, strategic_assessment]
               properties:
                 region: { type: string }
                 lat: { type: number }
@@ -371,35 +457,53 @@ The CALIBRATION section provides concrete examples for each classification brack
                 classification:
                   type: string
                   enum: [stable, elevated, volatile, crisis, critical]
+                attention:
+                  type: string
+                  enum: [info, low, medium, high, critical]
                 conflict_score: { type: integer, minimum: 0, maximum: 100 }
                 military_score: { type: integer, minimum: 0, maximum: 100 }
+                disaster_score: { type: integer, minimum: 0, maximum: 100 }
+                comms_score: { type: integer, minimum: 0, maximum: 100 }
                 strategic_assessment: { type: string }
                 entity_external_id: { type: string }
-      max_tokens: 5000
+      max_tokens: 8000
       temperature: 0.2
       output:
         store_insights: true
+        min_attention: "medium"   # noise gate: drop results below this attention
         insight_type: "hotspot_index"
         results_path: "hotspots"
+        ref_fields:
+          - field: "entity_external_id"
+            layer_type: "conflict_events"
         websocket_push: true
         retention: "336h"
 ```
 
 {{< callout type="info" title="results_path + entity_external_id" >}}
-`results_path: "hotspots"` extracts each item from the `hotspots` array and stores it as a separate `ai_insight` row. If the LLM includes `entity_external_id` in each item, the engine links the insight to the source entity -- enabling "show all insights for Ukraine" queries.
+`results_path: "hotspots"` extracts each item from the `hotspots` array and stores it as a separate `ai_insight` row. If the LLM includes `entity_external_id` in each item, the engine matches it against the input records and links the insight to the source entity -- enabling "show all insights for Ukraine" queries.
+{{< /callout >}}
+
+{{< callout type="info" title="ref_fields links extra entities" >}}
+`ref_fields` resolves an additional cross-layer entity reference per result. Each entry names a result field and the `layer_type` to look it up in; the engine resolves `(layer_type, field-value)` to an entity and adds an `ai_insight_refs` row. Here `entity_external_id` is resolved against `conflict_events`. Use this when a single insight should link to entities the matcher would not otherwise associate (e.g., the threatened cable or weather alert in the infrastructure and aviation analyses).
+{{< /callout >}}
+
+{{< callout type="info" title="min_attention is the noise gate" >}}
+`min_attention: "medium"` stores and pushes only hotspots whose `attention` is `medium` or higher (ranking: `info < low < medium < high < critical`). Lower or unclassified results are dropped before storage and WebSocket notify -- so `stable`/`elevated` regions mapped to `info`/`low` are suppressed, and only `volatile`/`crisis`/`critical` regions page through. Set the `attention` field from the model's own classification; when no per-operation floor is set, the engine-wide `ai.min_attention` default applies.
 {{< /callout >}}
 
 {{< callout type="info" title="Retention controls table size" >}}
-`retention: "336h"` (14 days) means insights older than two weeks are automatically deleted by the hourly cleanup goroutine. For a 5-minute analysis, this means ~4,000 insight rows per region before cleanup. Increase retention for audit trails; decrease it for high-frequency analyses.
+`retention: "336h"` (14 days) means insights older than two weeks are automatically deleted by the hourly cleanup goroutine. Increase retention for audit trails; decrease it for high-frequency analyses.
 {{< /callout >}}
 
 ### Complete definition
 
-Save this as `analysis.d/geopolitical_hotspot_index.yaml`:
+Save this as `analysis.d/geopolitical_hotspot_index.yaml` (it ships under `analysis.d/disabled/`; copy it up and set `enabled: true` to run it):
 
 ```yaml
 # analysis.d/geopolitical_hotspot_index.yaml
-# Cross-layer composite threat scoring: conflict + military signals.
+# Cross-layer composite threat scoring:
+# conflict + military + disaster + comms signals.
 schema_version: 1
 
 name: geopolitical_hotspot_index
@@ -418,58 +522,113 @@ data:
     window: "12h"
     key_fields: ["entity_external_id"]
   sql: |
-    WITH region_signals AS (
+    WITH latest_conf AS (
+      SELECT o.entity_id, o.lat, o.lon,
+        ROW_NUMBER() OVER (PARTITION BY o.entity_id ORDER BY o.ts DESC) AS rn
+      FROM observations o
+      JOIN entities e ON e.id = o.entity_id
+      WHERE e.layer_type = 'conflict_events'
+    ),
+    latest_mil AS (
+      SELECT o.entity_id, o.lat, o.lon, o.ts,
+        ROW_NUMBER() OVER (PARTITION BY o.entity_id ORDER BY o.ts DESC) AS rn
+      FROM observations o
+      JOIN entities e ON e.id = o.entity_id
+      WHERE e.layer_type = 'flights_military'
+    ),
+    latest_dis AS (
+      SELECT o.entity_id, o.lat, o.lon,
+        ROW_NUMBER() OVER (PARTITION BY o.entity_id ORDER BY o.ts DESC) AS rn
+      FROM observations o
+      JOIN entities e ON e.id = o.entity_id
+      WHERE e.layer_type = 'disaster_alerts'
+    ),
+    latest_out AS (
+      SELECT o.entity_id, o.lat, o.lon,
+        ROW_NUMBER() OVER (PARTITION BY o.entity_id ORDER BY o.ts DESC) AS rn
+      FROM observations o
+      JOIN entities e ON e.id = o.entity_id
+      WHERE e.layer_type = 'internet_outages'
+    ),
+    region_signals AS (
+      -- CTE 1: ANCHOR — Conflict regions with confirmed fatalities.
       SELECT
         conf.id, conf.name AS region_name, conf.external_id,
-        o_conf.lat, o_conf.lon, o_conf.position,
-        CAST(COALESCE(conf.metadata->>'fatalities', '0') AS int) AS fatalities,
-        CAST(COALESCE(conf.metadata->>'events', '0') AS int) AS event_count
+        o_conf.lat, o_conf.lon,
+        CAST(COALESCE(json_extract(conf.metadata,'$.fatalities'), '0') AS INTEGER) AS fatalities,
+        CAST(COALESCE(json_extract(conf.metadata,'$.events'), '0') AS INTEGER) AS event_count
       FROM entities conf
-      CROSS JOIN LATERAL (
-        SELECT lat, lon, position
-        FROM observations
-        WHERE entity_id = conf.id
-        ORDER BY ts DESC LIMIT 1
-      ) o_conf
+      JOIN latest_conf o_conf ON o_conf.entity_id = conf.id AND o_conf.rn = 1
       WHERE conf.layer_type = 'conflict_events'
-        AND CAST(COALESCE(conf.metadata->>'fatalities', '0') AS int) > 0
+        AND CAST(COALESCE(json_extract(conf.metadata,'$.fatalities'), '0') AS INTEGER) > 0
     ),
     military_presence AS (
+      -- CTE 2: SIGNAL — Military aircraft within 300km, observed in last 24h.
       SELECT
         rs.region_name,
         COUNT(DISTINCT mil.id) AS military_aircraft_count,
-        STRING_AGG(DISTINCT mil.metadata->>'type', ', ') AS aircraft_types
+        group_concat(DISTINCT json_extract(mil.metadata,'$.type')) AS aircraft_types
       FROM region_signals rs
       JOIN entities mil ON mil.layer_type = 'flights_military'
-      CROSS JOIN LATERAL (
-        SELECT position, ts
-        FROM observations
-        WHERE entity_id = mil.id
-        ORDER BY ts DESC LIMIT 1
-      ) o_mil
-      WHERE o_mil.ts > NOW() - INTERVAL '24 hours'
-        AND ST_DWithin(
-            rs.position::geography,
-            o_mil.position::geography,
-            300000
-        )
+      JOIN latest_mil o_mil ON o_mil.entity_id = mil.id AND o_mil.rn = 1
+      WHERE julianday(o_mil.ts) > julianday('now','-24 hours')
+        AND o_mil.lat BETWEEN rs.lat-(300/111.32) AND rs.lat+(300/111.32)
+        AND o_mil.lon BETWEEN rs.lon-(300/(111.32*max(COS(RADIANS(rs.lat)),0.01))) AND rs.lon+(300/(111.32*max(COS(RADIANS(rs.lat)),0.01)))
+        AND haversine_km(rs.lat, rs.lon, o_mil.lat, o_mil.lon) <= 300
+      GROUP BY rs.region_name
+    ),
+    nearby_disasters AS (
+      -- CTE 3: SIGNAL — Disaster alerts within 500km.
+      SELECT
+        rs.region_name,
+        COUNT(DISTINCT d.id) AS disaster_count,
+        group_concat(DISTINCT json_extract(d.metadata,'$.eventtype')) AS disaster_types
+      FROM region_signals rs
+      JOIN entities d ON d.layer_type = 'disaster_alerts'
+      JOIN latest_dis o_d ON o_d.entity_id = d.id AND o_d.rn = 1
+      WHERE o_d.lat BETWEEN rs.lat-(500/111.32) AND rs.lat+(500/111.32)
+        AND o_d.lon BETWEEN rs.lon-(500/(111.32*max(COS(RADIANS(rs.lat)),0.01))) AND rs.lon+(500/(111.32*max(COS(RADIANS(rs.lat)),0.01)))
+        AND haversine_km(rs.lat, rs.lon, o_d.lat, o_d.lon) <= 500
+      GROUP BY rs.region_name
+    ),
+    nearby_outages AS (
+      -- CTE 4: SIGNAL — Internet outages within 500km.
+      SELECT
+        rs.region_name,
+        COUNT(DISTINCT io.id) AS outage_count,
+        group_concat(DISTINCT json_extract(io.metadata,'$.outage_type')) AS outage_types
+      FROM region_signals rs
+      JOIN entities io ON io.layer_type = 'internet_outages'
+      JOIN latest_out o_io ON o_io.entity_id = io.id AND o_io.rn = 1
+      WHERE o_io.lat BETWEEN rs.lat-(500/111.32) AND rs.lat+(500/111.32)
+        AND o_io.lon BETWEEN rs.lon-(500/(111.32*max(COS(RADIANS(rs.lat)),0.01))) AND rs.lon+(500/(111.32*max(COS(RADIANS(rs.lat)),0.01)))
+        AND haversine_km(rs.lat, rs.lon, o_io.lat, o_io.lon) <= 500
       GROUP BY rs.region_name
     )
+    -- FINAL SELECT: Merge all signals per region via LEFT JOINs.
     SELECT
       rs.id AS entity_id,
       rs.region_name AS name,
       rs.external_id AS external_id,
       'conflict_events' AS layer_type,
       rs.lat, rs.lon, 0.0 AS altitude_m,
-      NOW() AS ts,
-      rs.fatalities::text AS fatalities,
-      rs.event_count::text AS event_count,
-      COALESCE(mp.military_aircraft_count, 0)::text AS military_aircraft,
-      COALESCE(mp.aircraft_types, 'none') AS aircraft_types
+      strftime('%Y-%m-%dT%H:%M:%SZ','now') AS ts,
+      CAST(rs.fatalities AS TEXT) AS fatalities,
+      CAST(rs.event_count AS TEXT) AS event_count,
+      CAST(COALESCE(mp.military_aircraft_count, 0) AS TEXT) AS military_aircraft,
+      COALESCE(mp.aircraft_types, 'none') AS aircraft_types,
+      CAST(COALESCE(nd.disaster_count, 0) AS TEXT) AS disaster_count,
+      COALESCE(nd.disaster_types, 'none') AS disaster_types,
+      CAST(COALESCE(no2.outage_count, 0) AS TEXT) AS internet_outages,
+      COALESCE(no2.outage_types, 'none') AS outage_types
     FROM region_signals rs
     LEFT JOIN military_presence mp ON mp.region_name = rs.region_name
+    LEFT JOIN nearby_disasters nd ON nd.region_name = rs.region_name
+    LEFT JOIN nearby_outages no2 ON no2.region_name = rs.region_name
     WHERE rs.fatalities > 0
       AND (COALESCE(mp.military_aircraft_count, 0) > 0
+           OR COALESCE(nd.disaster_count, 0) > 0
+           OR COALESCE(no2.outage_count, 0) > 0
            OR rs.fatalities >= 10)
     ORDER BY rs.fatalities DESC
     LIMIT 15
@@ -486,19 +645,23 @@ ai:
 
         GEOPOLITICAL HOTSPOT INDEX: Composite threat scoring for
         {{.RecordCount}} regions using cross-layer signal fusion
-        (conflict + military) over {{.Lookback}}.
+        (conflict + military + disasters + comms) over {{.Lookback}}.
 
         Multi-signal regional data:
         {{range .Records}}
         REGION: {{.EntityName}} ({{.Lat}}, {{.Lon}}, ID: {{.ExternalID}})
           Conflict: {{index .Metadata "fatalities"}} fatalities / {{index .Metadata "event_count"}} events
           Military: {{index .Metadata "military_aircraft"}} aircraft ({{index .Metadata "aircraft_types"}})
+          Disasters: {{index .Metadata "disaster_count"}} ({{index .Metadata "disaster_types"}})
+          Comms disruption: {{index .Metadata "internet_outages"}} outages ({{index .Metadata "outage_types"}})
         {{end}}
 
         For each region, compute a composite Hotspot Index (0-100) using
         these weighted signals:
-        - Conflict intensity (fatalities + events): 60% weight
-        - Military presence (aircraft count + type significance): 40% weight
+        - Conflict intensity (fatalities + events): 40% weight
+        - Military presence (aircraft count + types — ISR/AWACS higher than transport): 25% weight
+        - Disaster overlay (compounding humanitarian crisis): 20% weight
+        - Communications disruption (internet outages indicate escalation/censorship): 15% weight
 
         CALIBRATION:
         - critical (81-100): Active large-scale war, 1000+ fatalities, confirmed military ops
@@ -511,8 +674,12 @@ ai:
         fatality count is low relative to active war zones. Use your world
         knowledge of the region's chronic instability.
 
-        The strategic_assessment MUST be 2-3 sentences explaining what drives
+        The strategic_assessment MUST be 2-4 sentences explaining what drives
         the score, referencing specific signals from the data.
+
+        Set "attention" DIRECTLY from each region's classification (do not
+        auto-elevate): stable -> info, elevated -> low, volatile -> medium,
+        crisis -> high, critical -> critical.
 
         Respond with JSON matching this schema:
         {{.OutputSchema}}
@@ -526,7 +693,7 @@ ai:
             type: array
             items:
               type: object
-              required: [region, hotspot_index, classification, strategic_assessment]
+              required: [region, hotspot_index, classification, attention, strategic_assessment]
               properties:
                 region: { type: string }
                 lat: { type: number }
@@ -535,16 +702,25 @@ ai:
                 classification:
                   type: string
                   enum: [stable, elevated, volatile, crisis, critical]
+                attention:
+                  type: string
+                  enum: [info, low, medium, high, critical]
                 conflict_score: { type: integer, minimum: 0, maximum: 100 }
                 military_score: { type: integer, minimum: 0, maximum: 100 }
+                disaster_score: { type: integer, minimum: 0, maximum: 100 }
+                comms_score: { type: integer, minimum: 0, maximum: 100 }
                 strategic_assessment: { type: string }
                 entity_external_id: { type: string }
-      max_tokens: 5000
+      max_tokens: 8000
       temperature: 0.2
       output:
         store_insights: true
+        min_attention: "medium"   # noise gate: drop results below this attention
         insight_type: "hotspot_index"
         results_path: "hotspots"
+        ref_fields:
+          - field: "entity_external_id"
+            layer_type: "conflict_events"
         websocket_push: true
         retention: "336h"
 ```

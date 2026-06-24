@@ -97,7 +97,7 @@ CEL expression for pre-filtering records before they are sent to the LLM. The ex
 {{< /field >}}
 
 {{< field name="data.sql" type="string" required="false" >}}
-Raw SQL query for advanced data retrieval. Validated at load time if present.
+Raw SQL query for advanced data retrieval. Validated read-only at **run time** -- on each execution the engine calls `aiquery.ValidateReadOnlySQL` (in `fetchDataFromSQL`) and aborts the run if the query is not read-only. It is not checked at load time, and a definition that sets `data.sql` fails its run if no query executor is configured.
 {{< /field >}}
 
 ### Dedup
@@ -115,6 +115,29 @@ Fields used as the composite dedup key. Min length: 1.
 ## AI Operations
 
 The `ai` section uses the same `SourceAIConfig` structure as source definitions. See the [Source Schema Reference]({{< relref "/reference/source-schema#ai" >}}) for the full field reference on `ai.enabled` and `ai.operations[]`.
+
+### Output Noise Control and Cross-Layer Refs
+
+Two `operations[].output` fields are specific to analysis insight storage and are not covered by the source-schema delegation above.
+
+{{< field name="operations[].output.min_attention" type="string" required="false" >}}
+Minimum attention level a result must carry to be stored and pushed. One of `info`, `low`, `medium`, `high`, `critical` (validator `oneof`). Results below this floor -- including absent or unclassified attention, treated as `info` -- are dropped. When `results_path` resolves to an empty array, the all-clear summary insight is suppressed if a floor is configured. When unset, the engine-wide `ai.min_attention` default applies (community default: `low`).
+{{< /field >}}
+
+{{< field name="operations[].output.ref_fields" type="object[]" required="false" >}}
+Cross-layer entity references. Each entry maps a field in the LLM result item (whose value is an `external_id`) to an entity in another layer, creating an extra `ai_insight_refs` row. Both keys are required per entry:
+
+- `field` (string, required) -- result-item property holding the external ID
+- `layer_type` (string, required) -- layer to scope the `external_id` lookup
+
+```yaml
+output:
+  results_path: "assessments"
+  ref_fields:
+    - field: "conflict_external_id"
+      layer_type: "conflict_events"
+```
+{{< /field >}}
 
 ### Prompt Template Variables
 

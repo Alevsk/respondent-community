@@ -35,6 +35,7 @@ Create `compose.yaml` in the project root:
 services:
   respondent:
     image: "docker.io/alevsk/respondent-community:latest"
+    command: ["serve", "--config", "/etc/respondent/respondent.community.yaml"]
     restart: unless-stopped
     env_file:
       - path: .env
@@ -108,7 +109,8 @@ docker run -d \
   -v "$(pwd)/sources.d:/etc/respondent/sources.d:ro" \
   -v "$(pwd)/analysis.d:/etc/respondent/analysis.d:ro" \
   -v respondent_data:/data \
-  docker.io/alevsk/respondent-community:latest
+  docker.io/alevsk/respondent-community:latest \
+  serve --config /etc/respondent/respondent.community.yaml
 ```
 
 The container exposes the UI, API, and WebSocket on **port 8090** — open `http://localhost:8090` in your browser once the container is healthy.

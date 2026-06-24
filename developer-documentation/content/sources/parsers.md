@@ -155,14 +155,17 @@ parser:
 
 ## GeoJSON
 
-Parses GeoJSON FeatureCollection responses. The `records_path` defaults to `"features"` -- you only need to set it if the FeatureCollection is nested inside a wrapper object.
+Parses GeoJSON `FeatureCollection` (or a single `Feature`) responses. The parser always reads the top-level `"features"` array of a `FeatureCollection` -- `records_path` is ignored for this format, so a nested FeatureCollection inside a wrapper object is not supported.
 
 ```yaml
 parser:
   format: geojson
-  records_path: "features"
   max_records: 10000
 ```
+
+{{< callout type="info" title="records_path is a no-op for GeoJSON" >}}
+Setting `records_path: "features"` is harmless but has no effect -- the GeoJSON parser reads the document's top-level `"features"` array directly regardless of `records_path`. A single top-level `Feature` is wrapped as a one-element record list.
+{{< /callout >}}
 
 Each parsed record has the standard GeoJSON structure:
 
@@ -307,8 +310,8 @@ parser:
   max_records: 5000
 ```
 
-{{< field name="records_path" type="string" required="true" >}}
-Dot-separated path to the repeating XML element. Each matched element becomes a record.
+{{< field name="records_path" type="string" required="false" >}}
+Dot-separated path to the repeating XML element. Each matched element becomes a record. When omitted, the document root element is wrapped as a single record.
 {{< /field >}}
 
 {{< code-tabs >}}

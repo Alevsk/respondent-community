@@ -25,7 +25,11 @@ Groups entities on the globe. Multiple sources can feed one layer. Same naming r
 {{< /field >}}
 
 {{< field name="display_name" type="string" required="true" >}}
-Human-readable name shown in the frontend layer picker.
+Human-readable name for the SOURCE (shown in source listings, logs, and AI prompts). This names the source, not the layer-picker label.
+{{< /field >}}
+
+{{< field name="layer_display_name" type="string" required="false" >}}
+Overrides the human-readable LAYER label shown in the UI layers panel. When omitted, the layer is labeled by title-casing `layer_type` (`FormatLayerName`, e.g. `traffic_stations` -> `Traffic Stations`). Set it when the title-cased `layer_type` loses meaning -- for example a country qualifier: `"Traffic Stations (Mexico)"`. Distinct from `display_name`, which names the source.
 {{< /field >}}
 
 {{< field name="entity_type" type="string" required="false" default="geo_entity" >}}
@@ -398,6 +402,22 @@ Text transform for `string` format type. Allowed values: `upper`, `lower`.
 Sort order. Lower values are shown first.
 {{< /field >}}
 
+### Color By
+
+Colors entities by the value of a metadata field. Overrides `display.style.color` per entity based on the matched value. When present, the client reads this map instead of applying a single base color to every entity.
+
+{{< field name="display.color_by.field" type="string" required="true" >}}
+Metadata field name whose value selects the color.
+{{< /field >}}
+
+{{< field name="display.color_by.values" type="map[string]string" required="true" >}}
+Map of field value to hex color (e.g., `operational: "#00ff9d"`). Min 1 entry. Each value must be a valid hex color.
+{{< /field >}}
+
+{{< field name="display.color_by.default_color" type="string" required="false" >}}
+Hex color used when the field value is not present in `values`. Must be a valid hex color.
+{{< /field >}}
+
 ## History
 
 Per-layer time range limits for historical exploration. When present, overrides the server defaults (48h lookback, 24h span).
@@ -408,6 +428,76 @@ Maximum historical lookback (e.g., `"8760h"` for 1 year).
 
 {{< field name="history.max_range_span" type="duration" required="false" >}}
 Maximum time range span per query (e.g., `"168h"` for 1 week).
+{{< /field >}}
+
+## Indicator
+
+Maps a global indicator entity's metadata fields to structured indicator values for HUD rendering. Only meaningful when `entity_type` is `global_indicator`.
+
+{{< field name="indicator.summary_expr" type="string (CEL)" required="false" >}}
+CEL expression that computes a human-readable summary. Variables: `level` (int), `metadata` (map[string]string). When omitted, a default severity scale (Quiet -> Extreme) is used.
+{{< /field >}}
+
+### Values (array)
+
+{{< field name="indicator.values[].key" type="string" required="false" >}}
+Identifier for this indicator reading.
+{{< /field >}}
+
+{{< field name="indicator.values[].label" type="string" required="false" >}}
+Human-readable label for the reading.
+{{< /field >}}
+
+{{< field name="indicator.values[].source_field" type="string" required="false" >}}
+Metadata key holding the raw value.
+{{< /field >}}
+
+{{< field name="indicator.values[].unit" type="string" required="false" >}}
+Unit of measurement displayed with the value.
+{{< /field >}}
+
+{{< field name="indicator.values[].max_level" type="integer" required="false" >}}
+Maximum severity level on the scale.
+{{< /field >}}
+
+{{< field name="indicator.values[].level_thresholds" type="float[]" required="false" >}}
+Ascending thresholds used to compute the severity level from a raw value (when `level_expr` is omitted).
+{{< /field >}}
+
+{{< field name="indicator.values[].level_expr" type="string (CEL)" required="false" >}}
+CEL expression that computes the severity level from a raw value. Variables: `value` (string), `change_pct` (string). Must return an int. When omitted, the level is computed from `level_thresholds`/`max_level`.
+{{< /field >}}
+
+{{< field name="indicator.values[].change_source_field" type="string" required="false" >}}
+Metadata key holding the percentage change.
+{{< /field >}}
+
+{{< field name="indicator.values[].format" type="string" required="false" >}}
+Value display format. Allowed values: `scale`, `number`, `currency`, `percent`.
+{{< /field >}}
+
+{{< field name="indicator.values[].precision" type="integer" required="false" >}}
+Decimal places for the displayed value.
+{{< /field >}}
+
+{{< field name="indicator.values[].prefix" type="string" required="false" >}}
+String prepended to the value (e.g., `"$"`).
+{{< /field >}}
+
+## Field Mappings
+
+A top-level array of generalized CEL mappings from source data to domain structures.
+
+{{< field name="field_mappings[].source" type="string (CEL)" required="true" >}}
+CEL expression producing the value from the source record.
+{{< /field >}}
+
+{{< field name="field_mappings[].target" type="string" required="true" >}}
+Destination field for the mapped value.
+{{< /field >}}
+
+{{< field name="field_mappings[].type" type="string" required="true" >}}
+Value type. Allowed values: `timestamp`, `string`, `integer`, `float`, `boolean`.
 {{< /field >}}
 
 ## Lookup Tables

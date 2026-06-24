@@ -137,7 +137,13 @@ The following built-in functions are available in filter expressions:
 | `sgp4_lon(line1, line2)` | double | SGP4-propagated longitude |
 | `sgp4_alt_m(line1, line2)` | double | SGP4-propagated altitude (meters) |
 | `sgp4_vel_mps(line1, line2)` | double | SGP4-propagated velocity (m/s) |
-| `lookup("table", key, "field")` | string | Query a lookup table |
+| `lookup("table", key, "field")` | dyn | Query a lookup table (errors on missing table/key/field) |
+| `has_lookup("table", key)` | bool | Report whether a key exists in a lookup table |
+| `lookup_or("table", key, "field", default)` | dyn | Query a lookup table, returning `default` on a missing table/key/field |
+
+{{< callout type="info" title="Lookup functions require lookup_tables" >}}
+The `lookup`, `has_lookup`, and `lookup_or` functions are only bound when the source defines a `lookup_tables` section. Referencing them without declaring at least one lookup table fails compilation.
+{{< /callout >}}
 
 {{< callout type="warning" title="Always guard optional fields" >}}
 Without `has()`, accessing a missing field causes a runtime error that silently drops the record. Always wrap optional field access with `has()` guards, especially in compound filters where earlier conditions might not prevent evaluation of later ones.

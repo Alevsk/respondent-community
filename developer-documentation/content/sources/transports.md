@@ -47,8 +47,8 @@ HTTP request timeout. Examples: `"10s"`, `"30s"`, `"1m"`.
 Polling interval -- how often to re-fetch data. Examples: `"60s"`, `"5m"`, `"1200s"`.
 {{< /field >}}
 
-{{< field name="max_response_bytes" type="integer" required="false" default="10485760" >}}
-Maximum response body size in bytes. Range: 1 to 104857600 (100 MB). Default is 10 MB.
+{{< field name="max_response_bytes" type="integer" required="false" default="52428800" >}}
+Maximum response body size in bytes. Range: 1 to 104857600 (100 MB). Default is 50 MB (52428800).
 {{< /field >}}
 
 ### Example

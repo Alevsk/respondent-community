@@ -33,7 +33,8 @@ display_name: "My Earthquakes"
 - **name** -- unique identifier for this source. Lowercase and underscores only.
 - **source_type** -- maps to the internal source registry. By convention, use the same value as `name`.
 - **layer_type** -- groups entities on the globe. Multiple sources can feed the same layer (e.g., both USGS and EMSC earthquakes share the `earthquakes` layer).
-- **display_name** -- human-readable label shown in the UI layer picker.
+- **display_name** -- human-readable name for the SOURCE (used in source listings, logs, and AI prompts). It does not set the layer-picker label; that label derives from `layer_type` (title-cased, e.g. `earthquakes` -> `Earthquakes`).
+- **layer_display_name** (optional) -- overrides the title-cased `layer_type` as the layer label shown in the UI layers panel. Set it when the title-cased `layer_type` loses meaning, e.g. `"Traffic Stations (Mexico)"`.
 {{< /callout >}}
 
 ## Step 2: Configure the transport

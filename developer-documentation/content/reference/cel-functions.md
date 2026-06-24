@@ -128,10 +128,8 @@ Provided by the [cel-go math extension library](https://pkg.go.dev/github.com/go
 | `math.ceil` | `math.ceil(2.3)` | `3` |
 | `math.floor` | `math.floor(2.7)` | `2` |
 | `math.round` | `math.round(2.5)` | `3` |
-| `math.min` | `math.min(3, 7)` | `3` |
-| `math.max` | `math.max(3, 7)` | `7` |
-| `math.sqrt` | `math.sqrt(16.0)` | `4.0` |
-| `math.pow` | `math.pow(2.0, 3.0)` | `8.0` |
+| `math.least` | `math.least(3, 7)` | `3` |
+| `math.greatest` | `math.greatest(3, 7)` | `7` |
 
 {{< callout type="warning" title="Security" >}}
 The CEL environment does not include Encoders (base64, etc.) to prevent covert data exfiltration. There is no access to environment variables, filesystem, or network from within CEL expressions.
