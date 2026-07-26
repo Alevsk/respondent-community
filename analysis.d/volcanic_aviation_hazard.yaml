@@ -1,10 +1,17 @@
 # =============================================================================
 # VOLCANIC AVIATION HAZARD — Volcano-to-Flight-Path Correlation
 # =============================================================================
-# Detects commercial aircraft operating near active volcanoes. Volcanic ash is
+# Detects commercial aircraft operating near volcanoes with a recorded eruptive
+# history AND at an altitude that could intersect an ash column. Volcanic ash is
 # invisible to weather radar, can travel thousands of km, and destroys jet
 # engines (cf. BA Flight 9, 1982; KLM Flight 867, 1989). This analysis
 # correlates Smithsonian volcano data with real-time ADS-B flight positions.
+#
+# IMPORTANT: there is NO live VAAC/VONA eruption feed here. The volcano "status"
+# is a geologic classification, not a current-activity signal. Proximity to a
+# non-erupting volcano is therefore only a theoretical ash risk; the AI prompt
+# treats those as negligible/low and the noise gate (min_attention) drops them.
+# Only a genuine current ash hazard intersecting the flight earns high/critical.
 #
 # Data layers: volcanoes (Smithsonian GVP) × flights_commercial (ADS-B)
 # =============================================================================
@@ -12,7 +19,7 @@
 schema_version: 1
 name: volcanic_aviation_hazard
 display_name: "Volcanic Aviation Hazard"
-enabled: false # TODO: enable
+enabled: true
 
 schedule:
   interval: "180s"
@@ -26,51 +33,79 @@ data:
     window: "1h"
     key_fields: ["entity_external_id", "volcano_external_id"]
   sql: |
-    WITH active_volcanoes AS (
-      -- Volcanoes with non-Holocene status (erupted in recorded history)
-      -- or with recent VEI > 0 indicating recent activity.
+    WITH latest_volcano AS (
+      SELECT o.entity_id, o.lat, o.lon,
+             ROW_NUMBER() OVER (PARTITION BY o.entity_id ORDER BY o.ts DESC) AS rn
+      FROM observations o
+      JOIN entities e ON e.id = o.entity_id
+      WHERE e.layer_type = 'volcanoes'
+    ),
+    latest_flight AS (
+      SELECT o.entity_id, o.lat, o.lon, o.altitude_m, o.ts,
+             ROW_NUMBER() OVER (PARTITION BY o.entity_id ORDER BY o.ts DESC) AS rn
+      FROM observations o
+      JOIN entities e ON e.id = o.entity_id
+      WHERE e.layer_type = 'flights_commercial'
+        -- ADS-B is near-real-time; a position older than 15 min is stale, so only
+        -- correlate live flights. (volcanoes is static geologic reference — no live
+        -- eruption feed — and is intentionally NOT time-filtered.)
+        AND o.ts > strftime('%Y-%m-%dT%H:%M:%SZ','now','-15 minutes')
+    ),
+    active_volcanoes AS (
+      -- Volcanoes with non-Holocene status (erupted in recorded geologic history).
+      -- NOTE: status is a *geologic* classification, NOT a live-activity feed. We
+      -- have no VAAC/VONA eruption source, so "non-Holocene" only means the volcano
+      -- has a recorded eruptive history — it does NOT imply a current eruption. The
+      -- AI prompt treats ash risk from a non-erupting volcano as theoretical and
+      -- gates it out; a genuine current ash hazard is required for high/critical.
+      -- elevation_m is the summit elevation in meters (used for ash-column math).
       SELECT v.id, v.name, v.external_id, v.metadata,
-             o.lat, o.lon, o.position,
-             COALESCE(v.metadata->>'status', 'unknown') AS volcano_status,
-             COALESCE(v.metadata->>'elevation', '0') AS elevation_m,
-             COALESCE(v.metadata->>'last_eruption_year', 'unknown') AS last_eruption,
-             COALESCE(v.metadata->>'morphology', 'unknown') AS morphology,
-             COALESCE(v.metadata->>'vei', '0') AS vei
+             o.lat, o.lon,
+             COALESCE(json_extract(v.metadata,'$.status'), 'unknown') AS volcano_status,
+             CAST(COALESCE(json_extract(v.metadata,'$.elevation'),'0') AS REAL) AS elevation_m,
+             COALESCE(json_extract(v.metadata,'$.last_eruption_year'), 'unknown') AS last_eruption,
+             COALESCE(json_extract(v.metadata,'$.morphology'), 'unknown') AS morphology,
+             COALESCE(json_extract(v.metadata,'$.vei'), '0') AS vei
       FROM entities v
-      CROSS JOIN LATERAL (
-        SELECT lat, lon, position
-        FROM observations WHERE entity_id = v.id ORDER BY ts DESC LIMIT 1
-      ) o
+      JOIN latest_volcano o ON o.entity_id = v.id AND o.rn = 1
       WHERE v.layer_type = 'volcanoes'
-        AND v.metadata->>'status' != 'Holocene'
+        AND json_extract(v.metadata,'$.status') != 'Holocene'
     ),
     nearby_flights AS (
-      -- Commercial flights within 200km of active volcanoes.
-      -- 200km = volcanic ash danger zone for en-route aircraft.
+      -- Commercial flights within 100km of recorded-history volcanoes whose
+      -- altitude could plausibly intersect an ash column.
+      -- 100km = tightened en-route proximity band (was 200km, too wide -> noise).
+      -- ALTITUDE-INTERSECTION FILTER: keep a flight only if its altitude could sit
+      -- inside a plausible ash column — from the ground (>= 0) up to summit
+      -- elevation + 15km (ash to ~FL450). Flights cruising far above that ceiling
+      -- cannot be in the ash and are dropped (kills cruise-far-above noise).
       SELECT
         f.id AS flight_id,
         f.name AS flight_name,
         f.external_id AS flight_hex,
-        f.metadata->>'callsign' AS callsign,
-        f.metadata->>'type' AS aircraft_type,
+        json_extract(f.metadata,'$.callsign') AS callsign,
+        json_extract(f.metadata,'$.type') AS aircraft_type,
         o_f.lat AS flight_lat, o_f.lon AS flight_lon,
         o_f.altitude_m AS flight_alt,
         o_f.ts AS flight_ts,
         av.name AS volcano_name,
         av.external_id AS volcano_external_id,
         av.volcano_status,
-        av.elevation_m,
+        CAST(ROUND(av.elevation_m) AS TEXT) AS elevation_m,
         av.last_eruption,
         av.morphology,
-        ROUND(ST_Distance(o_f.position::geography, av.position::geography) / 1000)::text AS distance_km
+        CAST(ROUND(haversine_km(o_f.lat, o_f.lon, av.lat, av.lon)) AS TEXT) AS distance_km
       FROM entities f
-      CROSS JOIN LATERAL (
-        SELECT lat, lon, altitude_m, position, ts
-        FROM observations WHERE entity_id = f.id ORDER BY ts DESC LIMIT 1
-      ) o_f
-      JOIN active_volcanoes av ON ST_DWithin(o_f.position::geography, av.position::geography, 200000)
+      JOIN latest_flight o_f ON o_f.entity_id = f.id AND o_f.rn = 1
+      JOIN active_volcanoes av
+        ON av.lat BETWEEN o_f.lat-(100/111.32) AND o_f.lat+(100/111.32)
+       AND av.lon BETWEEN o_f.lon-(100/(111.32*max(COS(RADIANS(o_f.lat)),0.01))) AND o_f.lon+(100/(111.32*max(COS(RADIANS(o_f.lat)),0.01)))
+       AND haversine_km(o_f.lat, o_f.lon, av.lat, av.lon) <= 100
+       AND CAST(COALESCE(o_f.altitude_m,'0') AS REAL) >= 0
+       AND CAST(COALESCE(o_f.altitude_m,'0') AS REAL) <= av.elevation_m + 15000
       WHERE f.layer_type = 'flights_commercial'
-        AND o_f.ts > NOW() - INTERVAL '6 hours'
+        -- Keep both flight-recency filters consistent at the 15-min live window.
+        AND o_f.ts > strftime('%Y-%m-%dT%H:%M:%SZ','now','-15 minutes')
     )
     SELECT
       nf.flight_id AS entity_id,
@@ -90,7 +125,7 @@ data:
       nf.distance_km,
       nf.volcano_external_id
     FROM nearby_flights nf
-    ORDER BY CAST(nf.distance_km AS int) ASC
+    ORDER BY CAST(nf.distance_km AS INTEGER) ASC
     LIMIT 30
 
 ai:
@@ -102,7 +137,8 @@ ai:
         You are an aviation safety analyst specializing in volcanic ash hazards. Your assessments inform NOTAM recommendations and flight safety bulletins.
 
         VOLCANIC AVIATION HAZARD: {{.RecordCount}} commercial flights detected within
-        200km of active volcanoes (last {{.Lookback}}).
+        100km of volcanoes with a recorded eruptive history, at altitudes that could
+        plausibly intersect an ash column (last {{.Lookback}}).
 
         Volcanic ash is invisible to weather radar and destroys jet engines.
         Historical incidents: BA Flight 9 (1982), KLM 867 (1989) — total engine failure.
@@ -117,28 +153,62 @@ ai:
           Distance: {{index .Metadata "distance_km"}}km
         {{end}}
 
+        CRITICAL — NO LIVE ERUPTION FEED:
+        This analysis has NO VAAC/VONA or any current-eruption data source. The volcano
+        "status" and "last eruption" fields are GEOLOGIC history, not a signal that the
+        volcano is erupting now. A nearby volcano that is NOT currently erupting poses
+        only a THEORETICAL ash risk — treat that as negligible or low, regardless of how
+        impressive its eruptive history is. There is no ash in the sky just because an
+        aircraft is near a volcano. Default every pair to negligible/low unless you have
+        a concrete, current ash hazard.
+
+        Only emit high or critical when there is a GENUINE CURRENT ash hazard that
+        intersects this flight — i.e. you have specific, current evidence (from your own
+        up-to-date world knowledge of an ongoing eruption at this named volcano) that an
+        ash cloud is aloft right now AND the flight's altitude/position puts it in or
+        near that ash. Proximity + eruptive history alone is NOT enough.
+
         Volcano status reference: Historical = erupted in historical time, Fumarolic = gas emissions,
         Tephrochronology = dated by tephra layers, Pleistocene = older activity.
 
-        ERUPTION RISK CALIBRATION:
-        - Currently erupting or erupted within last 5 years: HIGH baseline risk. Ash could be present NOW.
-        - Last eruption 5-50 years ago: MODERATE baseline. Volcano is in an active cycle.
-        - Last eruption 50-500 years ago: LOW baseline. Monitor for precursors.
-        - Last eruption 500+ years ago or Holocene only: NEGLIGIBLE baseline. Flag only if other signals present.
+        HAZARD CALIBRATION (current activity is the deciding factor, not history):
+        - No known current eruption (the default for nearly every row): NEGLIGIBLE or LOW.
+          The ash risk is theoretical. These are NOT threats — see OMISSION rule below.
+        - Known unrest / recent eruptive episode but no confirmed ash aloft: LOW to MODERATE.
+        - Confirmed ongoing eruption with ash, flight not clearly intersecting: MODERATE/HIGH.
+        - Confirmed ongoing eruption with ash aloft AND this flight intersecting it: HIGH/CRITICAL.
 
-        A "Historical" status volcano that last erupted in 2014 (Ontakesan) is VERY different from one that last erupted in 1707.
-
-        Calculate whether the flight altitude actually intersects the potential ash cloud zone. Ash clouds typically extend from the volcano summit elevation to summit + 10-15km for explosive eruptions, or summit + 2-5km for effusive eruptions. State the altitude math explicitly.
+        Calculate whether the flight altitude actually intersects the potential ash cloud zone. Ash clouds typically extend from the volcano summit elevation to summit + 10-15km for explosive eruptions, or summit + 2-5km for effusive eruptions. State the altitude math explicitly. (Flights cruising far above summit + 15km were already filtered out upstream.)
 
         Reference the relevant Volcanic Ash Advisory Centre (VAAC) jurisdiction: Tokyo VAAC for western Pacific, Buenos Aires VAAC for South America, London VAAC for North Atlantic/Europe, etc.
 
         For each flight-volcano pair, assess:
-        1. Risk level based on volcano status, last eruption recency, and flight proximity
+        1. Is there an actual CURRENT ash hazard (not just eruptive history)? If not, it is negligible/low.
         2. Whether flight altitude intersects the potential ash cloud zone (show the altitude math)
         3. Flight rerouting urgency: none/advisory/recommended/immediate
-        4. Overall hazard: negligible/low/moderate/high/critical
+        4. Overall hazard_level: negligible/low/moderate/high/critical
 
-        Each assessment field MUST be 2-3 sentences. Differentiate meaningfully between dormant volcanoes and those with recent activity.
+        ATTENTION (maps DIRECTLY from hazard_level — NEVER auto-elevate):
+        - hazard_level negligible -> attention "info"
+        - hazard_level low        -> attention "low"
+        - hazard_level moderate   -> attention "medium"
+        - hazard_level high       -> attention "high"
+        - hazard_level critical   -> attention "critical"
+        Do NOT raise attention above what hazard_level implies. A moderate/advisory
+        assessment is medium attention, not high — proximity to a famous volcano does
+        not by itself justify a high attention.
+
+        OMISSION RULE (core usefulness fix):
+        OMIT non-threats entirely. Do NOT emit any pair whose hazard_level is negligible
+        or low, whose ash_cloud_risk is none or theoretical, or whose rerouting_urgency
+        is none. Return FEWER items rather than benign "no action / all clear / monitor"
+        rows. If no pair has a genuine current ash hazard, return an empty hazards array
+        and say so in the summary. A near-empty result is the correct output when nothing
+        is actually erupting.
+
+        Each emitted assessment field MUST be 2-3 sentences explaining WHY there is a
+        genuine current hazard. Differentiate clearly between an actively erupting volcano
+        and one that merely has an eruptive history.
 
         Respond with JSON matching this schema:
         {{.OutputSchema}}
@@ -153,7 +223,7 @@ ai:
             type: array
             items:
               type: object
-              required: [callsign, volcano_name, hazard_level, assessment, ash_cloud_risk]
+              required: [entity_external_id, callsign, volcano_name, hazard_level, attention, assessment, ash_cloud_risk]
               properties:
                 callsign: { type: string }
                 aircraft_type: { type: string }
@@ -169,16 +239,23 @@ ai:
                 hazard_level:
                   type: string
                   enum: [negligible, low, moderate, high, critical]
+                attention:
+                  type: string
+                  # Maps DIRECTLY from hazard_level (negligible->info, low->low,
+                  # moderate->medium, high->high, critical->critical). The noise
+                  # gate (min_attention) drops everything below it.
+                  enum: [info, low, medium, high, critical]
                 rerouting_urgency:
                   type: string
                   enum: [none, advisory, recommended, immediate]
                 assessment: { type: string }
                 entity_external_id: { type: string }
                 volcano_external_id: { type: string }
-      max_tokens: 5000
+      max_tokens: 12000
       temperature: 0.1
       output:
         store_insights: true
+        min_attention: "high"   # noise gate: drop results below this attention
         insight_type: "volcanic_aviation_hazard"
         results_path: "hazards"
         ref_fields:

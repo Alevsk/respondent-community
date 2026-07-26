@@ -1,0 +1,189 @@
+# sources.d/nga_broadcast_warnings.yaml
+# NGA Broadcast / Navigational Warnings (WWNWS) — worldwide maritime safety
+# broadcasts: live-firing exercises, GPS interference, mines, survey operations,
+# derelicts, hazards to navigation, MODU/vessel positions.
+# Source: https://msi.nga.mil/api/publications/broadcast-warn?output=json&status=active
+# Auth: None. License: U.S. Government work, public domain (Title 17 -- no copyright).
+# Disclaimer: situational-awareness only, NOT a sole means of navigation.
+#
+# Each warning's coordinates live as DMS strings inside the `text` body (e.g.
+# "45-07.10N 030-09.70E"), not as numeric fields — so, like the news sources,
+# the entity is created without a position and an AI step extracts lat/lon (DMS
+# -> decimal) and classifies the warning. These exact DMS coordinates make the
+# extraction high-confidence. Provides chokepoint security context (firing
+# exercises, GPS jamming, survey ops in the Persian Gulf / Strait of Hormuz)
+# alongside the live AIS layer.
+#
+# Poll interval: 30 min — warnings are promulgated a few times per day.
+# Recording mode: dedupe — re-record only when the warning text/status changes.
+schema_version: 1
+
+name: nga_broadcast_warnings
+labels:
+  category: maritime
+  priority: medium
+
+source_type: nga_broadcast_warnings
+layer_type: maritime_warnings
+display_name: "Maritime Warnings"
+enabled: true
+
+transport:
+  type: http_poll
+  url: "https://msi.nga.mil/api/publications/broadcast-warn?output=json&status=active"
+  method: GET
+  headers:
+    Accept: "application/json"
+    User-Agent: "respondent-geoint/1.0 (https://github.com/respondent-platform)"
+  timeout: "60s"
+  interval: "1800s"   # 30 min
+  max_response_bytes: 10485760  # 10MB (~250KB actual)
+  retry:
+    max_attempts: 3
+    backoff: "exponential"
+    initial_delay: "10s"
+    max_delay: "120s"
+
+# Envelope: { "broadcast-warn": [ {...}, {...} ] }
+parser:
+  format: json
+  records_path: "broadcast-warn"
+  max_records: 500
+
+# Require the identifying fields and a non-empty warning body to geolocate.
+filter: >
+  has(record.navArea) && has(record.msgNumber) && has(record.msgYear)
+  && has(record.text) && record.text != ""
+
+entity:
+  external_id: >
+    string(record.navArea) + "-" + string(record.msgNumber) + "-" + string(record.msgYear)
+  name: >
+    "NAVAREA " + string(record.navArea) + " " + string(record.msgNumber) + "/" + string(record.msgYear)
+  metadata:
+    nav_area: >
+      string(record.navArea)
+    subregion: >
+      has(record.subregion) && record.subregion != null ? string(record.subregion) : ""
+    issue_date: >
+      has(record.issueDate) && record.issueDate != null ? string(record.issueDate) : ""
+    authority: >
+      has(record.authority) && record.authority != null ? string(record.authority) : ""
+    text: >
+      record.text
+
+observation:
+  latitude: "0.0"
+  longitude: "0.0"
+  altitude: "0.0"
+  timestamp: >
+    now()
+  velocity: {}
+  metadata:
+    text: >
+      record.text
+  content_hash: >
+    string(record.navArea) + "-" + string(record.msgNumber) + "-" + string(record.msgYear)
+
+ai:
+  enabled: true
+  operations:
+    - name: warning_geo_enrichment
+      prompt: |
+        You are a maritime safety analyst geolocating and classifying NGA
+        navigational/broadcast warnings for a situational-awareness dashboard.
+
+        <warning>
+          <id>NAVAREA {{index .Entity.Metadata "nav_area"}} {{.Entity.Name}}</id>
+          <authority>{{index .Entity.Metadata "authority"}}</authority>
+          <text>{{index .Entity.Metadata "text"}}</text>
+        </warning>
+
+        Perform the following in order:
+
+        1. GEOLOCATE — the warning body usually contains coordinates as DMS strings
+           like "45-07.10N 030-09.70E" (degrees-minutes.decimal, hemisphere suffix).
+           Parse the PRIMARY position and convert to DECIMAL degrees:
+           decimal = degrees + minutes/60, negative for S latitude and W longitude.
+           If several positions are given (an area), use the first/centroid. If NO
+           coordinates are present, leave lat/lon null and set location_confidence low.
+
+        2. CLASSIFY — assign one warning_type from the allowed enum.
+
+        3. ASSESS SEVERITY — operational significance to mariners (low/moderate/high/critical).
+
+        4. SUMMARIZE — one concise sentence on what the warning is and where.
+
+        Respond with JSON matching this schema:
+        {{.OutputSchema}}
+      output_schema:
+        type: object
+        required: [location_confidence, warning_type, severity, summary]
+        properties:
+          lat: { type: [number, "null"], minimum: -90, maximum: 90 }
+          lon: { type: [number, "null"], minimum: -180, maximum: 180 }
+          region: { type: [string, "null"] }
+          country: { type: [string, "null"] }
+          location_confidence:
+            type: number
+            minimum: 0.0
+            maximum: 1.0
+          warning_type:
+            type: string
+            enum:
+              - firing_exercise
+              - gps_interference
+              - mines
+              - survey_operations
+              - hazard_to_navigation
+              - derelict_adrift
+              - military_activity
+              - cable_pipeline_ops
+              - rocket_space_ops
+              - other
+          severity:
+            type: string
+            enum: [low, moderate, high, critical]
+          summary:
+            type: string
+      max_tokens: 500
+      temperature: 0
+      output:
+        target: entity
+        patch_coordinates:
+          enabled: true
+          lat_field: "lat"
+          lon_field: "lon"
+          confidence_field: "location_confidence"
+          min_confidence: 0.7
+
+recording:
+  mode: dedupe
+
+cache:
+  ttl: "7200s"  # 2 hours
+
+display:
+  icon:
+    shape: warning
+    rotatable: false
+    interpolation: false
+    scale: 1.0
+  trail:
+    color: "#ffb300"
+    width: 1.0
+    opacity: 0.5
+  style:
+    color: "#ffb300"
+    point_size: 7
+  field_renderers:
+    - keys: [nav_area]
+      label: "NAVAREA"
+      format:
+        type: string
+      priority: 0
+    - keys: [authority]
+      label: "AUTHORITY"
+      format:
+        type: string
+      priority: 1

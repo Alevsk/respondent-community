@@ -6,10 +6,18 @@
 # data centers) to assess physical damage risk and service disruption potential.
 #
 # Hazard sources:
-#   - Earthquakes M3.0+ (last 12h)
+#   - Earthquakes M3.0+ (last 12h), admitted via a MAGNITUDE-SCALED radius:
+#     shallow (depth<70km) M3-4 <=30km, M4-5 <=60km, M5-6 <=120km, M6+ <=250km;
+#     deep (depth>=100km) only within <=80km. M<5.0 only admitted when <30km.
 #   - Disaster alerts (GDACS — tsunamis, cyclones, floods)
-#   - Active volcanoes (non-Holocene status = recent/historical activity)
+#   - Active volcanoes (non-Holocene status = recent/historical activity; treated
+#     as negligible by the model since there is no live eruption-state source)
 #   - Extreme weather alerts (NOAA — severity 'Extreme')
+#
+# Noise control: ~70% of legacy output was negligible far/deep quakes. The radius
+# is now magnitude-scaled, a relevance floor drops weak distant quakes, the same
+# physical quake arriving under EMSC vs USGS ids is collapsed via quake_key, and
+# the model OMITs no_action / negligible / duplicate rows from the results array.
 #
 # Infrastructure targets:
 #   - Submarine cable landing points (1,908 entities)
@@ -19,7 +27,7 @@
 schema_version: 1
 name: infrastructure_threat_assessment
 display_name: "Critical Infrastructure Threat Assessment"
-enabled: false # TODO: enable
+enabled: true
 
 schedule:
   interval: "180s"
@@ -31,65 +39,80 @@ data:
   max_records: 30
   dedup:
     window: "3h"
-    key_fields: ["entity_external_id", "infrastructure_external_id"]
+    # Collapse the same physical quake arriving under EMSC vs USGS ids: a derived
+    # spatiotemporal key (hazard_type + lat/lon rounded to 0.1 degree) replaces the
+    # provider-specific external_id so both feeds dedup to one infra pairing.
+    key_fields: ["quake_key", "infrastructure_external_id"]
   sql: |
-    WITH recent_hazards AS (
+    WITH latest_hazard AS (
+      SELECT o.entity_id, o.lat, o.lon, o.altitude_m, o.ts,
+             ROW_NUMBER() OVER (PARTITION BY o.entity_id ORDER BY o.ts DESC) AS rn
+      FROM observations o
+      JOIN entities e ON e.id = o.entity_id
+      WHERE e.layer_type IN ('earthquakes', 'disaster_alerts', 'volcanoes', 'weather_alerts')
+    ),
+    latest_infra AS (
+      SELECT o.entity_id, o.lat, o.lon,
+             ROW_NUMBER() OVER (PARTITION BY o.entity_id ORDER BY o.ts DESC) AS rn
+      FROM observations o
+      JOIN entities e ON e.id = o.entity_id
+      WHERE e.layer_type IN ('subsea_cables', 'internet_infrastructure')
+    ),
+    recent_hazards AS MATERIALIZED (
+      -- MATERIALIZED: compute the hazard set once. Otherwise SQLite re-runs this
+      -- 4-way UNION (with per-layer window lookups) once per infrastructure
+      -- position in the spatial join (~7k infra entities) => the query never
+      -- finishes within the timeout.
       -- Earthquakes M3.0+ in last 12h
       SELECT e.id, e.name, e.external_id, e.layer_type, e.metadata,
-             o.lat, o.lon, o.position, o.altitude_m, o.ts,
+             o.lat, o.lon, o.altitude_m, o.ts,
              'earthquake' AS hazard_type,
-             COALESCE(e.metadata->>'magnitude', e.metadata->>'mag', '0') AS severity_value,
-             COALESCE(e.metadata->>'depth', '0') AS depth_km
+             COALESCE(json_extract(e.metadata,'$.magnitude'), json_extract(e.metadata,'$.mag'), '0') AS severity_value,
+             COALESCE(json_extract(e.metadata,'$.depth'), '0') AS depth_km
       FROM entities e
-      CROSS JOIN LATERAL (
-        SELECT lat, lon, position, altitude_m, ts
-        FROM observations WHERE entity_id = e.id ORDER BY ts DESC LIMIT 1
-      ) o
+      JOIN latest_hazard o ON o.entity_id = e.id AND o.rn = 1
       WHERE e.layer_type = 'earthquakes'
-        AND o.ts > NOW() - INTERVAL '12 hours'
-        AND CAST(COALESCE(e.metadata->>'magnitude', e.metadata->>'mag', '0') AS float) >= 3.0
+        AND o.ts > strftime('%Y-%m-%dT%H:%M:%SZ','now','-12 hours')
+        AND CAST(COALESCE(json_extract(e.metadata,'$.magnitude'), json_extract(e.metadata,'$.mag'), '0') AS REAL) >= 3.0
       UNION ALL
       -- Active disaster alerts (GDACS — tsunamis, cyclones, floods, etc.)
       SELECT e.id, e.name, e.external_id, e.layer_type, e.metadata,
-             o.lat, o.lon, o.position, o.altitude_m, o.ts,
+             o.lat, o.lon, o.altitude_m, o.ts,
              'disaster' AS hazard_type,
-             COALESCE(e.metadata->>'alertlevel', 'unknown') AS severity_value,
+             COALESCE(json_extract(e.metadata,'$.alertlevel'), 'unknown') AS severity_value,
              '0' AS depth_km
       FROM entities e
-      CROSS JOIN LATERAL (
-        SELECT lat, lon, position, altitude_m, ts
-        FROM observations WHERE entity_id = e.id ORDER BY ts DESC LIMIT 1
-      ) o
+      JOIN latest_hazard o ON o.entity_id = e.id AND o.rn = 1
       WHERE e.layer_type = 'disaster_alerts'
-        AND o.ts > NOW() - INTERVAL '12 hours'
+        AND o.ts > strftime('%Y-%m-%dT%H:%M:%SZ','now','-12 hours')
       UNION ALL
       -- Active volcanoes (non-Holocene = has erupted in recorded history)
       SELECT e.id, e.name, e.external_id, e.layer_type, e.metadata,
-             o.lat, o.lon, o.position, o.altitude_m, o.ts,
+             o.lat, o.lon, o.altitude_m, o.ts,
              'volcano' AS hazard_type,
-             COALESCE(e.metadata->>'status', 'unknown') AS severity_value,
+             COALESCE(json_extract(e.metadata,'$.status'), 'unknown') AS severity_value,
              '0' AS depth_km
       FROM entities e
-      CROSS JOIN LATERAL (
-        SELECT lat, lon, position, altitude_m, ts
-        FROM observations WHERE entity_id = e.id ORDER BY ts DESC LIMIT 1
-      ) o
+      JOIN latest_hazard o ON o.entity_id = e.id AND o.rn = 1
       WHERE e.layer_type = 'volcanoes'
-        AND e.metadata->>'status' != 'Holocene'
+        AND json_extract(e.metadata,'$.status') != 'Holocene'
       UNION ALL
       -- Extreme weather alerts (NOAA)
       SELECT e.id, e.name, e.external_id, e.layer_type, e.metadata,
-             o.lat, o.lon, o.position, o.altitude_m, o.ts,
+             o.lat, o.lon, o.altitude_m, o.ts,
              'extreme_weather' AS hazard_type,
-             COALESCE(e.metadata->>'severity', 'unknown') AS severity_value,
+             COALESCE(json_extract(e.metadata,'$.severity'), 'unknown') AS severity_value,
              '0' AS depth_km
       FROM entities e
-      CROSS JOIN LATERAL (
-        SELECT lat, lon, position, altitude_m, ts
-        FROM observations WHERE entity_id = e.id ORDER BY ts DESC LIMIT 1
-      ) o
+      JOIN latest_hazard o ON o.entity_id = e.id AND o.rn = 1
       WHERE e.layer_type = 'weather_alerts'
-        AND e.metadata->>'severity' = 'Extreme'
+        -- Recency bound: NOAA polls every 5 min and populates no event_time/end, so a
+        -- latest obs older than ~1h means the alert is no longer reported (stale). The
+        -- other hazard branches (earthquakes/disasters, 12h) persist longer; weather
+        -- goes stale fast, so it gets its own 1h window. Without this an old Extreme
+        -- alert joined live infrastructure as a current threat.
+        AND o.ts > strftime('%Y-%m-%dT%H:%M:%SZ','now','-1 hours')
+        AND json_extract(e.metadata,'$.severity') = 'Extreme'
     )
     SELECT
       h.id AS entity_id,
@@ -102,29 +125,53 @@ data:
       h.depth_km,
       infra.name AS infrastructure_name,
       infra.layer_type AS infrastructure_type,
-      infra.metadata->>'name' AS cable_name,
-      infra.metadata->>'org_name' AS facility_org,
-      infra.metadata->>'net_count' AS network_count,
-      infra.metadata->>'ix_count' AS ix_count,
+      json_extract(infra.metadata,'$.name') AS cable_name,
+      json_extract(infra.metadata,'$.org_name') AS facility_org,
+      json_extract(infra.metadata,'$.net_count') AS network_count,
+      json_extract(infra.metadata,'$.ix_count') AS ix_count,
       infra.external_id AS infrastructure_external_id,
-      -- Tighter radius for shallow earthquakes (<70km depth) which cause more
-      -- surface damage. Use 150km for shallow, 300km for deep.
-      ROUND(ST_Distance(h.position::geography, o_infra.position::geography) / 1000)::text AS distance_km
+      -- Derived spatiotemporal key: collapses the same physical quake arriving
+      -- under EMSC vs USGS external_ids (lat/lon rounded to ~0.1 deg / ~11km).
+      h.hazard_type || ':' || CAST(ROUND(h.lat,1) AS TEXT) || ',' || CAST(ROUND(h.lon,1) AS TEXT) AS quake_key,
+      -- Magnitude-scaled admission radius (see WHERE CASE below): shallow quakes
+      -- (<70km) widen with magnitude; deep quakes (>=100km) only within 80km.
+      CAST(ROUND(haversine_km(h.lat, h.lon, o_infra.lat, o_infra.lon)) AS TEXT) AS distance_km
     FROM recent_hazards h
     JOIN entities infra ON infra.layer_type IN ('subsea_cables', 'internet_infrastructure')
-    CROSS JOIN LATERAL (
-      SELECT position FROM observations WHERE entity_id = infra.id ORDER BY ts DESC LIMIT 1
-    ) o_infra
-    WHERE CASE
-      -- Shallow earthquakes: tighter 150km radius (more destructive at surface)
-      WHEN h.hazard_type = 'earthquake' AND CAST(h.depth_km AS float) < 70
-        THEN ST_DWithin(h.position::geography, o_infra.position::geography, 150000)
-      -- Deep earthquakes and other hazards: wider 300km radius
-      ELSE ST_DWithin(h.position::geography, o_infra.position::geography, 300000)
-    END
+    JOIN latest_infra o_infra ON o_infra.entity_id = infra.id AND o_infra.rn = 1
+    -- bbox prefilter using the widest radius we still admit (300km, for
+    -- non-earthquake hazards) before the precise haversine CASE below. Earthquakes
+    -- are capped far tighter by the magnitude-scaled CASE, so the wider bbox is a
+    -- safe (over-inclusive) superset.
+    WHERE o_infra.lat BETWEEN h.lat-(300/111.32) AND h.lat+(300/111.32)
+      AND o_infra.lon BETWEEN h.lon-(300/(111.32*max(COS(RADIANS(h.lat)),0.01))) AND h.lon+(300/(111.32*max(COS(RADIANS(h.lat)),0.01)))
+      AND CASE
+        -- RELEVANCE FLOOR (applies to all earthquakes first): only admit M<5.0
+        -- when the infra is within 30km. This drops the weak distant quakes that
+        -- previously flooded the output as "negligible (<1%)".
+        WHEN h.hazard_type = 'earthquake' AND CAST(h.severity_value AS REAL) < 5.0
+          THEN haversine_km(h.lat, h.lon, o_infra.lat, o_infra.lon) <= 30
+        -- Shallow M5+ (<70km depth): magnitude-scaled radius. Shallow events
+        -- damage the surface, so the admitted radius widens with magnitude.
+        --   M5-6 <= 120km, M6+ <= 250km.
+        WHEN h.hazard_type = 'earthquake' AND CAST(h.depth_km AS REAL) < 70 THEN
+          CASE
+            WHEN CAST(h.severity_value AS REAL) >= 6.0
+              THEN haversine_km(h.lat, h.lon, o_infra.lat, o_infra.lon) <= 250
+            ELSE haversine_km(h.lat, h.lon, o_infra.lat, o_infra.lon) <= 120
+          END
+        -- Deep M5+ (>=100km depth): energy is attenuated by depth, so admit only
+        -- very close infra (<=80km). Intermediate-depth (70-100km) quakes fall
+        -- through to the final WHEN and are excluded entirely.
+        WHEN h.hazard_type = 'earthquake' AND CAST(h.depth_km AS REAL) >= 100
+          THEN haversine_km(h.lat, h.lon, o_infra.lat, o_infra.lon) <= 80
+        WHEN h.hazard_type = 'earthquake' THEN 0
+        -- Non-earthquake hazards (disaster, volcano, extreme weather): 300km.
+        ELSE haversine_km(h.lat, h.lon, o_infra.lat, o_infra.lon) <= 300
+      END
     ORDER BY
-      CASE WHEN h.hazard_type = 'earthquake' THEN CAST(h.severity_value AS float) ELSE 0 END DESC,
-      ST_Distance(h.position::geography, o_infra.position::geography) ASC
+      CASE WHEN h.hazard_type = 'earthquake' THEN CAST(h.severity_value AS REAL) ELSE 0 END DESC,
+      haversine_km(h.lat, h.lon, o_infra.lat, o_infra.lon) ASC
     LIMIT 30
 
 ai:
@@ -153,7 +200,7 @@ ai:
 
         Hazard-to-infrastructure proximity data:
         {{range .Records}}
-        - HAZARD: {{.EntityName}} ({{index .Metadata "hazard_type"}}, severity: {{index .Metadata "severity_value"}}, ID: {{.ExternalID}})
+        - HAZARD: {{.EntityName}} ({{index .Metadata "hazard_type"}}, severity: {{index .Metadata "severity_value"}}, ID: {{.ExternalID}}, layer: {{.LayerType}})
           {{if index .Metadata "depth_km"}}Depth: {{index .Metadata "depth_km"}}km | {{end}}Position: {{.Lat}}, {{.Lon}}
           THREATENED: {{index .Metadata "infrastructure_name"}} ({{index .Metadata "infrastructure_type"}}, ref: {{index .Metadata "infrastructure_external_id"}})
           {{if index .Metadata "cable_name"}}Cable: {{index .Metadata "cable_name"}}{{end}}
@@ -163,6 +210,12 @@ ai:
 
         Consider the infrastructure's strategic importance. A cable landing point serving as the sole international internet connection for an island nation is FAR more critical than one of dozens of cables landing at a major hub like Singapore or New York.
 
+        VOLCANO HANDLING: the volcano feed has NO live eruption-state source — a
+        non-Holocene status only means the volcano erupted at some point in recorded
+        history, NOT that it is erupting now. Treat any volcano as NEGLIGIBLE and
+        OMIT it from the results array unless a co-located disaster/weather hazard
+        independently indicates active danger.
+
         For each hazard-infrastructure pair, assess:
         1. Physical damage probability — use the DAMAGE RADIUS THRESHOLDS above to calibrate your assessment against the actual distance and hazard magnitude
         2. Service disruption potential (how many networks/cables could be affected)
@@ -171,6 +224,30 @@ ai:
         5. Recommended action — no_action, monitor, alert_operator, or activate_contingency
         6. Overall threat level: low/moderate/elevated/high/critical
         7. disruption_assessment MUST be 2-3 sentences describing the potential service impact
+        8. attention — set this DIRECTLY from your own threat_level for THIS pair
+           (do NOT auto-elevate; mirror your assessment's severity):
+             low -> low, moderate -> medium, elevated -> medium, high -> high,
+             critical -> critical. (Use "info" only for purely informational rows
+             you choose to keep.)
+
+        OMIT NON-THREATS — this is the core usefulness requirement. Return FEWER
+        items rather than emitting benign rows. DO NOT include a hazard-infrastructure
+        pair in the "threats" array when ANY of the following is true:
+        - recommended_action would be "no_action"
+        - the physical damage probability is negligible / "no action" / "all clear"
+        - threat_level is "low" with no realistic disruption pathway
+        - the hazard is a non-erupting volcano (see VOLCANO HANDLING above)
+        - the row is a duplicate of another pair (the SAME physical quake may arrive
+          under both EMSC and USGS ids — report it ONCE; drop the duplicate)
+        An empty "threats" array is a valid and expected response when nothing is
+        actionable. Only emit pairs that genuinely warrant operator attention.
+
+        ENTITY IDENTITY (required for correct association): in each threat object set
+        entity_external_id to THIS pair's HAZARD ID and entity_layer_type to THIS
+        pair's HAZARD layer (the "ID:" and "layer:" shown for the hazard above) —
+        the earthquake/disaster/volcano/weather entity, NOT the infrastructure.
+        Copy them verbatim; do not invent or swap them. This is what links the
+        insight to the right entity instead of to every hazard in the batch.
 
         Respond with JSON matching this schema:
         {{.OutputSchema}}
@@ -185,7 +262,7 @@ ai:
             type: array
             items:
               type: object
-              required: [hazard_name, infrastructure_name, threat_level, damage_probability, disruption_assessment, recommended_action, strategic_importance]
+              required: [entity_external_id, entity_layer_type, hazard_name, infrastructure_name, threat_level, attention, damage_probability, disruption_assessment, recommended_action, strategic_importance]
               properties:
                 hazard_name: { type: string }
                 hazard_type: { type: string }
@@ -195,6 +272,11 @@ ai:
                 threat_level:
                   type: string
                   enum: [low, moderate, elevated, high, critical]
+                attention:
+                  type: string
+                  # Set DIRECTLY from threat_level (never auto-elevated). Drives the
+                  # min_attention noise gate below; non-threats are OMITTED upstream.
+                  enum: [info, low, medium, high, critical]
                 damage_probability: { type: string }
                 disruption_assessment: { type: string }
                 redundancy_notes: { type: string }
@@ -204,12 +286,21 @@ ai:
                 strategic_importance:
                   type: string
                   enum: [routine, significant, critical]
+                # Identity of THIS threat's hazard entity — used to associate the
+                # insight with the correct entity. Must be the hazard's own id+layer
+                # (one of earthquakes/disaster_alerts/volcanoes/weather_alerts), NOT
+                # the infrastructure's, so the insight links to the quake/disaster,
+                # not to every hazard in the batch.
                 entity_external_id: { type: string }
+                entity_layer_type:
+                  type: string
+                  enum: [earthquakes, disaster_alerts, volcanoes, weather_alerts]
                 infrastructure_external_id: { type: string }
-      max_tokens: 5000
+      max_tokens: 12000
       temperature: 0.1
       output:
         store_insights: true
+        min_attention: "medium"   # noise gate: drop results below this attention
         insight_type: "infrastructure_threat"
         results_path: "threats"
         websocket_push: true

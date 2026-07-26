@@ -5,16 +5,20 @@
 # spatially correlating NASA FIRMS fire hotspots with OpenAQ/PurpleAir sensors.
 # Identifies smoke plume impacts on population health.
 #
-# Thresholds tuned for sensitivity:
-#   - FRP > 10 MW (moderate fires — catches agricultural burns and wildfires)
-#   - PM2.5 > 35 µg/m³ (Unhealthy for Sensitive Groups and above)
-#   - 200km radius (smoke plumes travel far, especially with wind)
+# Thresholds tuned for precision (proximity is NOT causation):
+#   - Standalone bar: PM2.5 > 55 µg/m³ (Unhealthy+) OR FRP > 30 MW
+#   - 100km max join radius; small fires (FRP < 30 MW) must be within 30km
+#   - Temporal alignment: fire and air readings must both fall inside the
+#     lookback window (julianday on both sides) so we don't link a stale
+#     fire obs to a fresh air reading.
+# NOTE: there is no wind/transport model here, so a spatial+temporal overlap
+# is only a candidate. The AI layer must down-rank / omit speculative links.
 # =============================================================================
 
 schema_version: 1
 name: environmental_cascade
 display_name: "Environmental Cascade Detection"
-enabled: false # TODO: enable
+enabled: true
 
 schedule:
   interval: "180s"
@@ -28,33 +32,44 @@ data:
     window: "2h"
     key_fields: ["entity_external_id", "sensor_external_id"]
   sql: |
-    WITH active_fires AS (
-      SELECT e.id, e.name, e.external_id, e.metadata,
-             o.lat, o.lon, o.position, o.ts,
-             -- FRP threshold lowered from 20 to 10 MW to catch moderate fires
-             -- that can still produce significant smoke plumes.
-             CAST(COALESCE(e.metadata->>'frp', '0') AS float) AS frp
-      FROM entities e
-      CROSS JOIN LATERAL (
-        SELECT lat, lon, position, ts
-        FROM observations WHERE entity_id = e.id ORDER BY ts DESC LIMIT 1
-      ) o
+    WITH latest_fire AS (
+      SELECT o.entity_id, o.lat, o.lon, o.ts,
+             ROW_NUMBER() OVER (PARTITION BY o.entity_id ORDER BY o.ts DESC) AS rn
+      FROM observations o
+      JOIN entities e ON e.id = o.entity_id
       WHERE e.layer_type = 'fires_active'
-        AND o.ts > NOW() - INTERVAL '6 hours'
-        AND CAST(COALESCE(e.metadata->>'frp', '0') AS float) > 10
+    ),
+    latest_air AS (
+      SELECT o.entity_id, o.lat, o.lon, o.ts,
+             ROW_NUMBER() OVER (PARTITION BY o.entity_id ORDER BY o.ts DESC) AS rn
+      FROM observations o
+      JOIN entities e ON e.id = o.entity_id
+      WHERE e.layer_type = 'air_quality'
+    ),
+    active_fires AS (
+      SELECT e.id, e.name, e.external_id, e.metadata,
+             o.lat, o.lon, o.ts,
+             CAST(COALESCE(json_extract(e.metadata,'$.frp'), '0') AS REAL) AS frp
+      FROM entities e
+      JOIN latest_fire o ON o.entity_id = e.id AND o.rn = 1
+      WHERE e.layer_type = 'fires_active'
+        -- Temporal alignment: only consider fires whose latest obs is still
+        -- inside the lookback window (julianday on BOTH sides).
+        AND o.ts > strftime('%Y-%m-%dT%H:%M:%SZ','now','-6 hours')
     ),
     degraded_air AS (
       SELECT e.id, e.name, e.external_id, e.metadata,
-             o.lat, o.lon, o.position,
-             CAST(COALESCE(e.metadata->>'pm25', '0') AS float) AS pm25,
-             e.metadata->>'aqi' AS aqi_level
+             o.lat, o.lon, o.ts,
+             CAST(COALESCE(json_extract(e.metadata,'$.pm25'), '0') AS REAL) AS pm25,
+             json_extract(e.metadata,'$.aqi') AS aqi_level
       FROM entities e
-      CROSS JOIN LATERAL (
-        SELECT lat, lon, position
-        FROM observations WHERE entity_id = e.id ORDER BY ts DESC LIMIT 1
-      ) o
+      JOIN latest_air o ON o.entity_id = e.id AND o.rn = 1
       WHERE e.layer_type = 'air_quality'
-        AND CAST(COALESCE(e.metadata->>'pm25', '0') AS float) > 35
+        -- Temporal alignment: air reading must also be inside the lookback
+        -- window so we don't correlate a stale fire with a fresh air sample
+        -- (or vice versa).
+        AND o.ts > strftime('%Y-%m-%dT%H:%M:%SZ','now','-6 hours')
+        AND CAST(COALESCE(json_extract(e.metadata,'$.pm25'), '0') AS REAL) > 35
     )
     SELECT
       f.id AS entity_id,
@@ -62,20 +77,36 @@ data:
       f.external_id AS external_id,
       'fires_active' AS layer_type,
       f.lat, f.lon, 0.0 AS altitude_m, f.ts,
-      f.frp::text AS fire_power_mw,
-      f.metadata->>'confidence' AS fire_confidence,
-      f.metadata->>'satellite' AS fire_satellite,
+      CAST(f.frp AS TEXT) AS fire_power_mw,
+      json_extract(f.metadata,'$.confidence') AS fire_confidence,
+      json_extract(f.metadata,'$.satellite') AS fire_satellite,
       a.name AS affected_sensor,
-      a.pm25::text AS pm25_ugm3,
+      CAST(a.pm25 AS TEXT) AS pm25_ugm3,
       a.aqi_level,
-      a.metadata->>'temperature' AS temperature,
-      a.metadata->>'humidity' AS humidity,
-      -- Widened from 100km to 200km — smoke plumes travel hundreds of
-      -- kilometers, especially with prevailing winds.
-      ROUND(ST_Distance(f.position::geography, a.position::geography) / 1000)::text AS distance_km,
+      json_extract(a.metadata,'$.temperature') AS temperature,
+      json_extract(a.metadata,'$.humidity') AS humidity,
+      -- Tightened to a 100km MAX join radius. Without a wind/transport model a
+      -- spatial overlap is only a candidate, so we keep it conservative.
+      CAST(ROUND(haversine_km(f.lat, f.lon, a.lat, a.lon)) AS TEXT) AS distance_km,
       a.external_id AS sensor_external_id
     FROM active_fires f
-    JOIN degraded_air a ON ST_DWithin(f.position::geography, a.position::geography, 200000)
+    JOIN degraded_air a
+      -- bbox prefilter at 100km using SQLite max() (Postgres-only helpers avoided).
+      ON a.lat BETWEEN f.lat - (100/111.32) AND f.lat + (100/111.32)
+     AND a.lon BETWEEN f.lon - (100/(111.32*max(COS(RADIANS(f.lat)),0.01))) AND f.lon + (100/(111.32*max(COS(RADIANS(f.lat)),0.01)))
+     -- Cross-observation temporal proximity: the fire detection and the air reading
+     -- must share a <=2h timeslot (air_quality is the tighter, hourly side). Per-side
+     -- 6h recency bounds alone let a ~6h-old fire obs pair with a fresh air reading as
+     -- if co-occurring; this forces real overlap of a near-real-time smoke cascade.
+     AND ABS(julianday(f.ts) - julianday(a.ts)) * 24.0 <= 2
+     -- Hard cap at 100km for any fire.
+     AND haversine_km(f.lat, f.lon, a.lat, a.lon) <= 100
+     -- Small fires (FRP < 30 MW) require much closer proximity (<= 30km) since
+     -- they cannot plausibly drive PM2.5 across a long distance.
+     AND (f.frp >= 30 OR haversine_km(f.lat, f.lon, a.lat, a.lon) <= 30)
+     -- Standalone bar: only correlate when the air reading is genuinely
+     -- Unhealthy (PM2.5 > 55) OR the fire is at least moderate (FRP > 30 MW).
+     AND (a.pm25 > 55 OR f.frp > 30)
     ORDER BY a.pm25 DESC, f.frp DESC
     LIMIT 30
 
@@ -87,8 +118,13 @@ ai:
       prompt: |
         You are an environmental health analyst assessing the public health impact of wildfire smoke on nearby populations.
 
-        ENVIRONMENTAL CASCADE DETECTION: {{.RecordCount}} active fire hotspots correlated
-        with degraded air quality sensors within 200km (last {{.Lookback}}).
+        ENVIRONMENTAL CASCADE DETECTION: {{.RecordCount}} active fire hotspots spatially
+        correlated with degraded air quality sensors within 100km (last {{.Lookback}}).
+
+        CRITICAL CAVEAT — PROXIMITY IS NOT CAUSATION. This query has NO wind/transport
+        model. A fire near a sensor does NOT prove the fire caused the PM2.5 reading;
+        PM2.5 can come from traffic, industry, dust, other fires, or regional haze.
+        Treat every row as a CANDIDATE to be confirmed or rejected, not a fact.
 
         Fire-to-air-quality correlation data:
         {{range .Records}}
@@ -129,6 +165,28 @@ ai:
         6. Expected duration: short-term (hours) or sustained (days)
         7. Overall severity: minor/moderate/serious/severe/emergency
 
+        DOWN-RANK AND OMIT SPECULATIVE LINKS (this is the primary instruction):
+        - The causal link is SPECULATIVE whenever ANY of these hold: no wind data is
+          available to confirm transport toward the sensor; distance > 100km (none here,
+          but treat >50km as weak); low fire power (FRP < 30 MW); or marginal air quality
+          (PM2.5 only in the 35-55 "Unhealthy for Sensitive Groups" band).
+        - For speculative candidates, either OMIT the cascade from the results array
+          entirely, OR if you keep it for situational awareness, cap its severity at
+          minor/moderate (attention info/low) and say plainly in health_impact that the
+          fire-to-air link is unconfirmed.
+        - OMIT any cascade that is a non-threat, "no action", "negligible", "all clear",
+          or where you cannot reasonably attribute the PM2.5 to the fire. Returning FEWER,
+          higher-confidence cascades is strongly preferred over emitting benign rows.
+
+        ATTENTION (set DIRECTLY from your own severity for that cascade — never auto-elevate):
+        - minor      -> info
+        - moderate   -> low
+        - serious    -> medium
+        - severe     -> high
+        - emergency  -> critical
+        Do not raise attention above what the severity warrants just because a fire is
+        nearby; an unconfirmed link must stay info/low.
+
         Respond with JSON matching this schema:
         {{.OutputSchema}}
 
@@ -142,7 +200,7 @@ ai:
             type: array
             items:
               type: object
-              required: [fire_name, fire_classification, affected_area, health_impact, severity, population_exposure]
+              required: [entity_external_id, fire_name, fire_classification, affected_area, health_impact, severity, attention, population_exposure]
               properties:
                 fire_name: { type: string }
                 fire_classification:
@@ -163,12 +221,16 @@ ai:
                 severity:
                   type: string
                   enum: [minor, moderate, serious, severe, emergency]
+                attention:
+                  type: string
+                  enum: [info, low, medium, high, critical]
                 entity_external_id: { type: string }
                 sensor_external_id: { type: string }
-      max_tokens: 3000
+      max_tokens: 12000
       temperature: 0.1
       output:
         store_insights: true
+        min_attention: "medium"   # noise gate: drop results below this attention
         insight_type: "environmental_cascade"
         results_path: "cascades"
         ref_fields:

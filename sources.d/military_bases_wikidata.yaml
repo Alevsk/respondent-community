@@ -1,0 +1,158 @@
+# sources.d/military_bases_wikidata.yaml
+# Global Military Bases & Installations -- Wikidata SPARQL
+# Source: https://query.wikidata.org/sparql
+# Auth: None required (CC0 public domain)
+# Format: SPARQL JSON results (application/sparql-results+json)
+#
+# Queries Wikidata for everything that is an instance of (P31) a military base
+# (Q245016) or any subclass thereof (P279*) -- this transitively includes air
+# bases, naval bases, army garrisons, missile sites, etc. -- that carries
+# coordinates (P625). ~11k installations carry coordinates worldwide.
+# Each result binding has per-field objects: { "value": "...", "type": "..." }.
+# Access values via record.FIELD.value in CEL (same shape as the nuclear source).
+#
+# NOTE: Wikidata military bases include historical/decommissioned sites; there is
+# no reliable live operational-status property, so all coordinate-bearing bases
+# are surfaced. Correlate with conflict layers via analysis.d for operational
+# relevance.
+#
+# Poll interval: 24 hours -- the base inventory changes on the order of months.
+# Recording mode: dedupe -- re-record only when name/country/operator changes.
+schema_version: 2
+
+name: military_bases_wikidata
+labels:
+  category: "military"
+  priority: "medium"
+
+source_type: military_bases_wikidata
+layer_type: military_bases
+display_name: "Military Bases"
+
+enabled: true
+
+# ~11k installations -> viewport filtering (count well above the 2000 threshold).
+filtering: viewport
+
+transport:
+  type: http_poll
+  # SPARQL query URL-encoded. Coordinates extracted via psv:P625 +
+  # wikibase:geoLatitude/geoLongitude (reliable on the Wikidata endpoint;
+  # geof: BIND variants are not). The ?type/P31 OPTIONAL is intentionally
+  # omitted -- a base instance-of is multi-valued and would explode rows
+  # (one per class), and dedup by QID already collapses them.
+  url: >-
+    https://query.wikidata.org/sparql?format=json&query=SELECT%20%3Fbase%20%3FbaseLabel%20%3Flat%20%3Flon%20%3FcountryLabel%20%3FoperatorLabel%20WHERE%20%7B%20%3Fbase%20wdt%3AP31/wdt%3AP279%2A%20wd%3AQ245016%20.%20%3Fbase%20p%3AP625%20%3Fcs%20.%20%3Fcs%20psv%3AP625%20%3Fcn%20.%20%3Fcn%20wikibase%3AgeoLatitude%20%3Flat%20.%20%3Fcn%20wikibase%3AgeoLongitude%20%3Flon%20.%20OPTIONAL%20%7B%20%3Fbase%20wdt%3AP17%20%3Fcountry%20%7D%20OPTIONAL%20%7B%20%3Fbase%20wdt%3AP137%20%3Foperator%20%7D%20SERVICE%20wikibase%3Alabel%20%7B%20bd%3AserviceParam%20wikibase%3Alanguage%20%22en%22%20.%20%7D%20%7D%20LIMIT%2012000
+  method: GET
+  headers:
+    Accept: "application/sparql-results+json"
+    User-Agent: "respondent-geoint/1.0 (https://github.com/respondent-platform)"
+  timeout: "60s"
+  interval: "86400s"   # 24 hours -- base inventory is near-static
+  max_response_bytes: 20971520  # 20MB (~10MB actual at LIMIT 12000)
+  retry:
+    max_attempts: 3
+    backoff: "exponential"
+    initial_delay: "10s"
+    max_delay: "120s"
+
+# SPARQL JSON envelope: { "results": { "bindings": [ {...}, {...} ] } }
+parser:
+  format: json
+  records_path: "results.bindings"
+  max_records: 12000
+
+# Require base URI, a non-empty label, and valid non-zero coordinates.
+filter: >
+  has(record.base) && has(record.base.value)
+  && has(record.lat) && has(record.lat.value)
+  && has(record.lon) && has(record.lon.value)
+  && has(record.baseLabel) && has(record.baseLabel.value)
+  && record.baseLabel.value != ""
+  && double(record.lat.value) != 0.0
+  && double(record.lon.value) != 0.0
+
+# Strip the Wikidata URI prefix to get the bare QID (e.g., "Q13406").
+entity:
+  external_id: >
+    record.base.value.replace("http://www.wikidata.org/entity/", "")
+  name: >
+    record.baseLabel.value
+  metadata:
+    country: >
+      has(record.countryLabel) && has(record.countryLabel.value)
+        ? record.countryLabel.value : ""
+    operator: >
+      has(record.operatorLabel) && has(record.operatorLabel.value)
+        ? record.operatorLabel.value : ""
+    wikidata_qid: >
+      record.base.value.replace("http://www.wikidata.org/entity/", "")
+
+observation:
+  latitude: >
+    double(record.lat.value)
+  longitude: >
+    double(record.lon.value)
+  altitude: "0.0"
+  timestamp: >
+    now()
+  velocity: {}
+  metadata:
+    country: >
+      has(record.countryLabel) && has(record.countryLabel.value)
+        ? record.countryLabel.value : ""
+    operator: >
+      has(record.operatorLabel) && has(record.operatorLabel.value)
+        ? record.operatorLabel.value : ""
+  # Content hash: re-record only when name/country/operator changes.
+  content_hash: >
+    record.base.value
+    + "_" + (has(record.countryLabel) && has(record.countryLabel.value) ? record.countryLabel.value : "")
+    + "_" + (has(record.operatorLabel) && has(record.operatorLabel.value) ? record.operatorLabel.value : "")
+
+recording:
+  mode: dedupe
+
+cache:
+  ttl: "172800s"  # 48 hours -- survive a missed daily poll
+
+# Geo sorted-set maintenance for the viewport-filtered layer.
+geo_cache:
+  overfetch_ratio: 3.0
+  alive_ratio_threshold: 0.5
+  gc_batch_size: 500
+
+display:
+  icon:
+    shape: shield
+    rotatable: false
+    interpolation: false
+    scale: 1.0
+  trail:
+    color: "#7c8a3a"
+    width: 1.0
+    opacity: 0.5
+  style:
+    color: "#7c8a3a"
+    point_size: 6
+  field_renderers:
+    - keys: [country]
+      label: "COUNTRY"
+      format:
+        type: string
+        transform: upper
+      priority: 0
+    - keys: [operator]
+      label: "OPERATOR"
+      format:
+        type: string
+      priority: 1
+    - keys: [wikidata_qid]
+      label: "WIKIDATA"
+      format:
+        type: string
+      priority: 2
+
+history:
+  max_lookback: "8760h"   # 1 year
+  max_range_span: "720h"  # 30 days per query window

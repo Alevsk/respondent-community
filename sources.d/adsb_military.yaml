@@ -27,6 +27,10 @@ transport:
     backoff: exponential
     initial_delay: "1s"
     max_delay: "10s"
+  # Shares the api.adsb.lol per-host budget with adsb_lol_flights + on-demand fills.
+  rate_limit:
+    requests_per_second: 1
+    burst: 1
 
 parser:
   format: json

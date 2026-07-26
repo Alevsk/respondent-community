@@ -1,0 +1,128 @@
+# sources.d/sict_toll_booths.yaml
+# SICT Mexico toll booths (casetas) — highway toll chokepoints
+# Attribution: Source: github.com/iChocko/Datos-Viales-SICT (SICT)
+# Auth: None (public GeoJSON via GitHub raw)
+# Format: GeoJSON FeatureCollection with Point features
+#
+# Static infrastructure overlay showing ~401 highway toll booths across
+# Mexico. Each feature includes the booth name, associated highway,
+# route code, and TDPA (annual average daily traffic) for 2024.
+schema_version: 1
+
+name: sict_toll_booths
+labels:
+  category: infrastructure
+  priority: low
+source_type: sict_toll_booths
+layer_type: toll_booths
+display_name: "Toll Booths (Mexico)"
+# Layer label shown in the UI layers panel (overrides the title-cased layer_type
+# "Toll Booths", which would otherwise drop the country qualifier).
+layer_display_name: "Toll Booths (Mexico)"
+
+enabled: true
+
+transport:
+  type: http_poll
+  url: "https://raw.githubusercontent.com/iChocko/Datos-Viales-SICT/main/geodata/geojson/light/u1_casetas.geojson"
+  method: GET
+  headers:
+    Accept: "application/json"
+  timeout: "15s"
+  interval: "604800s" # 7 days — static annual traffic census data
+  max_response_bytes: 10485760  # 10MB
+  retry:
+    max_attempts: 3
+    backoff: "exponential"
+    initial_delay: "2s"
+    max_delay: "30s"
+
+parser:
+  format: geojson
+  records_path: "features"
+  max_records: 1000
+
+# Filter: require a non-empty caseta_mongo_id and valid geometry coordinates
+filter: >
+  has(record.properties) && has(record.properties.caseta_mongo_id)
+  && record.properties.caseta_mongo_id != ""
+  && has(record.geometry) && has(record.geometry.coordinates)
+
+entity:
+  external_id: >
+    "sict_caseta_" + record.properties.caseta_mongo_id
+  name: >
+    has(record.properties.caseta_name) && record.properties.caseta_name != ""
+      ? record.properties.caseta_name
+      : record.properties.caseta_mongo_id
+  metadata:
+    caseta_name: >
+      has(record.properties.caseta_name) ? record.properties.caseta_name : ""
+    highway: >
+      has(record.properties.carretera) ? record.properties.carretera : ""
+    route: >
+      has(record.properties.ruta) ? record.properties.ruta : ""
+    movement: >
+      has(record.properties.movimiento) ? record.properties.movimiento : ""
+    state: >
+      has(record.properties.state_slug) ? record.properties.state_slug : ""
+    cve: >
+      has(record.properties.cve) ? record.properties.cve : ""
+    tdpa: >
+      string(coerce_double(record.properties.tdpa_2024, 0.0))
+
+observation:
+  latitude: >
+    record.geometry.coordinates[1]
+  longitude: >
+    record.geometry.coordinates[0]
+  altitude: "0.0"
+  timestamp: >
+    now()
+  velocity: {}
+  metadata:
+    tdpa: >
+      string(coerce_double(record.properties.tdpa_2024, 0.0))
+  content_hash: >
+    record.properties.caseta_mongo_id + "_" + string(coerce_double(record.properties.tdpa_2024, 0.0))
+
+recording:
+  mode: dedupe
+
+cache:
+  ttl: "86400s"
+
+display:
+  icon:
+    shape: marker
+    rotatable: false
+    interpolation: false
+    scale: 1.0
+  trail:
+    color: "#ffd000"
+    width: 1.5
+    opacity: 0.7
+  style:
+    color: "#ffd000"
+    point_size: 6
+  field_renderers:
+    - keys: [caseta_name]
+      label: "TOLL BOOTH"
+      format:
+        type: string
+      priority: 0
+    - keys: [highway]
+      label: "HIGHWAY"
+      format:
+        type: string
+      priority: 1
+    - keys: [route]
+      label: "ROUTE"
+      format:
+        type: string
+      priority: 2
+    - keys: [tdpa]
+      label: "TDPA 2024"
+      format:
+        type: number
+      priority: 3

@@ -3,8 +3,9 @@
 # =============================================================================
 # Correlates lightning strike locations with subsequent fire ignitions to
 # identify lightning-caused wildfires. Lightning is the #1 natural cause of
-# wildfires. By detecting fires that appear near recent lightning strikes,
-# we can classify fire origin and predict where new fires may start.
+# wildfires. We match fires within 10km of a strike that appear 0-6h AFTER it
+# (directional causality), so only plausible lightning-caused ignitions surface
+# — pre-existing and coincidental fires are filtered out in SQL.
 #
 # Data layers: lightning (Blitzortung) × fires_active (NASA FIRMS)
 # =============================================================================
@@ -12,7 +13,7 @@
 schema_version: 1
 name: lightning_fire_prediction
 display_name: "Lightning-Fire Prediction"
-enabled: false # TODO: enable
+enabled: true
 
 schedule:
   interval: "180s"
@@ -24,34 +25,63 @@ data:
   max_records: 30
   dedup:
     window: "6h"
-    key_fields: ["entity_external_id", "lightning_external_id"]
+    # Key on the fire entity only: one fire is one prediction regardless of how
+    # many nearby strikes matched it. Prevents the same ignition fanning out into
+    # many near-identical notifications (one per strike).
+    key_fields: ["entity_external_id"]
   sql: |
     WITH recent_lightning AS (
       -- Observation-first: only ~4,600 active lightning entities vs 32K total.
-      SELECT DISTINCT ON (o.entity_id)
-        e.id, e.name, e.external_id, e.metadata,
-        o.lat, o.lon, o.position, o.ts,
-        COALESCE(e.metadata->>'polarity', 'unknown') AS polarity,
-        COALESCE(e.metadata->>'station_count', '0') AS station_count
-      FROM observations o
-      JOIN entities e ON e.id = o.entity_id AND e.layer_type = 'lightning'
-      WHERE o.ts > NOW() - INTERVAL '12 hours'
-      ORDER BY o.entity_id, o.ts DESC
+      SELECT *,
+        -- Precompute the 10km bounding box once per strike so the spatial join
+        -- below is plain comparisons, not millions of COS/RADIANS calls.
+        -- 0.09 deg latitude ~= 10km; longitude scaled by cos(lat).
+        lat - 0.09 AS lat_min,
+        lat + 0.09 AS lat_max,
+        lon - (0.09 / max(COS(RADIANS(lat)), 0.01)) AS lon_min,
+        lon + (0.09 / max(COS(RADIANS(lat)), 0.01)) AS lon_max
+      FROM (
+        SELECT
+          e.id, e.name, e.external_id, e.metadata,
+          o.lat, o.lon, o.ts,
+          COALESCE(json_extract(e.metadata,'$.polarity'), 'unknown') AS polarity,
+          COALESCE(json_extract(e.metadata,'$.station_count'), '0') AS station_count,
+          ROW_NUMBER() OVER (PARTITION BY o.entity_id ORDER BY o.ts DESC) AS rn
+        FROM observations o
+        JOIN entities e ON e.id = o.entity_id AND e.layer_type = 'lightning'
+        WHERE o.ts > strftime('%Y-%m-%dT%H:%M:%SZ','now','-12 hours')
+      ) WHERE rn = 1
     ),
-    recent_fires AS (
+    recent_fires AS MATERIALIZED (
       -- Observation-first: only ~900 active fire entities vs 222K total.
-      -- This eliminates 222K unnecessary LATERAL lookups.
-      SELECT DISTINCT ON (o.entity_id)
-        e.id, e.name, e.external_id, e.metadata,
-        o.lat, o.lon, o.position, o.ts
-      FROM observations o
-      JOIN entities e ON e.id = o.entity_id AND e.layer_type = 'fires_active'
-      WHERE o.ts > NOW() - INTERVAL '12 hours'
-      ORDER BY o.entity_id, o.ts DESC
+      -- This eliminates 222K unnecessary lookups. MATERIALIZED: compute the fire
+      -- set once instead of re-evaluating it per lightning strike in the join.
+      SELECT * FROM (
+        SELECT
+          e.id, e.name, e.external_id, e.metadata,
+          o.lat, o.lon, o.ts,
+          ROW_NUMBER() OVER (PARTITION BY o.entity_id ORDER BY o.ts DESC) AS rn
+        FROM observations o
+        JOIN entities e ON e.id = o.entity_id AND e.layer_type = 'fires_active'
+        WHERE o.ts > strftime('%Y-%m-%dT%H:%M:%SZ','now','-12 hours')
+          -- Higher-confidence FIRMS detections only WHEN a confidence value is
+          -- present (FIRMS uses letter codes n/h or named nominal/high). The
+          -- source stores "" when the field is absent, so NULL and "" both mean
+          -- "no confidence present" and skip the filter. (The FIRMS source also
+          -- already drops low/l at ingest; this is a defensive second layer.)
+          AND (
+            json_extract(e.metadata,'$.confidence') IS NULL
+            OR json_extract(e.metadata,'$.confidence') = ''
+            OR LOWER(json_extract(e.metadata,'$.confidence')) IN ('n','h','nominal','high')
+          )
+      ) WHERE rn = 1
     ),
     nearby_fires AS (
-      -- Active fires within 50km of lightning strikes.
-      -- 50km accounts for fire spread from ignition point.
+      -- Active fires within 10km of lightning strikes that POSTDATE the strike
+      -- within 0-6h. 10km matches the 1-5km ignition scale (plus margin); the
+      -- directional 0-21600s window removes pre-existing fires and coincidental
+      -- proximity at the SQL level so only plausible lightning-caused ignitions
+      -- reach the model.
       SELECT
         rl.name AS lightning_name,
         rl.external_id AS lightning_external_id,
@@ -64,19 +94,21 @@ data:
         rf.external_id AS fire_external_id,
         rf.lat AS fire_lat, rf.lon AS fire_lon,
         rf.ts AS fire_ts,
-        CAST(COALESCE(rf.metadata->>'frp', '0') AS float) AS fire_frp,
-        rf.metadata->>'confidence' AS fire_confidence,
-        rf.metadata->>'satellite' AS fire_satellite,
-        ROUND((ST_Distance(rl.position::geography, rf.position::geography) / 1000)::numeric, 1)::text AS distance_km,
+        CAST(COALESCE(json_extract(rf.metadata,'$.frp'), '0') AS REAL) AS fire_frp,
+        json_extract(rf.metadata,'$.confidence') AS fire_confidence,
+        json_extract(rf.metadata,'$.satellite') AS fire_satellite,
+        CAST(ROUND(haversine_km(rl.lat, rl.lon, rf.lat, rf.lon), 1) AS TEXT) AS distance_km,
         -- Time delta: how long after lightning did fire appear?
-        EXTRACT(EPOCH FROM (rf.ts - rl.ts))::int AS time_delta_seconds
+        CAST((strftime('%s', rf.ts) - strftime('%s', rl.ts)) AS INTEGER) AS time_delta_seconds
       FROM recent_lightning rl
       JOIN recent_fires rf ON
-        -- Bounding box pre-filter for 50km (~0.45 degrees latitude)
-        rf.lat BETWEEN rl.lat - 0.45 AND rl.lat + 0.45
-        AND rf.lon BETWEEN rl.lon - (0.45 / GREATEST(COS(RADIANS(rl.lat)), 0.01))
-                       AND rl.lon + (0.45 / GREATEST(COS(RADIANS(rl.lat)), 0.01))
-        AND ST_DWithin(rl.position::geography, rf.position::geography, 50000)
+        -- Bounding box pre-filter for 10km using bounds precomputed per strike.
+        rf.lat BETWEEN rl.lat_min AND rl.lat_max
+        AND rf.lon BETWEEN rl.lon_min AND rl.lon_max
+        AND haversine_km(rl.lat, rl.lon, rf.lat, rf.lon) <= 10
+        -- Directional causality: the fire MUST postdate the strike within 0-6h.
+        -- Drops pre-existing fires (negative delta) and coincidental rows.
+        AND (strftime('%s', rf.ts) - strftime('%s', rl.ts)) BETWEEN 0 AND 21600
     )
     SELECT
       nf.fire_id AS entity_id,
@@ -87,24 +119,24 @@ data:
       0.0 AS altitude_m,
       nf.fire_ts AS ts,
       nf.lightning_name,
-      nf.lightning_lat::text AS lightning_lat,
-      nf.lightning_lon::text AS lightning_lon,
+      CAST(nf.lightning_lat AS TEXT) AS lightning_lat,
+      CAST(nf.lightning_lon AS TEXT) AS lightning_lon,
       nf.polarity AS lightning_polarity,
       nf.station_count AS detection_stations,
-      nf.fire_frp::text AS fire_power_mw,
+      CAST(nf.fire_frp AS TEXT) AS fire_power_mw,
       COALESCE(nf.fire_confidence, 'unknown') AS fire_confidence,
       nf.distance_km,
-      nf.time_delta_seconds::text AS time_delta_seconds,
+      CAST(nf.time_delta_seconds AS TEXT) AS time_delta_seconds,
+      -- All surviving rows postdate the strike within 0-6h (enforced in the
+      -- JOIN), so every row is a plausible lightning-caused ignition. The split
+      -- here just flags immediacy: <=1h is the prime suspicion window.
       CASE
-        WHEN nf.time_delta_seconds > 0 AND nf.time_delta_seconds < 21600 THEN 'likely_caused'
-        WHEN nf.time_delta_seconds >= 21600 THEN 'possible_delayed'
-        ELSE 'pre_existing_fire'
+        WHEN nf.time_delta_seconds <= 3600 THEN 'likely_caused'
+        ELSE 'possible_caused'
       END AS causation_flag,
       nf.lightning_external_id
     FROM nearby_fires nf
-    ORDER BY
-      CASE WHEN nf.time_delta_seconds > 0 THEN 0 ELSE 1 END,
-      nf.fire_frp DESC
+    ORDER BY nf.fire_frp DESC
     LIMIT 30
 
 ai:
@@ -117,8 +149,11 @@ ai:
         detection. Your assessments inform early warning systems and fire response
         prioritization.
 
-        LIGHTNING-FIRE PREDICTION: {{.RecordCount}} fires detected within 50km of
-        recent lightning strikes (last {{.Lookback}}).
+        LIGHTNING-FIRE PREDICTION: {{.RecordCount}} fires detected within 10km of
+        recent lightning strikes, each appearing 0-6h AFTER the strike (last
+        {{.Lookback}}). Pre-existing and coincidental fires are already removed
+        upstream by a directional SQL filter, so every record below is a
+        candidate lightning-caused ignition.
 
         Lightning-to-fire correlation data:
         {{range .Records}}
@@ -132,9 +167,9 @@ ai:
 
         Lightning-fire causation reference:
         - Positive polarity lightning is more likely to cause fires (longer duration)
-        - Fires appearing 0-6h after nearby lightning = likely lightning-caused
-        - Fires appearing >6h after = possible delayed ignition (smoldering)
-        - Fires that predate lightning = coincidental proximity
+        - Fires appearing 0-1h after nearby lightning = strongest causation signal
+        - Fires appearing 1-6h after = plausible ignition, possibly delayed/smoldering
+        - Closer distance and higher detection-station counts strengthen confidence
 
         Use your knowledge of the fire's geographic location to assess:
         - Vegetation type: Forest, grassland, scrubland, agricultural, urban fringe
@@ -142,9 +177,9 @@ ai:
         - Drought conditions: Is the region known to be in drought? Dry conditions dramatically increase ignition probability from lightning.
         - Terrain: Mountainous terrain channels fire upslope; flat grassland allows rapid spread.
 
-        Fire growth potential assessment:
-        - FRP < 10 MW with positive time delta > 6h = smoldering, may self-extinguish
-        - FRP 10-50 MW with positive time delta 1-6h = establishing fire, response window closing
+        Fire growth potential assessment (all records are 0-6h post-strike):
+        - FRP < 10 MW in the 1-6h window = low intensity, possibly smoldering, may self-extinguish
+        - FRP 10-50 MW in the 1-6h window = establishing fire, response window closing
         - FRP > 50 MW = fully established fire, suppression difficult
         - FRP > 200 MW = major fire event, evacuation concerns
 
@@ -156,9 +191,28 @@ ai:
         1. Probability that the fire was caused by the lightning strike
         2. Fire growth potential (based on FRP and time since ignition)
         3. Whether this could be an early detection of a new wildfire
-        4. Risk classification: coincidental/possible/probable/confirmed_natural
+        4. Risk classification: possible/probable/confirmed_natural
 
         Provide 2-3 sentence assessments for each prediction.
+
+        CRITICAL OUTPUT RULES (this is the core usefulness fix):
+        - OMIT non-threats entirely. Do NOT emit predictions that are
+          coincidental, pre-existing, "no action", "negligible", "all clear",
+          or remote-monitor-only with no plausible spread or exposure. Return
+          FEWER predictions rather than padding the array with benign rows. If
+          nothing rises to an actionable concern, return an empty predictions
+          array.
+        - Set `attention` DIRECTLY from the assessment's own causation and
+          severity. Never auto-elevate to fill the array. Map it from
+          `causation_probability` combined with growth/exposure:
+            * unlikely  -> info
+            * possible  -> low
+            * probable  -> medium
+            * high      -> high
+          Escalate one step to `high`/`critical` ONLY when fire power and
+          population exposure clearly warrant it (e.g. probable+ causation with
+          FRP > 200 MW near populated areas = critical). Do not invent severity
+          the data does not support.
 
         Respond with JSON matching this schema:
         {{.OutputSchema}}
@@ -173,7 +227,7 @@ ai:
             type: array
             items:
               type: object
-              required: [fire_name, causation_probability, risk_classification, assessment, response_urgency]
+              required: [entity_external_id, fire_name, causation_probability, risk_classification, assessment, response_urgency, attention]
               properties:
                 fire_name: { type: string }
                 fire_power_mw: { type: number }
@@ -184,7 +238,10 @@ ai:
                   enum: [unlikely, possible, probable, high]
                 risk_classification:
                   type: string
-                  enum: [coincidental, possible, probable, confirmed_natural]
+                  enum: [possible, probable, confirmed_natural]
+                attention:
+                  type: string
+                  enum: [info, low, medium, high, critical]
                 growth_potential: { type: string }
                 terrain_vegetation: { type: string }
                 population_exposure:
@@ -196,10 +253,11 @@ ai:
                 assessment: { type: string }
                 entity_external_id: { type: string }
                 lightning_external_id: { type: string }
-      max_tokens: 3000
+      max_tokens: 12000
       temperature: 0.1
       output:
         store_insights: true
+        min_attention: "high"   # noise gate: drop results below this attention
         insight_type: "lightning_fire"
         results_path: "predictions"
         ref_fields:

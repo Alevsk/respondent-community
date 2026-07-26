@@ -25,9 +25,9 @@ transport:
   url: "wss://stream.aisstream.io/v0/stream"
   timeout: "15s"
   websocket:
-    # API key is injected via ${AISSTREAM_APY_KEY} -> RESPONDENT_AISSTREAM_APY_KEY env var.
+    # API key is injected via ${AISSTREAM_API_KEY} -> RESPONDENT_AISSTREAM_API_KEY env var.
     subscribe_messages:
-      - '{"APIKey":"${AISSTREAM_APY_KEY}","BoundingBoxes":[[[-90,-180],[90,180]]],"FilterMessageTypes":["PositionReport"]}'
+      - '{"APIKey":"${AISSTREAM_API_KEY}","BoundingBoxes":[[[-90,-180],[90,180]]],"FilterMessageTypes":["PositionReport"]}'
     ping_interval: "30s"
     message_format: text
   reconnect:

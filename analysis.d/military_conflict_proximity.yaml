@@ -13,12 +13,22 @@
 #
 # The ACLED free API has a ~10 day data lag, so we use a 14-day window for
 # conflict events to ensure we always have data to correlate against.
+#
+# COARSE PROXIMITY LIMITATION (read before trusting distance_km): ACLED free
+# data is country-CENTROID with country-WIDE daily fatalities — there is no
+# point-level event geometry. Every "conflict zone" is just the centroid of an
+# entire country, and the fatalities are the country's daily total, not the toll
+# at that coordinate. distance_km is therefore an ASSOCIATION distance from the
+# aircraft to a country centroid, NOT proximity to an actual front line or
+# strike location. Point-level resolution would require a different data source,
+# which is forbidden here, so we keep the join coarse and lean on a meaningful
+# fatality floor (>= 5) plus a tightened 300km radius to suppress noise.
 # =============================================================================
 
 schema_version: 1
 name: military_conflict_proximity
 display_name: "Military Activity Near Conflict Zones"
-enabled: false # TODO: enable
+enabled: true
 
 schedule:
   interval: "120s"
@@ -29,15 +39,54 @@ data:
   min_records: 1
   max_records: 40
   dedup:
-    window: "2h"
+    # Window aligned to the 6h lookback so the same aircraft over the same
+    # country (at the same altitude band) is not re-notified every 120s tick
+    # during a single sortie/orbit. Longer than the schedule interval (120s),
+    # so it actually suppresses duplicates. The per-aircraft ROW_NUMBER "best
+    # zone" pick in the SQL guarantees one row per aircraft; this window then
+    # stops that single row from re-firing for the duration of the flight.
+    window: "6h"
     key_fields: ["entity_external_id", "conflict_zone", "altitude_band"]
   sql: |
     -- Outer query: one row per aircraft, keeping only the most relevant conflict zone
     -- (highest fatalities, then nearest). Prevents duplicate notifications when an
-    -- aircraft is within 500km of multiple conflict zones (e.g. Palestine, Israel,
+    -- aircraft is within 300km of multiple conflict zones (e.g. Palestine, Israel,
     -- Lebanon, Syria are all nearby in the Levant).
+    --
+    -- COARSE-PROXIMITY CAVEAT: ACLED free data is country-CENTROID with country-WIDE
+    -- daily fatalities (no per-event geometry). Each conflict "zone" is the centroid
+    -- of a whole country and zone_fatalities is that country's daily total. Therefore
+    -- distance_km is the distance from the aircraft to a country centroid (an
+    -- ASSOCIATION distance), NOT proximity to a front line or strike site. Point-level
+    -- resolution would need a new data source, which is forbidden, so we compensate
+    -- with a meaningful fatality floor (>= 5) and a tightened 300km radius.
+    WITH latest_mil AS (
+      SELECT o.entity_id, o.lat, o.lon, o.altitude_m, o.ts,
+        ROW_NUMBER() OVER (PARTITION BY o.entity_id ORDER BY o.ts DESC) AS rn
+      FROM observations o
+      JOIN entities e ON e.id = o.entity_id
+      WHERE e.layer_type = 'flights_military'
+        -- Military ADS-B is near-real-time (30s poll); a position older than 15 min is
+        -- stale, so correlate only live positions. (conflict_events deliberately uses a
+        -- 14-day event_time window below because ACLED has a ~10-day data lag — that is
+        -- the freshest conflict data available, not a loose bound.)
+        AND o.ts > strftime('%Y-%m-%dT%H:%M:%SZ','now','-15 minutes')
+    ),
+    latest_conf AS (
+      SELECT o.entity_id, o.lat, o.lon, o.metadata, o.event_time,
+        ROW_NUMBER() OVER (PARTITION BY o.entity_id ORDER BY o.event_time DESC) AS rn
+      FROM observations o
+      JOIN entities e ON e.id = o.entity_id
+      WHERE e.layer_type = 'conflict_events'
+        AND o.event_time IS NOT NULL
+        AND julianday(o.event_time) > julianday('now','-14 days')
+        -- Intensity bar: require a MEANINGFUL country-wide daily death toll, not
+        -- just any non-zero figure. >= 5 fatalities filters out low-level/background
+        -- violence so we only correlate aircraft with genuinely active conflict.
+        AND CAST(COALESCE(json_extract(o.metadata,'$.fatalities'),'0') AS INTEGER) >= 5
+    )
     SELECT * FROM (
-      SELECT DISTINCT ON (mil.id)
+      SELECT
         mil.id AS entity_id,
         mil.external_id,
         mil.name,
@@ -46,11 +95,11 @@ data:
         o_mil.lon,
         o_mil.altitude_m,
         o_mil.ts,
-        mil.metadata->>'type' AS aircraft_type,
-        mil.metadata->>'hex' AS icao_hex,
-        mil.metadata->>'registration' AS registration,
-        CASE WHEN mil.ai_metadata != '{}' THEN mil.ai_metadata::text ELSE '' END AS aircraft_ai_context,
-        CASE WHEN conf.ai_metadata != '{}' THEN conf.ai_metadata::text ELSE '' END AS conflict_ai_context,
+        json_extract(mil.metadata,'$.type') AS aircraft_type,
+        json_extract(mil.metadata,'$.hex') AS icao_hex,
+        json_extract(mil.metadata,'$.registration') AS registration,
+        CASE WHEN mil.ai_metadata != '{}' THEN mil.ai_metadata ELSE '' END AS aircraft_ai_context,
+        CASE WHEN conf.ai_metadata != '{}' THEN conf.ai_metadata ELSE '' END AS conflict_ai_context,
         CASE
           WHEN o_mil.altitude_m < 3000 THEN 'low_tactical'
           WHEN o_mil.altitude_m BETWEEN 3000 AND 9000 THEN 'medium_operational'
@@ -58,37 +107,34 @@ data:
         END AS altitude_band,
         conf.external_id AS conflict_external_id,
         conf.name AS conflict_zone,
-        o_conf.metadata->>'fatalities' AS zone_fatalities,
-        o_conf.metadata->>'events' AS zone_events,
-        o_conf.metadata->>'exposure' AS zone_exposure,
-        o_conf.metadata->>'exposure_pct' AS zone_exposure_pct,
-        to_char(o_conf.event_time, 'YYYY-MM-DD') AS conflict_event_date,
-        ROUND(ST_Distance(o_mil.position::geography, o_conf.position::geography) / 1000)::text AS distance_km
+        json_extract(o_conf.metadata,'$.fatalities') AS zone_fatalities,
+        json_extract(o_conf.metadata,'$.events') AS zone_events,
+        json_extract(o_conf.metadata,'$.exposure') AS zone_exposure,
+        json_extract(o_conf.metadata,'$.exposure_pct') AS zone_exposure_pct,
+        strftime('%Y-%m-%d', o_conf.event_time) AS conflict_event_date,
+        CAST(ROUND(haversine_km(o_mil.lat, o_mil.lon, o_conf.lat, o_conf.lon)) AS TEXT) AS distance_km,
+        ROW_NUMBER() OVER (
+          PARTITION BY mil.id
+          ORDER BY CAST(COALESCE(json_extract(o_conf.metadata,'$.fatalities'),'0') AS INTEGER) DESC,
+            haversine_km(o_mil.lat, o_mil.lon, o_conf.lat, o_conf.lon) ASC
+        ) AS rn
       FROM entities mil
-      CROSS JOIN LATERAL (
-        SELECT lat, lon, altitude_m, position, ts
-        FROM observations WHERE entity_id = mil.id ORDER BY ts DESC LIMIT 1
-      ) o_mil
+      JOIN latest_mil o_mil ON o_mil.entity_id = mil.id AND o_mil.rn = 1
       JOIN entities conf ON conf.layer_type = 'conflict_events'
-      CROSS JOIN LATERAL (
-        SELECT position, metadata, event_time
-        FROM observations
-        WHERE entity_id = conf.id
-          AND event_time IS NOT NULL
-          AND event_time > NOW() - INTERVAL '14 days'
-          AND (metadata->>'fatalities')::int > 0
-        ORDER BY event_time DESC
-        LIMIT 1
-      ) o_conf
+      JOIN latest_conf o_conf ON o_conf.entity_id = conf.id AND o_conf.rn = 1
       WHERE mil.layer_type = 'flights_military'
-        AND o_mil.ts > NOW() - INTERVAL '6 hours'
-        AND ST_DWithin(o_mil.position::geography, o_conf.position::geography, 500000)
-      -- DISTINCT ON requires mil.id first, then pick highest fatalities / nearest.
-      ORDER BY mil.id,
-        (o_conf.metadata->>'fatalities')::int DESC,
-        ST_Distance(o_mil.position::geography, o_conf.position::geography) ASC
+        -- Keep both flights_military recency filters consistent at the 15-min window.
+        AND o_mil.ts > strftime('%Y-%m-%dT%H:%M:%SZ','now','-15 minutes')
+        -- Cheap bbox prefilter (300km), then exact haversine. 300km of a country
+        -- CENTROID is still coarse (see caveat above) but tighter than the old
+        -- 500km, which over a large country often "matched" aircraft nowhere near
+        -- any actual fighting. Use max() (SQLite), NEVER GREATEST (Postgres-only).
+        AND o_conf.lat BETWEEN o_mil.lat-(300/111.32) AND o_mil.lat+(300/111.32)
+        AND o_conf.lon BETWEEN o_mil.lon-(300/(111.32*max(COS(RADIANS(o_mil.lat)),0.01))) AND o_mil.lon+(300/(111.32*max(COS(RADIANS(o_mil.lat)),0.01)))
+        AND haversine_km(o_mil.lat, o_mil.lon, o_conf.lat, o_conf.lon) <= 300
     ) ranked
-    ORDER BY zone_fatalities::int DESC, distance_km::int ASC
+    WHERE rn = 1
+    ORDER BY CAST(COALESCE(zone_fatalities,'0') AS INTEGER) DESC, CAST(distance_km AS INTEGER) ASC
     LIMIT 40
 
 ai:
@@ -100,14 +146,24 @@ ai:
         You are a military aviation intelligence analyst producing tactical situational awareness reports.
 
         CROSS-LAYER INTELLIGENCE: {{.RecordCount}} military aircraft detected within
-        500km of active conflict zones (last {{.Lookback}}).
+        300km of active conflict zones (last {{.Lookback}}).
 
         TEMPORAL CONTEXT: Aircraft positions are real-time (last 6 hours). Conflict
         data is from the last 14 days, dated by actual event_time (ACLED free data
-        has ~10 day lag). Only zones with fatalities > 0 in the last 14 days are
+        has ~10 day lag). Only zones with >= 5 fatalities in the last 14 days are
         included. Assess significance based on how recent the conflict activity is
         relative to the aircraft observation — events from 1-3 days ago are more
         actionable than events from 10+ days ago.
+
+        DATA RESOLUTION CAVEAT (critical for calibration): distance_km is the
+        distance from the aircraft to the conflict country's CENTROID, and
+        zone_fatalities is that COUNTRY'S total daily death toll — ACLED free data
+        has no per-event geometry. distance_km is therefore an ASSOCIATION-to-country
+        measure, NOT proximity to the front line or a specific strike. Treat a small
+        distance_km as "operating over/near a country with active conflict," not as
+        "operating directly over the fighting." Do not over-state precision in your
+        assessments, and do not let a small centroid distance alone drive a high
+        rating.
 
         Aircraft positions and nearby conflict zones:
         {{range .Records}}
@@ -115,7 +171,7 @@ ai:
           Position: {{.Lat}}, {{.Lon}} | Alt: {{.Altitude}}m ({{index .Metadata "altitude_band"}})
           Near: {{index .Metadata "conflict_zone"}} (ref: {{index .Metadata "conflict_external_id"}}) [{{index .Metadata "conflict_event_date"}}]
             Fatalities: {{index .Metadata "zone_fatalities"}} | Events: {{index .Metadata "zone_events"}} | Exposure: {{index .Metadata "zone_exposure"}} ({{index .Metadata "zone_exposure_pct"}}%)
-          Distance: {{index .Metadata "distance_km"}}km{{if index .Metadata "aircraft_ai_context"}}
+          Distance: {{index .Metadata "distance_km"}}km (to country centroid — association, not front-line proximity){{if index .Metadata "aircraft_ai_context"}}
           AI Context (aircraft): {{index .Metadata "aircraft_ai_context"}}{{end}}{{if index .Metadata "conflict_ai_context"}}
           AI Context (conflict): {{index .Metadata "conflict_ai_context"}}{{end}}
         {{end}}
@@ -129,11 +185,11 @@ ai:
         - medium_operational (3000-9000m): ISR orbits, tanker tracks, AWACS stations
         - high_transit (>9000m): Strategic transit, ferrying, high-altitude surveillance
 
-        Significance calibration:
-        - routine: Training aircraft over home territory at expected altitude, or near low-activity zone
-        - notable: ISR platform at operational altitude within 300km of active conflict (recent fatalities)
-        - significant: Tanker establishing orbit suggesting aerial refueling ops near conflict zone with recent escalation
-        - critical: Multiple ISR + tanker + AWACS operating in coordinated pattern near escalating conflict with high recent fatalities
+        Significance calibration (remember distance_km is to a country centroid, not the front):
+        - routine: Training aircraft over home territory at expected altitude, transit flight, or only loosely associated with a low-activity country
+        - notable: ISR platform at operational altitude associated with an active-conflict country (recent fatalities)
+        - significant: Tanker establishing orbit suggesting aerial refueling ops associated with a conflict country undergoing recent escalation
+        - critical: Multiple ISR + tanker + AWACS operating in a coordinated pattern associated with an escalating conflict carrying high recent fatalities
 
         Analyze and provide:
         1. Identify aircraft roles (ISR, tanker, transport, AWACS, patrol) from type codes
@@ -148,6 +204,31 @@ ai:
 
         For each assessment, recommend a monitoring action: no_action, monitor, escalate, or urgent_review.
 
+        CRITICAL — USEFULNESS RULES (these determine whether the output is actionable
+        or noise; follow them exactly):
+
+        1. OMIT non-threats from the assessments array. This analysis must NOT emit
+           benign rows. Do NOT include any aircraft you would classify as routine, or
+           whose recommended_action is no_action, or that is merely transiting / over
+           home territory / only loosely associated with a quiet country. Return FEWER
+           items rather than padding the array with negligible observations. If nothing
+           in this batch rises above routine, return an EMPTY assessments array and say
+           so in the summary. An empty array is the correct, expected output when there
+           is nothing operationally meaningful — it is not an error.
+
+        2. Set "attention" DIRECTLY from your OWN significance rating for that item.
+           Do NOT auto-elevate, do NOT round up, and do NOT inflate attention because
+           the topic is "military" or "conflict." Use this exact mapping:
+             - significance routine    -> attention "info"   (but per rule 1, OMIT these entirely)
+             - significance notable    -> attention "medium"
+             - significance significant -> attention "high"
+             - significance critical   -> attention "critical"
+           Because routine items are omitted, every emitted item should carry an
+           attention of medium, high, or critical. Reserve high/critical for genuine
+           changes in operational tempo (orbits, coordinated multi-platform activity,
+           escalation with high recent fatalities), NOT for a single transit aircraft
+           that merely shares a region with a centroid.
+
         Respond with JSON matching this schema:
         {{.OutputSchema}}
 
@@ -161,7 +242,7 @@ ai:
             type: array
             items:
               type: object
-              required: [aircraft_role, mission_profile, significance, assessment, recommended_action]
+              required: [entity_external_id, aircraft_role, mission_profile, significance, attention, assessment, recommended_action]
               properties:
                 entity_external_id: { type: string }
                 aircraft_role:
@@ -172,18 +253,26 @@ ai:
                 conflict_external_id: { type: string }
                 conflict_zone: { type: string }
                 conflict_event_date: { type: string }
+                # distance_km is the aircraft-to-country-CENTROID association distance
+                # (ACLED has no per-event geometry), NOT proximity to a front line.
                 distance_km: { type: number }
                 significance:
                   type: string
                   enum: [routine, notable, significant, critical]
+                # Drives the engine noise gate (min_attention below). Set DIRECTLY from
+                # significance per the prompt mapping; routine items are OMITTED entirely.
+                attention:
+                  type: string
+                  enum: [info, low, medium, high, critical]
                 assessment: { type: string }
                 recommended_action:
                   type: string
                   enum: [no_action, monitor, escalate, urgent_review]
-      max_tokens: 4000
+      max_tokens: 16000
       temperature: 0.1
       output:
         store_insights: true
+        min_attention: "high"   # noise gate: drop results below this attention
         insight_type: "geopolitical_intel"
         results_path: "assessments"
         ref_fields:

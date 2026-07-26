@@ -25,7 +25,7 @@ transport:
   headers:
     Accept: "application/json"
   timeout: "10s"
-  interval: "180s"
+  interval: "300s"  # 5 minutes — R/S/G indices update ~every 4 min
 
 # --- Response Parsing ---
 # noaa-scales.json returns a JSON object keyed by time index:

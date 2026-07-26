@@ -1,0 +1,148 @@
+# sources.d/gfw_ais_gap_events.yaml
+# Global Fishing Watch — AIS "gap" (disabling) events. A gap event is a vessel
+# that stopped transmitting AIS for a sustained period and later resumed —
+# i.e. it went DARK. This is the closest free analog to the satellite-AIS
+# dark-fleet tracking that commercial OSINT platforms use for the Strait of
+# Hormuz, where sanctioned tankers routinely disable AIS.
+#
+# Source:  https://gateway.api.globalfishingwatch.org/v3/events
+# Docs:    https://api-doc.globalfishingwatch.org/
+# Auth:    Bearer token — free self-service key at
+#          https://globalfishingwatch.org/our-apis/tokens
+#          set it as env RESPONDENT_GFW_API_KEY (referenced below as GFW_API_KEY).
+# LICENSE: NON-COMMERCIAL USE ONLY (academic / NGO / free-and-open gov tools).
+#          Commercial use requires a separate GFW license. Do not enable this in
+#          a commercial deployment.
+#
+# ACTIVATION (this source ships DISABLED):
+#   1. Register a free token and put it in .env as RESPONDENT_GFW_API_KEY=<token>.
+#   2. Set `enabled: true` below and restart.
+#   3. Validate live — GFW data is satellite+terrestrial AIS-derived with multi-day
+#      latency (NOT real-time), so events are recent-historical, not live positions.
+#
+# The {date:-7d}/{date:+1d} URL macros expand at fetch time to a rolling 7-day
+# window (GFW requires absolute start-date/end-date). We pull global gap events
+# and keep only those inside the Persian Gulf / Strait of Hormuz / Gulf of Oman
+# box via the CEL filter (GFW's GET endpoint does not take an arbitrary bbox).
+schema_version: 2
+
+name: gfw_ais_gap_events
+labels:
+  category: maritime
+  priority: high
+
+source_type: gfw_ais_gap_events
+layer_type: vessel_ais_gaps
+display_name: "AIS Dark Events (GFW)"
+enabled: false   # set true after adding RESPONDENT_GFW_API_KEY (see header)
+
+transport:
+  type: http_poll
+  url: "https://gateway.api.globalfishingwatch.org/v3/events?datasets[0]=public-global-gaps-events:latest&start-date={date:-7d}&end-date={date:+1d}&limit=1000&offset=0"
+  method: GET
+  headers:
+    Accept: "application/json"
+    User-Agent: "respondent-geoint/1.0 (https://github.com/respondent-platform)"
+  auth:
+    type: bearer
+    env_var: "GFW_API_KEY"   # resolved from RESPONDENT_GFW_API_KEY
+  timeout: "60s"
+  interval: "3600s"   # hourly — GFW data has multi-day latency, no need to poll fast
+  max_response_bytes: 52428800  # 50MB (global gap events for the window)
+  retry:
+    max_attempts: 3
+    backoff: "exponential"
+    initial_delay: "15s"
+    max_delay: "120s"
+
+# GFW v3 list responses wrap results in "entries".
+parser:
+  format: json
+  records_path: "entries"
+  max_records: 1000
+
+# Keep only gap events with a valid position inside the Persian Gulf / Strait of
+# Hormuz / Gulf of Oman box.
+filter: >
+  has(record.id)
+  && has(record.position) && has(record.position.lat) && has(record.position.lon)
+  && double(record.position.lat) >= 23.0 && double(record.position.lat) <= 30.5
+  && double(record.position.lon) >= 47.0 && double(record.position.lon) <= 62.0
+
+entity:
+  external_id: >
+    string(record.id)
+  name: >
+    has(record.vessel) && has(record.vessel.name) && record.vessel.name != ""
+      ? record.vessel.name
+      : (has(record.vessel) && has(record.vessel.ssvid) ? "MMSI " + string(record.vessel.ssvid) : "AIS gap")
+  metadata:
+    event_type: >
+      has(record.type) ? string(record.type) : "gap"
+    vessel_name: >
+      has(record.vessel) && has(record.vessel.name) ? string(record.vessel.name) : ""
+    ssvid: >
+      has(record.vessel) && has(record.vessel.ssvid) ? string(record.vessel.ssvid) : ""
+    vessel_flag: >
+      has(record.vessel) && has(record.vessel.flag) ? string(record.vessel.flag) : ""
+    gap_start: >
+      has(record.start) ? string(record.start) : ""
+    gap_end: >
+      has(record.end) ? string(record.end) : ""
+
+observation:
+  latitude: >
+    double(record.position.lat)
+  longitude: >
+    double(record.position.lon)
+  altitude: "0.0"
+  timestamp: >
+    has(record.start) ? parse_iso8601(record.start) : now()
+  velocity: {}
+  metadata:
+    event_type: >
+      has(record.type) ? string(record.type) : "gap"
+    ssvid: >
+      has(record.vessel) && has(record.vessel.ssvid) ? string(record.vessel.ssvid) : ""
+    vessel_flag: >
+      has(record.vessel) && has(record.vessel.flag) ? string(record.vessel.flag) : ""
+  # One marker per gap event.
+  content_hash: >
+    string(record.id)
+
+recording:
+  mode: dedupe
+
+cache:
+  ttl: "86400s"  # 24h
+
+display:
+  icon:
+    shape: crosshair
+    rotatable: false
+    interpolation: false
+    scale: 1.0
+  trail:
+    color: "#ff5252"
+    width: 1.0
+    opacity: 0.5
+  style:
+    color: "#ff5252"
+    point_size: 7
+  field_renderers:
+    - keys: [vessel_name]
+      label: "VESSEL"
+      format:
+        type: string
+        transform: upper
+      priority: 0
+    - keys: [vessel_flag]
+      label: "FLAG"
+      format:
+        type: string
+      priority: 1
+    - keys: [ssvid]
+      label: "MMSI"
+      format:
+        type: string
+      priority: 2

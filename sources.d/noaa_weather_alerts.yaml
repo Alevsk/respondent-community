@@ -36,7 +36,7 @@ transport:
     Accept: "application/geo+json"
     User-Agent: "Respondent/1.0 (https://github.com/Alevsk/respondent)"
   timeout: "15s"
-  interval: "60s"
+  interval: "300s"  # 5 minutes — alerts issue on discrete cycles
   max_response_bytes: 52428800  # 50MB
   retry:
     max_attempts: 3

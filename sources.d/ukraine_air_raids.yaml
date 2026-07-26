@@ -145,7 +145,7 @@ display:
     shape: warning
     rotatable: false
     interpolation: false
-    scale: 1.5
+    scale: 1.0
   trail:
     color: "#ff0000"
     width: 1.5

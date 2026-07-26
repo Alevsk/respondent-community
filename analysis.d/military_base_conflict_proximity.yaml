@@ -1,0 +1,203 @@
+# =============================================================================
+# MILITARY BASE CONFLICT PROXIMITY — Fixed Installations Near Active Conflict
+# =============================================================================
+# Correlates fixed military installations (Wikidata military_bases) with active
+# conflict zones (ACLED conflict_events) for force-protection situational
+# awareness: which bases sit in/near countries with active high-fatality conflict.
+#
+# Distinct from military_conflict_proximity, which tracks moving military
+# AIRCRAFT. This one assesses the STATIC base.
+#
+# COARSE PROXIMITY LIMITATION (read before trusting distance_km): ACLED free data
+# is country-CENTROID with country-WIDE daily fatalities — there is NO point-level
+# event geometry. Each "conflict zone" is a country centroid and zone_fatalities
+# is that country's daily total. distance_km is therefore an ASSOCIATION distance
+# from the base to a country centroid, NOT proximity to a front line. We lean on a
+# meaningful fatality floor (>= 5) and a 250km radius, and the model is instructed
+# to treat distance as "base in/near a conflict-affected country," not front-line
+# proximity, and to OMIT routine/benign rows.
+#
+# ACLED free API has a ~10-day data lag, so conflict uses a 14-day event_time window.
+# =============================================================================
+
+schema_version: 1
+name: military_base_conflict_proximity
+display_name: "Military Bases Near Conflict Zones"
+enabled: true
+
+schedule:
+  interval: "300s"
+
+data:
+  layers: [military_bases, conflict_events]
+  lookback: "24h"
+  min_records: 1
+  max_records: 30
+  dedup:
+    window: "12h"
+    # One row per base (the ROW_NUMBER pick below). The window then stops that row
+    # re-firing every tick while the same conflict persists.
+    key_fields: ["entity_external_id", "conflict_external_id"]
+  sql: |
+    WITH latest_base AS (
+      SELECT o.entity_id, o.lat, o.lon, o.ts,
+        ROW_NUMBER() OVER (PARTITION BY o.entity_id ORDER BY o.ts DESC) AS rn
+      FROM observations o
+      JOIN entities e ON e.id = o.entity_id
+      WHERE e.layer_type = 'military_bases'
+    ),
+    latest_conf AS (
+      SELECT o.entity_id, o.lat, o.lon, o.metadata, o.event_time,
+        ROW_NUMBER() OVER (PARTITION BY o.entity_id ORDER BY o.event_time DESC) AS rn
+      FROM observations o
+      JOIN entities e ON e.id = o.entity_id
+      WHERE e.layer_type = 'conflict_events'
+        AND o.event_time IS NOT NULL
+        AND julianday(o.event_time) > julianday('now','-14 days')
+        -- Intensity bar: require a meaningful country-wide daily death toll (>= 5),
+        -- not just any non-zero figure, so we surface bases near genuinely active conflict.
+        AND CAST(COALESCE(json_extract(o.metadata,'$.fatalities'),'0') AS INTEGER) >= 5
+    )
+    SELECT * FROM (
+      SELECT
+        base.id AS entity_id,
+        base.external_id,
+        base.name,
+        'military_bases' AS layer_type,
+        o_base.lat,
+        o_base.lon,
+        -- The base is a STATIC layer (dedupe ingest), so its observation ts freezes
+        -- and would be dropped by the engine's post-SQL lookback (24h) filter,
+        -- starving the analysis after day one. Emit a fresh ts so the static base
+        -- row survives; real recency is governed by the conflict event_time window
+        -- (14 days) in latest_conf below, not by the base's ingest time. The true
+        -- ingest time is preserved as base_observed_ts for reference.
+        strftime('%Y-%m-%dT%H:%M:%SZ','now') AS ts,
+        o_base.ts AS base_observed_ts,
+        json_extract(base.metadata,'$.country') AS base_country,
+        json_extract(base.metadata,'$.operator') AS base_operator,
+        conf.external_id AS conflict_external_id,
+        conf.name AS conflict_zone,
+        json_extract(o_conf.metadata,'$.fatalities') AS zone_fatalities,
+        json_extract(o_conf.metadata,'$.events') AS zone_events,
+        json_extract(o_conf.metadata,'$.exposure_pct') AS zone_exposure_pct,
+        strftime('%Y-%m-%d', o_conf.event_time) AS conflict_event_date,
+        CAST(ROUND(haversine_km(o_base.lat, o_base.lon, o_conf.lat, o_conf.lon)) AS TEXT) AS distance_km,
+        ROW_NUMBER() OVER (
+          PARTITION BY base.id
+          ORDER BY CAST(COALESCE(json_extract(o_conf.metadata,'$.fatalities'),'0') AS INTEGER) DESC,
+            haversine_km(o_base.lat, o_base.lon, o_conf.lat, o_conf.lon) ASC
+        ) AS rn
+      FROM entities base
+      JOIN latest_base o_base ON o_base.entity_id = base.id AND o_base.rn = 1
+      JOIN entities conf ON conf.layer_type = 'conflict_events'
+      JOIN latest_conf o_conf ON o_conf.entity_id = conf.id AND o_conf.rn = 1
+      WHERE base.layer_type = 'military_bases'
+        -- Cheap bbox prefilter (250km) then exact haversine. max() is SQLite;
+        -- NEVER GREATEST (Postgres-only).
+        AND o_conf.lat BETWEEN o_base.lat-(250/111.32) AND o_base.lat+(250/111.32)
+        AND o_conf.lon BETWEEN o_base.lon-(250/(111.32*max(COS(RADIANS(o_base.lat)),0.01))) AND o_base.lon+(250/(111.32*max(COS(RADIANS(o_base.lat)),0.01)))
+        AND haversine_km(o_base.lat, o_base.lon, o_conf.lat, o_conf.lon) <= 250
+    ) ranked
+    WHERE rn = 1
+    ORDER BY CAST(COALESCE(zone_fatalities,'0') AS INTEGER) DESC, CAST(distance_km AS INTEGER) ASC
+    LIMIT 30
+
+ai:
+  enabled: true
+  operations:
+    - name: military_base_conflict_assessment
+      tags: [osint, military, base, conflict, geopolitical, force-protection, cross-layer]
+      prompt: |
+        You are a force-protection analyst assessing risk to fixed military installations from nearby active conflict.
+
+        MILITARY BASES NEAR CONFLICT: {{.RecordCount}} installations associated with
+        active conflict zones (last {{.Lookback}}; conflict events from the last 14
+        days, ACLED free data has a ~10-day lag).
+
+        DATA RESOLUTION CAVEAT (critical for calibration): distance_km is the distance
+        from the base to the conflict country's CENTROID, and zone_fatalities is that
+        COUNTRY'S total daily death toll — ACLED free data has no per-event geometry.
+        distance_km is an ASSOCIATION-to-country measure, NOT proximity to a front line.
+        Treat a small distance_km as "base in/near a country with active conflict," not
+        "base on the front line." Do not over-state precision, and do not let a small
+        centroid distance alone drive a high rating.
+
+        Bases and associated conflict zones:
+        {{range .Records}}
+        - {{.EntityName}} (country: {{index .Metadata "base_country"}}, operator: {{index .Metadata "base_operator"}}, ID: {{.ExternalID}})
+          Position: {{.Lat}}, {{.Lon}}
+          Conflict: {{index .Metadata "conflict_zone"}} (ref: {{index .Metadata "conflict_external_id"}}) [{{index .Metadata "conflict_event_date"}}]
+            Fatalities: {{index .Metadata "zone_fatalities"}} | Events: {{index .Metadata "zone_events"}} | Exposure: {{index .Metadata "zone_exposure_pct"}}%
+          Distance: {{index .Metadata "distance_km"}}km (to country centroid — association, not front-line proximity)
+        {{end}}
+
+        For each base-conflict pair, assess:
+        1. Force-protection relevance — is this installation plausibly affected by the conflict (operating nation, geography, recent escalation)?
+        2. Significance: routine / notable / significant / critical.
+        3. Recommended action — no_action, monitor, escalate, or urgent_review.
+        4. assessment MUST be 2-4 sentences on why this matters (or a brief note if borderline).
+        5. attention — set DIRECTLY from significance (do NOT auto-elevate, do NOT inflate
+           because the topic is "military"):
+             routine -> info (but per the OMIT rule below, drop these), notable -> medium,
+             significant -> high, critical -> critical.
+
+        OMIT NON-THREATS — the core usefulness requirement. This analysis must NOT emit
+        benign rows. DO NOT include a base that is merely in a large country whose
+        centroid happens to be within range, that is routine, or whose recommended_action
+        is no_action. A base far from the actual conflict (large country, distant
+        centroid) is NOT a threat. Return FEWER items. An empty "assessments" array is
+        the correct, expected output when nothing is operationally meaningful.
+
+        ENTITY IDENTITY (required): set entity_external_id to THIS base's ID and
+        entity_layer_type to "military_bases" (the base is the assessed entity). Copy
+        the ID verbatim from the "ID:" shown above.
+
+        Respond with JSON matching this schema:
+        {{.OutputSchema}}
+
+      output_schema:
+        type: object
+        required: [assessments, summary]
+        properties:
+          summary:
+            type: string
+          assessments:
+            type: array
+            items:
+              type: object
+              required: [entity_external_id, entity_layer_type, base_name, significance, attention, assessment, recommended_action]
+              properties:
+                entity_external_id: { type: string }
+                entity_layer_type:
+                  type: string
+                  enum: [military_bases]
+                base_name: { type: string }
+                base_country: { type: string }
+                conflict_external_id: { type: string }
+                conflict_zone: { type: string }
+                conflict_event_date: { type: string }
+                # ASSOCIATION distance to a country centroid, NOT front-line proximity.
+                distance_km: { type: number }
+                significance:
+                  type: string
+                  enum: [routine, notable, significant, critical]
+                attention:
+                  type: string
+                  enum: [info, low, medium, high, critical]
+                assessment: { type: string }
+                recommended_action:
+                  type: string
+                  enum: [no_action, monitor, escalate, urgent_review]
+      max_tokens: 12000
+      temperature: 0.1
+      output:
+        store_insights: true
+        min_attention: "high"   # noise gate: coarse data -> only surface high-signal pairs
+        insight_type: "geopolitical_intel"
+        results_path: "assessments"
+        websocket_push: true
+        retention: "336h"
+        ref_fields:
+          - field: "conflict_external_id"
+            layer_type: "conflict_events"

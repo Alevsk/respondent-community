@@ -1,0 +1,183 @@
+# sources.d/ourairports_airports.yaml
+# OurAirports -- Global Airport Registry
+# Source: https://davidmegginson.github.io/ourairports-data/airports.csv
+# Auth: None required (public domain dataset)
+# Format: CSV with header row (~80k rows worldwide)
+#
+# Static aviation-infrastructure overlay. The full registry includes heliports,
+# closed fields, and seaplane bases; this source filters to large_airport and
+# medium_airport (~5.3k) -- the set with scheduled service and operational
+# relevance -- to keep the globe legible and complement the live flight layers.
+#
+# CSV columns: id, ident, type, name, latitude_deg, longitude_deg, elevation_ft,
+# continent, iso_country, iso_region, municipality, scheduled_service, icao_code,
+# iata_code, gps_code, local_code, home_link, wikipedia_link, keywords.
+#
+# Poll interval: 7 days -- the airport registry is near-static.
+# Recording mode: dedupe -- re-record only when name/type/country changes.
+schema_version: 2
+
+name: ourairports_airports
+labels:
+  category: infrastructure
+  priority: low
+
+source_type: ourairports_airports
+layer_type: airports
+display_name: "Airports"
+
+enabled: true
+
+# ~5.3k mapped airports -> viewport filtering (above the 2000 threshold).
+filtering: viewport
+
+transport:
+  type: http_poll
+  url: "https://davidmegginson.github.io/ourairports-data/airports.csv"
+  method: GET
+  headers:
+    Accept: "text/csv"
+    User-Agent: "respondent-geoint/1.0"
+  timeout: "45s"
+  interval: "604800s"  # 7 days -- static registry
+  max_response_bytes: 20971520  # 20MB (~13MB actual)
+  retry:
+    max_attempts: 3
+    backoff: "exponential"
+    initial_delay: "5s"
+    max_delay: "60s"
+
+parser:
+  format: csv
+  # The full file is ~80k rows; the CEL filter narrows to ~5.3k. The cap must
+  # exceed the raw row count so no rows are dropped before filtering.
+  max_records: 100000
+  csv_options:
+    has_header: true
+
+# Keep only large/medium airports with valid coordinates.
+filter: >
+  has(record.type)
+  && (record.type == "large_airport" || record.type == "medium_airport")
+  && has(record.latitude_deg) && record.latitude_deg != ""
+  && has(record.longitude_deg) && record.longitude_deg != ""
+  && has(record.ident) && record.ident != ""
+
+entity:
+  external_id: >
+    "apt_" + record.ident
+  name: >
+    has(record.name) && record.name != "" ? record.name : record.ident
+  metadata:
+    icao: >
+      has(record.icao_code) ? record.icao_code : ""
+    iata: >
+      has(record.iata_code) ? record.iata_code : ""
+    airport_type: >
+      record.type
+    country: >
+      has(record.iso_country) ? record.iso_country : ""
+    municipality: >
+      has(record.municipality) ? record.municipality : ""
+    elevation_ft: >
+      has(record.elevation_ft) ? record.elevation_ft : ""
+
+observation:
+  latitude: >
+    double(record.latitude_deg)
+  longitude: >
+    double(record.longitude_deg)
+  altitude: "0.0"
+  timestamp: >
+    now()
+  velocity: {}
+  metadata:
+    airport_type: >
+      record.type
+    country: >
+      has(record.iso_country) ? record.iso_country : ""
+    iata: >
+      has(record.iata_code) ? record.iata_code : ""
+  content_hash: >
+    record.ident
+    + "_" + (has(record.name) ? record.name : "")
+    + "_" + record.type
+    + "_" + (has(record.iso_country) ? record.iso_country : "")
+
+recording:
+  mode: dedupe
+
+cache:
+  ttl: "172800s"  # 48 hours
+
+geo_cache:
+  overfetch_ratio: 3.0
+  alive_ratio_threshold: 0.5
+  gc_batch_size: 500
+
+display:
+  icon:
+    # Static plane silhouette — the universal airport pictogram. Non-rotatable
+    # (and a distinct color) so it reads as fixed infrastructure, not as a live
+    # aircraft (the flights_commercial layer uses the rotatable `flight` shape).
+    shape: flight-alt-c
+    rotatable: false
+    interpolation: false
+    scale: 1.0
+  trail:
+    color: "#8c9eff"
+    width: 1.0
+    opacity: 0.5
+  style:
+    # Periwinkle/indigo — distinct from the crowded cyan/blue cluster used by
+    # satellites, cables, IXPs and TLE, and high-contrast on the dark globe.
+    color: "#8c9eff"
+    point_size: 6
+  # Distinguish hub airports (brighter) from regional fields (lighter).
+  color_by:
+    field: airport_type
+    values:
+      large_airport: "#8c9eff"
+      medium_airport: "#c5cae9"
+    default_color: "#888888"
+  field_renderers:
+    - keys: [iata]
+      label: "IATA"
+      format:
+        type: string
+        transform: upper
+      priority: 0
+    - keys: [icao]
+      label: "ICAO"
+      format:
+        type: string
+        transform: upper
+      priority: 1
+    - keys: [airport_type]
+      label: "TYPE"
+      format:
+        type: string
+        transform: upper
+      priority: 2
+    - keys: [municipality]
+      label: "CITY"
+      format:
+        type: string
+      priority: 3
+    - keys: [country]
+      label: "COUNTRY"
+      format:
+        type: string
+        transform: upper
+      priority: 4
+    - keys: [elevation_ft]
+      label: "ELEVATION"
+      format:
+        type: float
+        precision: 0
+        suffix: " ft"
+      priority: 5
+
+history:
+  max_lookback: "8760h"
+  max_range_span: "720h"

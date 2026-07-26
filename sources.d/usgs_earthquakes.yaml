@@ -38,42 +38,42 @@ parser:
   max_records: 10000
 
 # --- Record Filtering (CEL) ---
-filter: >
+filter: >-
   has(record.properties.mag) && double(record.properties.mag) >= 1.0
 
 # --- Entity Mapping (CEL) ---
 entity:
-  external_id: >
+  external_id: >-
     record.id
-  name: >
+  name: >-
     has(record.properties.place) ? record.properties.place : record.id
   metadata:
-    magnitude: >
+    magnitude: >-
       string(record.properties.mag)
-    depth: >
+    depth: >-
       string(record.geometry.coordinates[2])
-    place: >
+    place: >-
       has(record.properties.place) ? record.properties.place : "Unknown"
-    type: >
+    type: >-
       has(record.properties.type) ? record.properties.type : "earthquake"
-    alert: >
+    alert: >-
       has(record.properties.alert) ? record.properties.alert : ""
-    url: >
+    url: >-
       has(record.properties.url) ? record.properties.url : ""
 
 # --- Observation Mapping (CEL) ---
 observation:
-  latitude: >
+  latitude: >-
     record.geometry.coordinates[1]
-  longitude: >
+  longitude: >-
     record.geometry.coordinates[0]
-  altitude: >
+  altitude: >-
     record.geometry.coordinates[2] * -1000.0
-  timestamp: >
+  timestamp: >-
     unix_ms(record.properties.time)
   velocity: {}
   metadata:
-    magnitude: >
+    magnitude: >-
       string(record.properties.mag)
   content_hash: ""
 

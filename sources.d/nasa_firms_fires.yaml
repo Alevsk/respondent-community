@@ -108,7 +108,7 @@ display:
     shape: fire
     rotatable: false
     interpolation: false
-    scale: 0.7
+    scale: 1.0
   trail:
     color: "#ff4500"
     width: 1.0

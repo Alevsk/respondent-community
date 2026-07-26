@@ -1,23 +1,24 @@
-# sources.d/adsb_lol_flights.yaml
-# Declarative definition for adsb.lol ADS-B Exchange v2 flight data.
-# Uses spatial grid crawling with hex-packed coverage and entity-level caching.
+# sources.d/adsb_fi_flights.yaml
+# Declarative definition for adsb.fi open-data ADS-B (v3 API, readsb v2 format).
 #
-# Disabled failover sibling: adsb_theairtraffic_flights is the active primary for
-# flights_commercial — it returns the whole globe in one ~0.5s call, whereas this
-# source's ~1 req/s spatial crawl trickles in one cell at a time (the UX
-# bottleneck theairtraffic replaces). Re-enable this (and disable a peer) to fail
-# over to ADSBexchange's network if theairtraffic degrades. Drop-in equivalent of
-# adsb_fi_flights and adsb_live_flights.
+# Drop-in failover sibling of adsb.lol: identical hex_grid spatial crawl, same
+# ~1 req/s ceiling, same readsb field mappings. Disabled by default; enable it
+# (and disable a peer) to fail over to a different operator's network if
+# adsb.lol degrades. adsb.fi v3 exposes only the /api/v3/lat/.../lon/.../dist/...
+# circle form — the /v2/point/{lat}/{lon} path used by airplanes.live 400s here,
+# and the deprecated v2 API returns the legacy "aircraft" key instead of "ac".
+#
+# Attribution: data courtesy of adsb.fi; non-commercial use only.
 # Reference: docs/FEEDER_DECLARATIVE_SOURCES.md
 schema_version: 2
 
-name: adsb_lol_flights
+name: adsb_fi_flights
 labels:
   category: aviation
   priority: high
-source_type: adsb_lol_flights
+source_type: adsb_fi_flights
 layer_type: flights_commercial
-display_name: "ADSB.lol Flights"
+display_name: "adsb.fi Flights"
 
 enabled: false
 
@@ -32,9 +33,12 @@ geo_cache:
 
 transport:
   type: http_poll
-  url: "https://api.adsb.lol/v2/lat/{lat}/lon/{lon}/dist/250"
-  on_demand_url: "https://api.adsb.lol/v2/point/{lat}/{lon}/250"
+  url: "https://opendata.adsb.fi/api/v3/lat/{lat}/lon/{lon}/dist/250"
+  on_demand_url: "https://opendata.adsb.fi/api/v3/lat/{lat}/lon/{lon}/dist/250"
   method: GET
+  headers:
+    User-Agent: "respondent-feeder/1.0"
+    Accept: "application/json"
   timeout: "15s"
   interval: "30s"
   max_response_bytes: 52428800
@@ -43,7 +47,7 @@ transport:
     backoff: exponential
     initial_delay: "1s"
     max_delay: "10s"
-  # api.adsb.lol rate-limits per IP (~1 req/s). This budget is shared per host
+  # adsb.fi open data rate-limits per IP (~1 req/s). Budget is shared per host
   # across the global crawl AND on-demand viewport fills; on-demand is sent at
   # high priority so the visible region fills ahead of the background sweep.
   rate_limit:

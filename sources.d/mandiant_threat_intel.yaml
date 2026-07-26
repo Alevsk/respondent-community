@@ -15,7 +15,7 @@ transport:
   headers:
     Accept: "application/xml"
   timeout: "15s"
-  interval: "1800s"
+  interval: "7200s" # 2 hours — very low velocity curated intel
 
 parser:
   format: rss
@@ -126,7 +126,7 @@ ai:
           lon: { type: [number, "null"], minimum: -180, maximum: 180 }
           city: { type: [string, "null"] }
           region: { type: [string, "null"] }
-          country: { type: string }
+          country: { type: [string, "null"] }
           country_iso3: { type: [string, "null"] }
           location_confidence:
             type: number
@@ -184,7 +184,7 @@ display:
     shape: diamond
     rotatable: false
     interpolation: false
-    scale: 0.8
+    scale: 1.0
   style:
     color: "#ffa500"
     point_size: 6

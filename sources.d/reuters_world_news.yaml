@@ -62,7 +62,7 @@ display:
     shape: diamond
     rotatable: false
     interpolation: false
-    scale: 0.8
+    scale: 1.0
   trail:
     color: "#00bfff"
     width: 1.0
@@ -196,7 +196,7 @@ ai:
           lon: { type: [number, "null"], minimum: -180, maximum: 180 }
           city: { type: [string, "null"] }
           region: { type: [string, "null"] }
-          country: { type: string }
+          country: { type: [string, "null"] }
           country_iso3: { type: [string, "null"] }
           location_confidence:
             type: number

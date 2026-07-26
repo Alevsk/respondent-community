@@ -1,0 +1,151 @@
+# sources.d/nga_world_ports.yaml
+# World Port Index (NGA Pub 150) -- global catalog of ~2,950 ports & terminals.
+# Source: https://msi.nga.mil/api/publications/world-port-index?output=json
+# Auth: None. License: U.S. Government work, public domain (Title 17 -- no copyright).
+#
+# Static reference layer of major ports/terminals with location and physical
+# characteristics. Includes Strait-of-Hormuz-adjacent ports (Jazireh-Ye Hormoz,
+# Jask, Khasab, Fujairah/Khor Fakkan bunkering cluster), giving chokepoint context
+# alongside the live AIS layer. Each record carries decimal xcoord (lon) / ycoord
+# (lat) plus DMS strings; we use the decimal pair directly.
+#
+# Poll interval: 24h -- the port catalog changes on the order of months.
+# Recording mode: dedupe -- re-record only when name/country/water-body changes.
+schema_version: 2
+
+name: nga_world_ports
+labels:
+  category: maritime
+  priority: medium
+
+source_type: nga_world_ports
+layer_type: ports
+display_name: "World Ports"
+enabled: true
+
+# ~2,950 ports -> viewport filtering (above the 2000 threshold).
+filtering: viewport
+
+transport:
+  type: http_poll
+  url: "https://msi.nga.mil/api/publications/world-port-index?output=json"
+  method: GET
+  headers:
+    Accept: "application/json"
+    User-Agent: "respondent-geoint/1.0 (https://github.com/respondent-platform)"
+  timeout: "60s"
+  interval: "86400s"   # 24 hours -- catalog is near-static
+  max_response_bytes: 20971520  # 20MB (~6.3MB actual)
+  retry:
+    max_attempts: 3
+    backoff: "exponential"
+    initial_delay: "10s"
+    max_delay: "120s"
+
+# Envelope: { "ports": [ {...}, {...} ] }
+parser:
+  format: json
+  records_path: "ports"
+  max_records: 3500
+
+# Require a port number, a name, and valid non-zero decimal coordinates.
+filter: >
+  has(record.portNumber)
+  && has(record.portName) && record.portName != ""
+  && has(record.ycoord) && has(record.xcoord)
+  && double(record.ycoord) != 0.0
+  && double(record.xcoord) != 0.0
+
+entity:
+  external_id: >
+    string(record.portNumber)
+  name: >
+    record.portName
+  metadata:
+    country: >
+      has(record.countryName) ? record.countryName : ""
+    water_body: >
+      has(record.dodWaterBody) && record.dodWaterBody != null
+        ? string(record.dodWaterBody) : ""
+    harbor_size: >
+      has(record.harborSize) && record.harborSize != null
+        ? string(record.harborSize) : ""
+    harbor_type: >
+      has(record.harborType) && record.harborType != null
+        ? string(record.harborType) : ""
+
+observation:
+  latitude: >
+    double(record.ycoord)
+  longitude: >
+    double(record.xcoord)
+  altitude: "0.0"
+  timestamp: >
+    now()
+  velocity: {}
+  metadata:
+    country: >
+      has(record.countryName) ? record.countryName : ""
+    region: >
+      has(record.regionName) && record.regionName != null
+        ? string(record.regionName) : ""
+    water_body: >
+      has(record.dodWaterBody) && record.dodWaterBody != null
+        ? string(record.dodWaterBody) : ""
+    harbor_size: >
+      has(record.harborSize) && record.harborSize != null
+        ? string(record.harborSize) : ""
+    max_vessel_length: >
+      has(record.maxVesselLength) && record.maxVesselLength != null
+        ? string(record.maxVesselLength) : ""
+  # Re-record only when identity/classification changes (static catalog).
+  content_hash: >
+    string(record.portNumber)
+    + "_" + (has(record.portName) ? record.portName : "")
+    + "_" + (has(record.dodWaterBody) && record.dodWaterBody != null ? string(record.dodWaterBody) : "")
+
+recording:
+  mode: dedupe
+
+cache:
+  ttl: "172800s"  # 48 hours -- survive a missed daily poll
+
+geo_cache:
+  overfetch_ratio: 3.0
+  alive_ratio_threshold: 0.5
+  gc_batch_size: 500
+
+display:
+  icon:
+    shape: anchor
+    rotatable: false
+    interpolation: false
+    scale: 1.0
+  trail:
+    color: "#26a69a"
+    width: 1.0
+    opacity: 0.5
+  style:
+    color: "#26a69a"
+    point_size: 6
+  field_renderers:
+    - keys: [country]
+      label: "COUNTRY"
+      format:
+        type: string
+        transform: upper
+      priority: 0
+    - keys: [water_body]
+      label: "WATER BODY"
+      format:
+        type: string
+      priority: 1
+    - keys: [harbor_size]
+      label: "HARBOR SIZE"
+      format:
+        type: string
+      priority: 2
+
+history:
+  max_lookback: "8760h"   # 1 year
+  max_range_span: "720h"  # 30 days per query window

@@ -102,7 +102,7 @@ display:
     shape: iss
     rotatable: false
     interpolation: true
-    scale: 1.5
+    scale: 2.0
   trail:
     color: "#00bfff"
     width: 1.5

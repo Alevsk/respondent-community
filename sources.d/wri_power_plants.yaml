@@ -1,0 +1,175 @@
+# sources.d/wri_power_plants.yaml
+# WRI Global Power Plant Database -- Worldwide Electricity Generation Facilities
+# Source: https://github.com/wri/global-power-plant-database
+# Auth: None required (CC BY 4.0)
+# Format: CSV with header row (~35k plants worldwide)
+#
+# Static energy-infrastructure overlay: ~35,000 power plants with fuel type,
+# capacity (MW), owner, and commissioning year. Complements the nuclear-only
+# layer with the full generation fleet (coal, gas, hydro, solar, wind, etc.) so
+# analysis can reason about grid exposure to natural hazards and conflict.
+#
+# CSV columns (subset used): country_long, name, gppd_idnr, capacity_mw,
+# latitude, longitude, primary_fuel, commissioning_year, owner.
+#
+# NOTE: this is a curated snapshot dataset (last major refresh 2021); plant
+# locations are stable, so a static overlay remains accurate for siting context.
+#
+# Poll interval: 30 days. Recording mode: dedupe (re-record on capacity/fuel/owner change).
+schema_version: 2
+
+name: wri_power_plants
+labels:
+  category: infrastructure
+  priority: medium
+
+source_type: wri_power_plants
+layer_type: power_plants
+display_name: "Power Plants"
+
+enabled: true
+
+# ~35k plants -> viewport filtering (well above the 2000 threshold).
+filtering: viewport
+
+transport:
+  type: http_poll
+  url: "https://raw.githubusercontent.com/wri/global-power-plant-database/master/output_database/global_power_plant_database.csv"
+  method: GET
+  headers:
+    Accept: "text/csv"
+    User-Agent: "respondent-geoint/1.0"
+  timeout: "45s"
+  interval: "2592000s"  # 30 days -- snapshot dataset
+  max_response_bytes: 20971520  # 20MB (~12MB actual)
+  retry:
+    max_attempts: 3
+    backoff: "exponential"
+    initial_delay: "5s"
+    max_delay: "60s"
+
+parser:
+  format: csv
+  max_records: 40000
+  csv_options:
+    has_header: true
+
+# Require a stable id and valid coordinates.
+filter: >
+  has(record.gppd_idnr) && record.gppd_idnr != ""
+  && has(record.latitude) && record.latitude != ""
+  && has(record.longitude) && record.longitude != ""
+
+entity:
+  external_id: >
+    record.gppd_idnr
+  name: >
+    has(record.name) && record.name != "" ? record.name : record.gppd_idnr
+  metadata:
+    country: >
+      has(record.country_long) ? record.country_long : ""
+    primary_fuel: >
+      has(record.primary_fuel) ? record.primary_fuel : ""
+    capacity_mw: >
+      has(record.capacity_mw) ? record.capacity_mw : ""
+    owner: >
+      has(record.owner) ? record.owner : ""
+    commissioning_year: >
+      has(record.commissioning_year) && record.commissioning_year != ""
+        ? record.commissioning_year.split(".")[0] : ""
+
+observation:
+  latitude: >
+    double(record.latitude)
+  longitude: >
+    double(record.longitude)
+  altitude: "0.0"
+  timestamp: >
+    now()
+  velocity: {}
+  metadata:
+    primary_fuel: >
+      has(record.primary_fuel) ? record.primary_fuel : ""
+    capacity_mw: >
+      has(record.capacity_mw) ? record.capacity_mw : ""
+    country: >
+      has(record.country_long) ? record.country_long : ""
+  content_hash: >
+    record.gppd_idnr
+    + "_" + (has(record.capacity_mw) ? record.capacity_mw : "")
+    + "_" + (has(record.primary_fuel) ? record.primary_fuel : "")
+    + "_" + (has(record.owner) ? record.owner : "")
+
+recording:
+  mode: dedupe
+
+cache:
+  ttl: "172800s"  # 48 hours
+
+geo_cache:
+  overfetch_ratio: 3.0
+  alive_ratio_threshold: 0.5
+  gc_batch_size: 500
+
+display:
+  icon:
+    shape: powerplant
+    rotatable: false
+    interpolation: false
+    scale: 1.0
+  trail:
+    color: "#ffb300"
+    width: 1.0
+    opacity: 0.5
+  style:
+    color: "#ffb300"
+    point_size: 6
+  # Color each plant by its primary fuel.
+  color_by:
+    field: primary_fuel
+    values:
+      Coal: "#4d4d4d"
+      Gas: "#ff9900"
+      Oil: "#8b4513"
+      Hydro: "#1f78ff"
+      Nuclear: "#ff4444"
+      Solar: "#ffdd00"
+      Wind: "#00d4aa"
+      Biomass: "#66bb33"
+      Geothermal: "#cc6699"
+      Waste: "#996633"
+      "Wave and Tidal": "#00bcd4"
+    default_color: "#888888"
+  field_renderers:
+    - keys: [primary_fuel]
+      label: "FUEL"
+      format:
+        type: string
+        transform: upper
+      priority: 0
+    - keys: [capacity_mw]
+      label: "CAPACITY"
+      format:
+        type: float
+        precision: 0
+        suffix: " MW"
+      priority: 1
+    - keys: [country]
+      label: "COUNTRY"
+      format:
+        type: string
+      priority: 2
+    - keys: [owner]
+      label: "OWNER"
+      format:
+        type: string
+      priority: 3
+    - keys: [commissioning_year]
+      label: "COMMISSIONED"
+      format:
+        type: integer
+      priority: 4
+
+history:
+  max_lookback: "8760h"
+  max_range_span: "720h"

@@ -203,7 +203,7 @@ display:
     shape: warning
     rotatable: false
     interpolation: false
-    scale: 1.2
+    scale: 1.0
   trail:
     color: "#ff6600"
     width: 1.5

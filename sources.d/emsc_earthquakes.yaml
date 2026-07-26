@@ -23,7 +23,7 @@ transport:
   headers:
     Accept: "application/json"
   timeout: "10s"
-  interval: "120s"
+  interval: "60s"   # match USGS; realtime epicenter/magnitude refinement
   max_response_bytes: 52428800  # 50MB
   retry:
     max_attempts: 3
@@ -149,6 +149,20 @@ ai:
         2. Estimated population exposure (low, medium, high)
         3. Tsunami risk (none, low, moderate, high) based on magnitude, depth, and proximity to coast
         4. A brief one-sentence summary
+
+        Return a SINGLE FLAT JSON object with EXACTLY these top-level keys —
+        severity, population_exposure, tsunami_risk, summary. Do NOT wrap it in
+        another object (e.g. "risk_assessment"), do not rename keys, and do not
+        add any keys or text outside the JSON.
+
+        <example>
+        {
+          "severity": "moderate",
+          "population_exposure": "medium",
+          "tsunami_risk": "none",
+          "summary": "A moderate M5.2 earthquake at 30km depth poses limited risk of localized structural damage and no tsunami threat."
+        }
+        </example>
 
         Respond with JSON matching this schema:
         {{.OutputSchema}}

@@ -1,0 +1,120 @@
+# sources.d/us_treasury_fiscal.yaml
+# US Treasury -- Total Public Debt (Debt to the Penny)
+# Source: https://api.fiscaldata.treasury.gov/services/api/fiscal_service/v2/accounting/od/debt_to_penny
+# Auth: None required (US Treasury FiscalData public API)
+# Format: JSON { data: [ { record_date, tot_pub_debt_out_amt, ... } ], meta: {...} }
+#
+# A macro-fiscal indicator: total US public debt outstanding (and its public vs
+# intragovernmental split), refreshed each business day. Rendered as a
+# global_indicator HUD panel (no globe position). Amounts are converted to
+# trillions of USD for display.
+schema_version: 2
+
+name: us_treasury_fiscal
+labels:
+  category: financial
+  priority: low
+
+source_type: us_treasury_fiscal
+layer_type: us_fiscal
+display_name: "US Public Debt"
+entity_type: global_indicator
+
+enabled: true
+
+transport:
+  type: http_poll
+  # fields= trims the payload; sort=-record_date + page size 1 returns the latest day.
+  url: "https://api.fiscaldata.treasury.gov/services/api/fiscal_service/v2/accounting/od/debt_to_penny?fields=record_date,tot_pub_debt_out_amt,debt_held_public_amt,intragov_hold_amt&sort=-record_date&page%5Bsize%5D=1"
+  method: GET
+  headers:
+    Accept: "application/json"
+    User-Agent: "respondent-geoint/1.0"
+  timeout: "20s"
+  interval: "21600s"  # 6 hours -- updates once per business day
+  max_response_bytes: 1048576  # 1MB (tiny)
+  retry:
+    max_attempts: 3
+    backoff: "exponential"
+    initial_delay: "5s"
+    max_delay: "60s"
+
+parser:
+  format: json
+  records_path: "data"
+  max_records: 1
+
+entity:
+  external_id: '"us_treasury_fiscal"'
+  name: '"US Public Debt"'
+  metadata:
+    source: '"US Treasury FiscalData"'
+
+observation:
+  timestamp: 'now()'
+  metadata:
+    record_date: >
+      has(record.record_date) ? record.record_date : ""
+    # Convert dollars -> trillions for a readable HUD figure.
+    total_debt_tn: 'string(double(record.tot_pub_debt_out_amt) / 1000000000000.0)'
+    public_debt_tn: 'string(double(record.debt_held_public_amt) / 1000000000000.0)'
+    intragov_debt_tn: 'string(double(record.intragov_hold_amt) / 1000000000000.0)'
+  content_hash: >
+    (has(record.record_date) ? record.record_date : "") + "_" + string(record.tot_pub_debt_out_amt)
+
+recording:
+  mode: append
+
+cache:
+  ttl: "43200s"  # 12 hours -- survive a missed poll
+
+indicator:
+  values:
+    # NOTE: the currency format renders prefix + rounded value but does NOT append
+    # `unit` (only the scale/percent formats do — see IndicatorGauge). Per repo
+    # convention (yahoo_finance_markets currency values all use unit: ""), the
+    # trillions scale is carried in the label, e.g. "$39.32" under "Total Debt ($T)".
+    - key: total_debt
+      label: "Total Debt ($T)"
+      source_field: total_debt_tn
+      unit: ""
+      format: currency
+      precision: 2
+      prefix: "$"
+      max_level: 1
+      # Informational figure -- never drives severity.
+      level_thresholds: [1000000]
+    - key: public_debt
+      label: "Public-Held ($T)"
+      source_field: public_debt_tn
+      unit: ""
+      format: currency
+      precision: 2
+      prefix: "$"
+      max_level: 1
+      level_thresholds: [1000000]
+    - key: intragov_debt
+      label: "Intragov ($T)"
+      source_field: intragov_debt_tn
+      unit: ""
+      format: currency
+      precision: 2
+      prefix: "$"
+      max_level: 1
+      level_thresholds: [1000000]
+  summary_expr: >
+    "Total US public debt outstanding"
+
+display:
+  icon:
+    shape: dot
+    rotatable: false
+    interpolation: false
+    scale: 1.0
+  trail:
+    color: "#88aa55"
+    width: 1.0
+    opacity: 0.5
+  style:
+    color: "#88aa55"
+    point_size: 1

@@ -215,7 +215,7 @@ transport:
   headers:
     Accept: "application/json"
   timeout: "30s"
-  interval: "3600s"  # 1 hour
+  interval: "1800s" # 30 minutes — capture all new federal samples (~15 min cadence)
   max_response_bytes: 5242880  # 5MB
   retry:
     max_attempts: 3

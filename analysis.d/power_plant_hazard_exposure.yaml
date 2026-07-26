@@ -1,0 +1,240 @@
+# =============================================================================
+# POWER PLANT HAZARD EXPOSURE — Energy Infrastructure vs Natural Hazards
+# =============================================================================
+# Correlates natural hazards (significant earthquakes, GDACS disasters, active
+# US wildfires) with the WRI global power-plant fleet to flag generation
+# facilities at physical risk and the grid-disruption potential.
+#
+# Hazard sources:
+#   - Earthquakes M4.5+ (last 24h), magnitude-scaled admission radius:
+#     M<5.0 only <=30km; shallow (depth<70km) M5-6 <=100km, M6+ <=200km;
+#     deep (depth>=100km) only <=60km.
+#   - Disaster alerts (GDACS — cyclones, floods, tsunamis) within 100km.
+#   - Active wildfires (NIFC) within 20km.
+#
+# Target: WRI power plants (~35k). MATERIALIZED hazard set + bbox prefilter keep
+# the spatial join inside the executor timeout (same pattern as the infra
+# threat assessment). Output OMITs non-threats; attention mirrors threat_level.
+# =============================================================================
+
+schema_version: 1
+name: power_plant_hazard_exposure
+display_name: "Power Plant Hazard Exposure"
+enabled: true
+
+schedule:
+  interval: "300s"
+
+data:
+  layers: [earthquakes, disaster_alerts, wildfires, power_plants]
+  lookback: "24h"
+  min_records: 1
+  max_records: 30
+  dedup:
+    window: "3h"
+    # Collapse the same physical quake arriving under EMSC vs USGS ids via a
+    # derived spatiotemporal key, paired with the threatened plant.
+    key_fields: ["hazard_key", "plant_external_id"]
+  sql: |
+    WITH latest_hazard AS (
+      SELECT o.entity_id, o.lat, o.lon, o.altitude_m, o.ts,
+             ROW_NUMBER() OVER (PARTITION BY o.entity_id ORDER BY o.ts DESC) AS rn
+      FROM observations o
+      JOIN entities e ON e.id = o.entity_id
+      WHERE e.layer_type IN ('earthquakes', 'disaster_alerts', 'wildfires')
+    ),
+    latest_plant AS (
+      SELECT o.entity_id, o.lat, o.lon,
+             ROW_NUMBER() OVER (PARTITION BY o.entity_id ORDER BY o.ts DESC) AS rn
+      FROM observations o
+      JOIN entities e ON e.id = o.entity_id
+      WHERE e.layer_type = 'power_plants'
+    ),
+    recent_hazards AS MATERIALIZED (
+      -- MATERIALIZED: compute the hazard set once. Otherwise SQLite re-runs this
+      -- UNION (with per-layer window lookups) once per power plant in the spatial
+      -- join (~35k plants) and the query never finishes within the timeout.
+      -- Earthquakes M4.5+ in last 24h
+      SELECT e.id, e.name, e.external_id, e.layer_type, e.metadata,
+             o.lat, o.lon, o.altitude_m, o.ts,
+             'earthquake' AS hazard_type,
+             COALESCE(json_extract(e.metadata,'$.magnitude'), json_extract(e.metadata,'$.mag'), '0') AS severity_value,
+             COALESCE(json_extract(e.metadata,'$.depth'), '0') AS depth_km
+      FROM entities e
+      JOIN latest_hazard o ON o.entity_id = e.id AND o.rn = 1
+      WHERE e.layer_type = 'earthquakes'
+        AND o.ts > strftime('%Y-%m-%dT%H:%M:%SZ','now','-24 hours')
+        AND CAST(COALESCE(json_extract(e.metadata,'$.magnitude'), json_extract(e.metadata,'$.mag'), '0') AS REAL) >= 4.5
+      UNION ALL
+      -- Active disaster alerts (GDACS)
+      SELECT e.id, e.name, e.external_id, e.layer_type, e.metadata,
+             o.lat, o.lon, o.altitude_m, o.ts,
+             'disaster' AS hazard_type,
+             COALESCE(json_extract(e.metadata,'$.alertlevel'), 'unknown') AS severity_value,
+             '0' AS depth_km
+      FROM entities e
+      JOIN latest_hazard o ON o.entity_id = e.id AND o.rn = 1
+      WHERE e.layer_type = 'disaster_alerts'
+        AND o.ts > strftime('%Y-%m-%dT%H:%M:%SZ','now','-24 hours')
+      UNION ALL
+      -- Active wildfires (NIFC)
+      SELECT e.id, e.name, e.external_id, e.layer_type, e.metadata,
+             o.lat, o.lon, o.altitude_m, o.ts,
+             'wildfire' AS hazard_type,
+             COALESCE(json_extract(e.metadata,'$.acres'), json_extract(e.metadata,'$.size'), 'unknown') AS severity_value,
+             '0' AS depth_km
+      FROM entities e
+      JOIN latest_hazard o ON o.entity_id = e.id AND o.rn = 1
+      WHERE e.layer_type = 'wildfires'
+        AND o.ts > strftime('%Y-%m-%dT%H:%M:%SZ','now','-24 hours')
+    )
+    SELECT
+      h.id AS entity_id,
+      h.name,
+      h.external_id AS external_id,
+      h.layer_type,
+      h.lat, h.lon, h.altitude_m, h.ts,
+      h.hazard_type,
+      h.severity_value,
+      h.depth_km,
+      plant.name AS plant_name,
+      json_extract(plant.metadata,'$.primary_fuel') AS plant_fuel,
+      json_extract(plant.metadata,'$.capacity_mw') AS plant_capacity_mw,
+      json_extract(plant.metadata,'$.country') AS plant_country,
+      plant.external_id AS plant_external_id,
+      h.hazard_type || ':' || CAST(ROUND(h.lat,1) AS TEXT) || ',' || CAST(ROUND(h.lon,1) AS TEXT) AS hazard_key,
+      CAST(ROUND(haversine_km(h.lat, h.lon, o_plant.lat, o_plant.lon)) AS TEXT) AS distance_km
+    FROM recent_hazards h
+    JOIN entities plant ON plant.layer_type = 'power_plants'
+    JOIN latest_plant o_plant ON o_plant.entity_id = plant.id AND o_plant.rn = 1
+    -- bbox prefilter using the widest admitted radius (200km) before the precise
+    -- haversine CASE. Over-inclusive but cheap; the CASE caps each hazard tighter.
+    WHERE o_plant.lat BETWEEN h.lat-(200/111.32) AND h.lat+(200/111.32)
+      AND o_plant.lon BETWEEN h.lon-(200/(111.32*max(COS(RADIANS(h.lat)),0.01))) AND h.lon+(200/(111.32*max(COS(RADIANS(h.lat)),0.01)))
+      AND CASE
+        -- Relevance floor: weak quakes (M<5.0) only when the plant is within 30km.
+        WHEN h.hazard_type = 'earthquake' AND CAST(h.severity_value AS REAL) < 5.0
+          THEN haversine_km(h.lat, h.lon, o_plant.lat, o_plant.lon) <= 30
+        -- Shallow M5+ (<70km depth): magnitude-scaled radius.
+        WHEN h.hazard_type = 'earthquake' AND CAST(h.depth_km AS REAL) < 70 THEN
+          CASE
+            WHEN CAST(h.severity_value AS REAL) >= 6.0
+              THEN haversine_km(h.lat, h.lon, o_plant.lat, o_plant.lon) <= 200
+            ELSE haversine_km(h.lat, h.lon, o_plant.lat, o_plant.lon) <= 100
+          END
+        -- Deep M5+ (>=100km depth): attenuated; admit only <=60km.
+        WHEN h.hazard_type = 'earthquake' AND CAST(h.depth_km AS REAL) >= 100
+          THEN haversine_km(h.lat, h.lon, o_plant.lat, o_plant.lon) <= 60
+        WHEN h.hazard_type = 'earthquake' THEN 0
+        -- Wildfires are local: <=20km.
+        WHEN h.hazard_type = 'wildfire'
+          THEN haversine_km(h.lat, h.lon, o_plant.lat, o_plant.lon) <= 20
+        -- Disasters (cyclone/flood/tsunami): <=100km.
+        ELSE haversine_km(h.lat, h.lon, o_plant.lat, o_plant.lon) <= 100
+      END
+    ORDER BY
+      CASE WHEN h.hazard_type = 'earthquake' THEN CAST(h.severity_value AS REAL) ELSE 0 END DESC,
+      haversine_km(h.lat, h.lon, o_plant.lat, o_plant.lon) ASC
+    LIMIT 30
+
+ai:
+  enabled: true
+  operations:
+    - name: power_plant_risk_analysis
+      tags: [osint, infrastructure, energy, power, earthquake, disaster, wildfire, cross-layer]
+      prompt: |
+        You are a critical infrastructure protection analyst assessing physical threats to electricity-generation facilities from natural hazards.
+
+        POWER PLANT HAZARD EXPOSURE: {{.RecordCount}} hazards detected near power
+        plants (last {{.Lookback}}). Hazard types: earthquake, disaster (GDACS),
+        wildfire (NIFC).
+
+        DAMAGE GUIDANCE:
+        - Earthquake M4.5-5: localized damage <30km; switchyard/transformer risk.
+        - Earthquake M5-6: significant shaking <100km; turbine/cooling risk for plants <50km.
+        - Earthquake M6+: severe potential <200km; dams (hydro) and nuclear cooling are highest-consequence.
+        - Shallow quakes (<70km depth) cause far more surface damage than deep events.
+        - Wildfire within 20km: transmission/switchyard and fuel-handling risk; thermal de-rating.
+        - Disaster (cyclone/flood/tsunami) within 100km: flooding of low-lying plants, intake/outfall damage.
+        - Fuel matters: hydro dams pose downstream-failure consequences; gas/coal have fuel-fire risk; solar/wind are lower-consequence but still trip-prone.
+
+        Hazard-to-plant proximity data:
+        {{range .Records}}
+        - HAZARD: {{.EntityName}} ({{index .Metadata "hazard_type"}}, severity: {{index .Metadata "severity_value"}}, ID: {{.ExternalID}}, layer: {{.LayerType}})
+          {{if index .Metadata "depth_km"}}Depth: {{index .Metadata "depth_km"}}km | {{end}}Position: {{.Lat}}, {{.Lon}}
+          THREATENED PLANT: {{index .Metadata "plant_name"}} (fuel: {{index .Metadata "plant_fuel"}}, capacity: {{index .Metadata "plant_capacity_mw"}}MW, country: {{index .Metadata "plant_country"}}, ref: {{index .Metadata "plant_external_id"}})
+          Distance: {{index .Metadata "distance_km"}}km
+        {{end}}
+
+        For each hazard-plant pair, assess:
+        1. Physical damage probability — calibrate against the actual distance, hazard magnitude, and plant fuel type.
+        2. Grid-disruption potential — scale with capacity (MW) and whether the plant is a baseload/critical node.
+        3. Recommended action — no_action, monitor, alert_operator, or activate_contingency.
+        4. Overall threat level: low/moderate/elevated/high/critical.
+        5. disruption_assessment MUST be 2-3 sentences on potential generation/grid impact.
+        6. attention — set DIRECTLY from threat_level (do NOT auto-elevate):
+           low -> low, moderate -> medium, elevated -> medium, high -> high, critical -> critical.
+           (Use "info" only for purely informational rows you choose to keep.)
+
+        OMIT NON-THREATS — the core usefulness requirement. Return FEWER items
+        rather than benign rows. DO NOT include a pair when ANY of the following holds:
+        - recommended_action would be "no_action"
+        - damage probability is negligible
+        - threat_level is "low" with no realistic disruption pathway
+        - the row duplicates another pair (the SAME physical quake may arrive under
+          both EMSC and USGS ids — report it ONCE; drop the duplicate)
+        An empty "threats" array is a valid, expected response when nothing is actionable.
+
+        ENTITY IDENTITY (required): in each threat object set entity_external_id to
+        THIS pair's HAZARD ID and entity_layer_type to THIS pair's HAZARD layer (the
+        "ID:" and "layer:" shown for the hazard) — NOT the power plant. Copy verbatim.
+
+        Respond with JSON matching this schema:
+        {{.OutputSchema}}
+
+      output_schema:
+        type: object
+        required: [threats, summary]
+        properties:
+          summary:
+            type: string
+          threats:
+            type: array
+            items:
+              type: object
+              required: [entity_external_id, entity_layer_type, hazard_name, plant_name, threat_level, attention, damage_probability, disruption_assessment, recommended_action]
+              properties:
+                hazard_name: { type: string }
+                hazard_type: { type: string }
+                plant_name: { type: string }
+                plant_fuel: { type: string }
+                plant_capacity_mw: { type: string }
+                distance_km: { type: number }
+                threat_level:
+                  type: string
+                  enum: [low, moderate, elevated, high, critical]
+                attention:
+                  type: string
+                  enum: [info, low, medium, high, critical]
+                damage_probability: { type: string }
+                disruption_assessment: { type: string }
+                recommended_action:
+                  type: string
+                  enum: [no_action, monitor, alert_operator, activate_contingency]
+                entity_external_id: { type: string }
+                entity_layer_type:
+                  type: string
+                  enum: [earthquakes, disaster_alerts, wildfires]
+                plant_external_id: { type: string }
+      max_tokens: 12000
+      temperature: 0.1
+      output:
+        store_insights: true
+        min_attention: "medium"
+        insight_type: "power_plant_hazard"
+        results_path: "threats"
+        websocket_push: true
+        retention: "336h"
+        ref_fields:
+          - field: "plant_external_id"
+            layer_type: "power_plants"
