@@ -2,7 +2,20 @@
 # Copy and modify for your deployment.
 
 database:
-  path: "./respondent.db"          # SQLite file path (created if missing; overridden by RESPONDENT_DATABASE_PATH env var in compose.yaml)
+  path: "/data/respondent.db"          # SQLite file path (created if missing; overridden by RESPONDENT_DATABASE_PATH env var in compose.yaml)
+
+  # Size-cap retention (ON by default — set max_size: "" to disable).
+  # The observations table is append-only and grows without bound. When the
+  # on-disk size exceeds max_size, the oldest observations are pruned in batches
+  # down to max_size * low_water_ratio and the freed space is returned to the OS.
+  # Live ingestion is never throttled — the cap is chased by pruning.
+  retention:
+    max_size: "5GB"                   # cap on-disk size; "" disables. e.g. "50GB" / "500MB".
+    low_water_ratio: 0.90             # prune down to max_size * this fraction (hysteresis)
+    check_interval: "10m"             # how often size is measured and pruning runs
+    batch_size: 5000                  # observation rows deleted per transaction
+    max_batches_per_tick: 200         # per-tick prune budget (~1M rows); next tick continues
+    incremental_vacuum_pages: 10000   # pages reclaimed to the OS per tick (~40MB at 4KB pages)
 
 server:
   port: 8090                       # Single port for API + WebSocket + Earth UI

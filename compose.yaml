@@ -1,6 +1,7 @@
 services:
   respondent:
     image: "docker.io/alevsk/respondent-community:latest"
+    command: ["serve", "--config", "/etc/respondent/respondent.yaml"]
     restart: unless-stopped
     env_file:
       - path: .env
@@ -8,12 +9,7 @@ services:
     ports:
       - "${CADDY_HTTP_PORT:-8090}:8090"
     volumes:
-      - ./respondent.yaml:/etc/respondent/respondent.community.yaml:ro
-      - ./sources.d:/etc/respondent/sources.d:ro
-      - ./analysis.d:/etc/respondent/analysis.d:ro
-      - respondent_data:/data
-    environment:
-      - RESPONDENT_DATABASE_PATH=/data/respondent.db
-
-volumes:
-  respondent_data:
+      - ./respondent.yaml:/etc/respondent/respondent.yaml:ro
+      - ./sources.d:/sources.d:ro
+      - ./analysis.d:/analysis.d:ro
+      - ./data:/data
