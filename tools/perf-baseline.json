@@ -1,0 +1,35 @@
+{
+  "note": "pre-Phase-1 baseline, scripted-pan, all layers",
+  "commitSha": "f28d1a63f9a31d3c0f464a244db8c3bfc0a88cb6",
+  "capturedAt": "2026-06-20T00:00:00Z",
+  "scenario": {
+    "url": "http://localhost:8090",
+    "durationSec": 15,
+    "panSteps": 36,
+    "panLat": 20,
+    "panAltM": 12000000,
+    "panDescription": "360° longitude sweep in 36 equal steps (10°/step), lat=20°, alt=12Mm, during FPS sampling window"
+  },
+  "env": {
+    "layersFound": 21,
+    "layersEnabled": 16,
+    "network": "local — server has no external API keys; public sources only (entity count reflects whatever streamed in 3s warm-up)",
+    "build": "e2e-frontend-build (VITE_API_URL=''), CGO_ENABLED=1 darwin arm64"
+  },
+  "result": {
+    "url": "http://localhost:8090",
+    "durationSec": 15,
+    "layersEnabled": 16,
+    "panApplied": true,
+    "fps": {
+      "avg": 115.3,
+      "min": 4,
+      "max": 416.7,
+      "samples": 1352
+    },
+    "longTasks": {
+      "count": 69,
+      "totalMs": 4043
+    }
+  }
+}

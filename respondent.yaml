@@ -1,0 +1,77 @@
+# Respondent Community Edition — Example Configuration
+# Copy and modify for your deployment.
+
+database:
+  path: "data/respondent.db"          # SQLite file path (created if missing)
+
+  # Size-cap retention (ON by default — set max_size: "" to disable).
+  # The observations table is append-only and grows without bound. When the
+  # on-disk size exceeds max_size, the oldest observations are pruned in batches
+  # down to max_size * low_water_ratio and the freed space is returned to the OS.
+  # Live ingestion is never throttled — the cap is chased by pruning.
+  retention:
+    max_size: "5GB"                   # cap on-disk size; "" disables. e.g. "50GB" / "500MB".
+    low_water_ratio: 0.90             # prune down to max_size * this fraction (hysteresis)
+    check_interval: "10m"             # how often size is measured and pruning runs
+    batch_size: 5000                  # observation rows deleted per transaction
+    max_batches_per_tick: 200         # per-tick prune budget (~1M rows); next tick continues
+    incremental_vacuum_pages: 10000   # pages reclaimed to the OS per tick (~40MB at 4KB pages)
+
+server:
+  port: 8090                       # Single port for API + WebSocket + Earth UI
+
+ingest:
+  sources_dir: "./sources.d"       # Path to source definition YAML files
+
+ai:
+  enabled: true                   # Set to true + configure llm section to enable AI features
+  analysis_dir: "./analysis.d"  # SQLite-compatible analysis definitions
+  # Engine-wide noise floor: analysis insights below this attention level are
+  # neither stored nor notified, unless an analysis sets output.min_attention.
+  # One of info/low/medium/high/critical. "low" drops routine info observations.
+  min_attention: "low"
+  workers:
+    enrichment: 2                  # Concurrent enrichment workers
+    analysis: 1                    # Concurrent analysis workers
+
+llm:
+  provider: "zai"
+
+  # ZAI (GLM) — API key via env RESPONDENT_LLM_ZAI_API_KEY (never commit the key).
+  zai:
+    base_url: "https://api.z.ai/api/coding/paas/v4"
+    model: "glm-4.6"
+    max_tokens: 8192
+    timeout: "120s"          # GLM latency headroom on large prompts
+    enable_thinking: false   # structured JSON output: skip reasoning (faster, cheaper, no truncation)
+
+  lmstudio:
+    base_url: "http://localhost:1234/v1"
+    # model is optional — LM Studio serves the currently loaded model when blank.
+    model: "qwen/qwen3.6-35b-a3b"
+    max_tokens: 4096
+
+# Geocoder configuration for AI geo-enrichment coordinate resolution.
+# Tier 2: Nominatim geocoding API. Tier 3: Country centroid fallback.
+# Geo-resolution for enrichment. Tier 1 uses the LLM's own coordinates; tier 2
+# geocodes specific localities (city/region) via the provider below; tier 3 is an
+# offline country-centroid fallback. A comprehensive built-in centroid table
+# covers every country, so country_centroids is only needed to override specific
+# entries. Set provider "none" for a fully offline instance (tiers 1 + 3 only,
+# no external calls).
+geocoder:
+  provider: "nominatim"
+  nominatim:
+    base_url: "https://nominatim.openstreetmap.org"
+    user_agent: "respondent/1.0 (geospatial-intelligence)"
+  rate_limit:
+    requests_per_second: 1.0
+    burst: 5
+  cache:
+    enabled: true
+    ttl: "168h"           # successful matches
+    negative_ttl: "1h"    # no-match results (short, so transient misses self-heal)
+    key_prefix: "geocoder:"
+
+logging:
+  level: "info"                    # debug, info, warn, error

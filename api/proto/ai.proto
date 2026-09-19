@@ -1,0 +1,179 @@
+syntax = "proto3";
+
+package respondent.v1;
+
+option go_package = "github.com/Alevsk/respondent/gen/go/respondent/v1;respondentv1";
+
+import "common.proto";
+import "entities.proto";
+import "google/api/annotations.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+// ── AI Service Messages ─────────────────────────────────────────────
+
+// NaturalLanguageSearchRequest is the request for natural language entity search.
+message NaturalLanguageSearchRequest {
+  string query = 1;            // Natural language query (e.g. "find all flights near LAX")
+  string layer_type = 2;       // Optional: restrict to a specific layer type (dynamic string)
+  int32 limit = 3;             // Max results to return (default 20, max 100)
+}
+
+// NaturalLanguageSearchResponse is the response for natural language entity search.
+message NaturalLanguageSearchResponse {
+  string generated_sql = 1;                    // The SQL generated from the NL query
+  repeated EntitySearchResult results = 2;     // Matching entities
+  int32 total_count = 3;                       // Total matches
+  string explanation = 4;                      // Human-readable explanation of what was searched
+}
+
+// AnalyzeEntityRequest is the request for AI entity analysis.
+message AnalyzeEntityRequest {
+  string entity_id = 1;         // Composite entity ID "layerType:externalId"
+  int32 observation_limit = 2;  // Max observations to include in analysis (default 10)
+}
+
+// AnalyzeEntityResponse is the response for AI entity analysis.
+message AnalyzeEntityResponse {
+  string entity_id = 1;         // Echo back the entity ID
+  string analysis = 2;          // AI-generated analysis text
+  string insight_id = 3;        // ID of the stored insight (if persisted)
+}
+
+// GetInsightsRequest is the request for listing AI insights.
+message GetInsightsRequest {
+  string insight_type = 1;           // Optional: filter by insight type (dynamic string)
+  string layer_type = 2;            // Optional: filter by layer type (dynamic string)
+  string entity_id = 3;             // Optional: filter by associated entity
+  int32 limit = 4;                  // Max results (default 20, max 100)
+  int32 offset = 5;                 // Pagination offset
+  AttentionLevel attention = 6;     // Optional: exact attention level filter
+  AttentionLevel min_attention = 7; // Optional: minimum attention level (inclusive)
+}
+
+// GetInsightsResponse is the response for listing AI insights.
+message GetInsightsResponse {
+  repeated AIInsight insights = 1;
+  int32 total_count = 2;
+}
+
+// InsightEntityRef is a lightweight entity reference embedded in AIInsight responses.
+message InsightEntityRef {
+  string id = 1;
+  string external_id = 2;
+  string name = 3;
+  string layer_type = 4;
+}
+
+// AIInsight represents a stored AI-generated insight.
+message AIInsight {
+  string id = 1;
+  string insight_type = 2;           // Dynamic insight type string (e.g. "entity_analysis", "anomaly_detection")
+  string source_name = 3;
+  string operation_name = 4;
+  string layer_type = 5;             // Dynamic layer type string
+  google.protobuf.Struct result = 6;
+  repeated string entity_ids = 7;
+  repeated string observation_ids = 8;
+  google.protobuf.Timestamp expires_at = 9;
+  google.protobuf.Timestamp created_at = 10;
+  AttentionLevel attention = 11;
+  int32 attention_rank = 12;         // Computed rank: 0=info, 1=low, 2=medium, 3=high, 4=critical
+  repeated InsightEntityRef entities = 13;
+}
+
+// ExplainQueryRequest is the request for SQL explanation.
+message ExplainQueryRequest {
+  string sql = 1;               // SQL query to explain in plain English
+}
+
+// ExplainQueryResponse is the response for SQL explanation.
+message ExplainQueryResponse {
+  string explanation = 1;       // Plain-English explanation of the SQL
+}
+
+// ListAnalysisDefinitionsRequest is the request for listing analysis definitions.
+message ListAnalysisDefinitionsRequest {}
+
+// ListAnalysisDefinitionsResponse is the response for listing analysis definitions.
+message ListAnalysisDefinitionsResponse {
+  repeated AnalysisDefinitionInfo definitions = 1;
+}
+
+// GetNotificationFilterOptionsRequest requests available filter dimensions.
+message GetNotificationFilterOptionsRequest {}
+
+// GetNotificationFilterOptionsResponse returns available filter options
+// for the frontend notification filter UI.
+message GetNotificationFilterOptionsResponse {
+  repeated InsightTypeOption insight_types = 1;
+  repeated string attention_levels = 2;
+  repeated string layer_types = 3;
+}
+
+// InsightTypeOption describes one available insight type for filtering.
+message InsightTypeOption {
+  string value = 1;
+  string display_name = 2;
+  string source_name = 3;
+}
+
+// AnalysisDefinitionInfo provides summary info about a loaded analysis definition.
+message AnalysisDefinitionInfo {
+  string name = 1;
+  string display_name = 2;
+  bool enabled = 3;
+  string schedule = 4;             // Interval or cron expression
+  repeated string layers = 5;      // Target layer types
+  repeated string insight_types = 6; // Insight types produced by operations
+}
+
+// ── AI Service ──────────────────────────────────────────────────────
+
+// AIService provides AI-powered search, analysis, and insight retrieval.
+service AIService {
+  // Natural language search over entities using LLM-generated SQL
+  rpc NaturalLanguageSearch(NaturalLanguageSearchRequest) returns (NaturalLanguageSearchResponse) {
+    option (google.api.http) = {
+      post: "/v1/ai/search"
+      body: "*"
+    };
+  }
+
+  // Analyze an entity using AI based on its data and observations
+  rpc AnalyzeEntity(AnalyzeEntityRequest) returns (AnalyzeEntityResponse) {
+    option (google.api.http) = {
+      post: "/v1/ai/analyze"
+      body: "*"
+    };
+  }
+
+  // Get stored AI insights with optional filters
+  rpc GetInsights(GetInsightsRequest) returns (GetInsightsResponse) {
+    option (google.api.http) = {
+      get: "/v1/ai/insights"
+    };
+  }
+
+  // Explain a SQL query in plain English
+  rpc ExplainQuery(ExplainQueryRequest) returns (ExplainQueryResponse) {
+    option (google.api.http) = {
+      post: "/v1/ai/explain"
+      body: "*"
+    };
+  }
+
+  // List loaded analysis definitions
+  rpc ListAnalysisDefinitions(ListAnalysisDefinitionsRequest) returns (ListAnalysisDefinitionsResponse) {
+    option (google.api.http) = {
+      get: "/v1/ai/analysis"
+    };
+  }
+
+  // Get available notification filter options
+  rpc GetNotificationFilterOptions(GetNotificationFilterOptionsRequest) returns (GetNotificationFilterOptionsResponse) {
+    option (google.api.http) = {
+      get: "/v1/ai/notifications/filters"
+    };
+  }
+}

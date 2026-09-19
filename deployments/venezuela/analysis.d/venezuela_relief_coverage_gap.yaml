@@ -1,0 +1,143 @@
+# =============================================================================
+# RELIEF COVERAGE GAP — Venezuela earthquake
+# =============================================================================
+# Flags SEVERE / TOTAL building-collapse sites that have NO relief center
+# (acopio) within ~10 km — i.e. badly hit places where survivors have nowhere
+# nearby to get aid. Joins the venezuela_building_damage layer against
+# venezuela_relief_centers using the haversine_km SQL helper.
+#
+# TS NOTE: a damaged building's last observation may be hours old; we emit a
+# FRESH ts (strftime now) so the engine's post-SQL lookback gate keeps the row.
+# The marker sits at the building's reported position; the real distance to the
+# nearest relief center is carried in metadata.
+# =============================================================================
+schema_version: 1
+name: venezuela_relief_coverage_gap
+display_name: "VE Relief Coverage Gap"
+enabled: true
+
+schedule:
+  interval: "900s"   # 15 min
+
+data:
+  layers: [venezuela_building_damage, venezuela_relief_centers]
+  lookback: "168h"
+  min_records: 1
+  max_records: 30
+  dedup:
+    window: "12h"
+    key_fields: ["entity_external_id"]
+  sql: |
+    -- Latest position per relief center (last 14d).
+    WITH centers AS (
+      SELECT o.lat, o.lon,
+        ROW_NUMBER() OVER (PARTITION BY o.entity_id ORDER BY o.ts DESC) AS rn
+      FROM observations o
+      JOIN entities e ON e.id = o.entity_id
+      WHERE e.layer_type = 'venezuela_relief_centers'
+        AND o.ts > strftime('%Y-%m-%dT%H:%M:%SZ','now','-336 hours')
+    ),
+    -- Latest position per damaged building (last 7d).
+    buildings AS (
+      SELECT s.id AS entity_id, s.external_id, s.name, s.metadata,
+        o.lat, o.lon, o.ts,
+        json_extract(s.metadata,'$.damage_type') AS damage_type,
+        json_extract(s.metadata,'$.place') AS place,
+        ROW_NUMBER() OVER (PARTITION BY s.id ORDER BY o.ts DESC) AS rn
+      FROM entities s
+      JOIN observations o ON o.entity_id = s.id
+      WHERE s.layer_type = 'venezuela_building_damage'
+        AND o.ts > strftime('%Y-%m-%dT%H:%M:%SZ','now','-168 hours')
+    )
+    SELECT
+      b.entity_id,
+      b.external_id,
+      b.name,
+      'venezuela_building_damage' AS layer_type,
+      b.lat,
+      b.lon,
+      0.0 AS altitude_m,
+      strftime('%Y-%m-%dT%H:%M:%SZ','now') AS ts,
+      b.damage_type,
+      b.place,
+      CAST(ROUND(
+        (SELECT MIN(haversine_km(b.lat, b.lon, c.lat, c.lon)) FROM centers c WHERE c.rn = 1)
+      , 1) AS TEXT) AS nearest_center_km
+    FROM buildings b
+    WHERE b.rn = 1
+      AND b.damage_type IN ('total','severo')
+      -- No relief center within 10 km (or none at all).
+      AND (
+        (SELECT MIN(haversine_km(b.lat, b.lon, c.lat, c.lon)) FROM centers c WHERE c.rn = 1) > 10.0
+        OR (SELECT COUNT(*) FROM centers c WHERE c.rn = 1) = 0
+      )
+    ORDER BY nearest_center_km DESC
+    LIMIT 30
+
+ai:
+  enabled: true
+  operations:
+    - name: relief_gap_assessment
+      tags: [venezuela, humanitarian, earthquake, relief, coverage]
+      prompt: |
+        You are a humanitarian logistics analyst for the 2026 Venezuela earthquake
+        response. Below are SEVERE or TOTAL building-collapse sites that have NO
+        aid collection center (acopio) within ~10 km.
+
+        {{.RecordCount}} underserved damage sites:
+        {{range .Records}}
+        - {{.EntityName}} ({{index .Metadata "place"}}) — damage: {{index .Metadata "damage_type"}}
+          Position: {{.Lat}}, {{.Lon}} | nearest relief center: {{index .Metadata "nearest_center_km"}} km
+        {{end}}
+
+        For each site assess how urgently a new relief/aid point is needed, given
+        the damage severity and the distance to existing aid.
+
+        attention — set DIRECTLY from urgency (do NOT auto-elevate):
+          routine -> info (OMIT), notable -> medium, significant -> high, critical -> critical.
+
+        USEFULNESS RULES (follow exactly):
+        - OMIT sites that are not genuinely underserved or are only partially damaged.
+          Return FEWER items. An EMPTY assessments array is the correct output when
+          nothing is urgent.
+        - Reserve high/critical for total collapses far (>20 km) from any aid.
+
+        Respond with JSON matching this schema:
+        {{.OutputSchema}}
+      output_schema:
+        type: object
+        required: [assessments, summary]
+        properties:
+          summary:
+            type: string
+          assessments:
+            type: array
+            items:
+              type: object
+              required: [entity_external_id, place, urgency, attention, assessment, recommended_action]
+              properties:
+                entity_external_id: { type: string }
+                place: { type: string }
+                nearest_center_km: { type: number }
+                urgency:
+                  type: string
+                  enum: [routine, notable, significant, critical]
+                attention:
+                  type: string
+                  enum: [info, low, medium, high, critical]
+                assessment: { type: string }
+                recommended_action:
+                  type: string
+                  enum: [no_action, monitor, deploy_mobile_aid, establish_relief_center]
+      max_tokens: 12000
+      temperature: 0.1
+      output:
+        store_insights: true
+        min_attention: "medium"
+        insight_type: "venezuela_relief_gap"
+        results_path: "assessments"
+        ref_fields:
+          - field: "entity_external_id"
+            layer_type: "venezuela_building_damage"
+        websocket_push: true
+        retention: "336h"

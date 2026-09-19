@@ -1,0 +1,173 @@
+# deployments/venezuela/sources.d/venezuela_earthquakes.yaml
+# AUTHORITATIVE seismic events for Venezuela (USGS FDSN), scoped to a bbox
+# covering Venezuela and its offshore margin. Added alongside the crowd-sourced
+# damage layers so the map shows the actual epicenters + magnitudes driving the
+# situation, not just social-media reports. Free, public, no auth.
+#
+# Endpoint: USGS FDSN event web service (GeoJSON). bbox lat 0..16, lon -75..-58,
+# magnitude >= 2.5, latest 200 by time.
+schema_version: 2
+
+name: venezuela_earthquakes
+labels:
+  category: geological
+  priority: high
+
+source_type: venezuela_earthquakes
+layer_type: venezuela_earthquakes
+display_name: "VE Earthquakes (USGS)"
+enabled: true
+
+transport:
+  type: http_poll
+  url: "https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&minlatitude=0&maxlatitude=16&minlongitude=-75&maxlongitude=-58&minmagnitude=2.5&orderby=time&limit=200"
+  method: GET
+  headers:
+    Accept: "application/json"
+    User-Agent: "respondent-community/1.0 (https://github.com/alevsk/respondent-community)"
+  timeout: "20s"
+  interval: "120s"   # 2 min — aftershock sequence refinement
+  max_response_bytes: 10485760
+  retry:
+    max_attempts: 3
+    backoff: "exponential"
+    initial_delay: "2s"
+    max_delay: "30s"
+
+parser:
+  format: geojson
+  records_path: "features"
+  max_records: 1000
+
+filter: >
+  has(record.id)
+  && has(record.properties.mag) && record.properties.mag != null
+  && double(record.properties.mag) >= 2.5
+  && has(record.geometry) && has(record.geometry.coordinates)
+  && size(record.geometry.coordinates) >= 2
+
+entity:
+  external_id: >
+    string(record.id)
+  name: >
+    has(record.properties.place) && record.properties.place != null
+      ? string(record.properties.place) : string(record.id)
+  metadata:
+    magnitude: >
+      string(record.properties.mag)
+    place: >
+      has(record.properties.place) && record.properties.place != null
+        ? string(record.properties.place) : ""
+    magtype: >
+      has(record.properties.magType) && record.properties.magType != null
+        ? string(record.properties.magType) : ""
+    felt: >
+      has(record.properties.felt) && record.properties.felt != null
+        ? string(record.properties.felt) : ""
+    usgs_url: >
+      has(record.properties.url) && record.properties.url != null
+        ? string(record.properties.url) : ""
+
+observation:
+  latitude: >
+    double(record.geometry.coordinates[1])
+  longitude: >
+    double(record.geometry.coordinates[0])
+  # USGS depth is km (positive down); store as negative meters.
+  altitude: >
+    size(record.geometry.coordinates) >= 3 ? double(record.geometry.coordinates[2]) * -1000.0 : 0.0
+  timestamp: >
+    unix_ms(record.properties.time)
+  velocity: {}
+  metadata:
+    magnitude: >
+      string(record.properties.mag)
+    depth_km: >
+      size(record.geometry.coordinates) >= 3 ? string(record.geometry.coordinates[2]) : "0"
+  content_hash: ""
+
+recording:
+  mode: upsert
+
+cache:
+  ttl: "7200s"   # 2h — keep epicenters visible
+
+display:
+  icon:
+    shape: ripple
+    rotatable: false
+    interpolation: false
+    scale: 1.0
+  trail:
+    color: "#ff1744"
+    width: 1.5
+    opacity: 0.7
+  style:
+    color: "#ff1744"
+    point_size: 8
+  field_renderers:
+    - keys: [magnitude, mag]
+      label: "MAGNITUDE"
+      format:
+        type: float
+        precision: 1
+        prefix: "M"
+      priority: 0
+    - keys: [depth_km]
+      label: "DEPTH"
+      format:
+        type: float
+        precision: 1
+        suffix: " km"
+      priority: 1
+    - keys: [place]
+      label: "LOCATION"
+      format:
+        type: string
+      priority: 2
+    - keys: [felt]
+      label: "FELT REPORTS"
+      format:
+        type: string
+      priority: 3
+
+ai:
+  enabled: true
+  operations:
+    - name: ve_quake_risk
+      prompt: |
+        Assess this Venezuela earthquake event.
+
+        Location: {{.Entity.Name}}
+        Magnitude: {{index .Entity.Metadata "magnitude"}}
+        Coordinates: {{.Observation.Lat}}, {{.Observation.Lon}}
+
+        Return a SINGLE FLAT JSON object with EXACTLY these keys:
+        severity (one of minor, moderate, significant, major, catastrophic),
+        population_exposure (one of low, medium, high), summary (one sentence).
+        Do not wrap it, rename, or add keys.
+
+        Respond with JSON matching this schema:
+        {{.OutputSchema}}
+      output_schema:
+        type: object
+        required: [severity, population_exposure, summary]
+        properties:
+          severity:
+            type: string
+            enum: [minor, moderate, significant, major, catastrophic]
+          population_exposure:
+            type: string
+            enum: [low, medium, high]
+          summary:
+            type: string
+      temperature: 0
+      cache_ttl: "6h"
+      output:
+        store_insights: true
+        insight_type: "risk_assessment"
+        websocket_push: true
+
+history:
+  max_lookback: "2160h"
+  max_range_span: "168h"

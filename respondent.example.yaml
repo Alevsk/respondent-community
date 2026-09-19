@@ -1,0 +1,102 @@
+# ╔═══════════════════════════════════════════════════════════════════════════════╗
+# ║  Respondent Community Edition Configuration                                  ║
+# ╚═══════════════════════════════════════════════════════════════════════════════╝
+#
+# Respondent Community Edition is a single static binary that embeds a Cesium
+# 3D globe frontend and serves it alongside a Go backend using SQLite for
+# storage, in-memory caching, and in-process pub/sub.
+#
+# No external dependencies (Postgres, NATS, Valkey) are required.
+#
+# ─── Config Resolution ─────────────────────────────────────────────────────────
+#
+# Config file search order (first match wins):
+#   1. Explicit path via --config flag
+#   2. ./respondent.yaml (current working directory)
+#   3. /etc/respondent/respondent.yaml
+#   4. ~/.config/respondent/respondent.yaml
+#
+# ─── Environment Variable Overrides ───────────────────────────────────────────
+#
+# Every config key can be overridden via environment variable using the
+# RESPONDENT_ prefix with dots replaced by underscores:
+#
+#   Config key                    Environment variable
+#   ────────────────────────────  ──────────────────────────────────────
+#   server.port                   RESPONDENT_SERVER_PORT
+#   database.path                 RESPONDENT_DATABASE_PATH
+#   llm.provider                  RESPONDENT_LLM_PROVIDER
+#   llm.xai.api_key               RESPONDENT_LLM_XAI_API_KEY
+#   ai.enabled                    RESPONDENT_AI_ENABLED
+#
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ─── Server ────────────────────────────────────────────────────────────────────
+
+server:
+  port: 8090
+  read_timeout: "30s"
+  write_timeout: "30s"
+  idle_timeout: "120s"
+
+# ─── Database ──────────────────────────────────────────────────────────────────
+# SQLite database — no external database server needed.
+
+database:
+  path: "./respondent.db"
+
+# ─── Ingest ────────────────────────────────────────────────────────────────────
+# Declarative source definitions for data ingestion.
+
+ingest:
+  sources_dir: "sources.d/"
+  dev_mode: false
+
+# ─── LLM Provider ─────────────────────────────────────────────────────────────
+# Optional AI enrichment via LLM providers. Leave provider empty to disable.
+
+llm:
+  provider: ""
+
+  openai:
+    api_key: ""
+    model: "gpt-4o"
+    max_tokens: 1024
+
+  anthropic:
+    api_key: ""
+    model: "claude-sonnet-4-20250514"
+    max_tokens: 1024
+
+  gemini:
+    api_key: ""
+    model: "gemini-2.5-flash"
+
+  xai:
+    api_key: ""
+    model: "grok-3"
+    max_tokens: 1024
+
+  ollama:
+    base_url: "http://localhost:11434"
+    model: "llama3"
+
+  lmstudio:
+    base_url: "http://localhost:1234/v1"
+    model: ""
+    max_tokens: 1024
+
+# ─── AI Features ───────────────────────────────────────────────────────────────
+# Optional AI enrichment and analysis. Requires llm.provider to be set.
+
+ai:
+  enabled: false
+  analysis_dir: "analysis.d/"
+  workers:
+    enrichment: 2
+    analysis: 1
+
+# ─── Logging ───────────────────────────────────────────────────────────────────
+
+logging:
+  level: "info"

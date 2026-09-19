@@ -1,0 +1,248 @@
+# =============================================================================
+# MARITIME CABLE THREAT DETECTION — Ship Proximity to Submarine Cables
+# =============================================================================
+# Detects vessels loitering, anchored, or drifting near submarine cable LANDING
+# POINTS (coastal shore-end stations where cables make landfall — NOT deep-water
+# mid-ocean routes). Post-Nord Stream, this is the #1 real-world maritime
+# infrastructure concern — state and non-state actors have been observed
+# positioning vessels near critical undersea cable landing infrastructure.
+#
+# Signal logic (nav_status is a NUMERIC AIS code stored as a string "0".."15"):
+#   - Stationary/disabled vessels (AIS codes 1=at anchor, 2=not under command,
+#     5=moored, 6=aground) within 5-10km of a cable landing are HIGH priority.
+#   - Under-way (moving) vessels are only flagged within 2km — close enough that
+#     mere transit is no longer an innocent explanation.
+#   - Aggregates ship type and cable metadata for context.
+#
+# Data layers: ships (AIS via AISStream) × subsea_cables (TeleGeography)
+# =============================================================================
+
+schema_version: 1
+name: maritime_cable_threat
+display_name: "Maritime Cable Threat Detection"
+enabled: true
+
+schedule:
+  interval: "120s"
+
+data:
+  layers: [ships]
+  lookback: "6h"
+  min_records: 1
+  max_records: 30
+  dedup:
+    window: "4h"
+    # One alert per vessel regardless of which cable landing it is near.
+    key_fields: ["entity_external_id"]
+  sql: |
+    WITH cable_landings AS (
+      -- Cable positions are semi-static (1,910 entities).
+      SELECT c.id, c.name, c.external_id, c.metadata,
+             o.lat, o.lon,
+             json_extract(c.metadata,'$.name') AS cable_name
+      FROM entities c
+      JOIN (
+        SELECT o.entity_id, o.lat, o.lon,
+               ROW_NUMBER() OVER (PARTITION BY o.entity_id ORDER BY o.ts DESC) rn
+        FROM observations o
+        JOIN entities e ON e.id = o.entity_id AND e.layer_type = 'subsea_cables'
+      ) o ON o.entity_id = c.id AND o.rn = 1
+      WHERE c.layer_type = 'subsea_cables'
+    ),
+    recent_ships AS (
+      -- Observation-first: scan recent observations then join entities.
+      SELECT entity_id, lat, lon, ts FROM (
+        SELECT
+          o.entity_id, o.lat, o.lon, o.ts,
+          ROW_NUMBER() OVER (PARTITION BY o.entity_id ORDER BY o.ts DESC) rn
+        FROM observations o
+        JOIN entities e ON e.id = o.entity_id AND e.layer_type = 'ships'
+        -- AIS positions update every few minutes; a fix older than 2h is stale (the
+        -- vessel may be far from a cable landing it briefly passed), so only correlate
+        -- recent positions. (subsea_cables is static reference geometry and is
+        -- intentionally NOT time-filtered.)
+        WHERE o.ts > strftime('%Y-%m-%dT%H:%M:%SZ','now','-2 hours')
+      ) WHERE rn = 1
+    ),
+    nearby_ships AS (
+      SELECT
+        s.id AS ship_id,
+        s.name AS ship_name,
+        s.external_id AS ship_external_id,
+        json_extract(s.metadata,'$.mmsi') AS mmsi,
+        json_extract(s.metadata,'$.ship_name') AS ais_ship_name,
+        json_extract(s.metadata,'$.nav_status') AS nav_status,
+        rs.lat AS ship_lat, rs.lon AS ship_lon,
+        rs.ts AS ship_ts,
+        cl.name AS cable_landing_name,
+        cl.cable_name,
+        cl.external_id AS cable_external_id,
+        cl.lat AS cable_lat, cl.lon AS cable_lon,
+        CAST(ROUND(haversine_km(rs.lat, rs.lon, cl.lat, cl.lon) * 1000.0) AS TEXT) AS distance_m,
+        CAST(ROUND(haversine_km(rs.lat, rs.lon, cl.lat, cl.lon), 1) AS TEXT) AS distance_km
+      FROM recent_ships rs
+      JOIN entities s ON s.id = rs.entity_id
+      JOIN cable_landings cl ON
+        -- Bounding box pre-filter: cheap lat/lon check before expensive geodesic
+        -- haversine. Use the WIDEST gate (10km) so stationary candidates in the
+        -- 5-10km band survive; the precise status-aware gate is applied below.
+        rs.lat BETWEEN cl.lat - (10.0/111.32) AND cl.lat + (10.0/111.32)
+        AND rs.lon BETWEEN cl.lon - (10.0 / (111.32 * max(COS(RADIANS(cl.lat)), 0.01)))
+                       AND cl.lon + (10.0 / (111.32 * max(COS(RADIANS(cl.lat)), 0.01)))
+        -- Status-aware geometry gate (nav_status is a numeric AIS code string):
+        --   stationary/disabled (1=at anchor, 2=not under command, 5=moored,
+        --   6=aground) -> flag out to 10km (suspicious even at distance);
+        --   everything else (under way, fishing, etc.) -> only flag within 2km.
+        AND haversine_km(rs.lat, rs.lon, cl.lat, cl.lon) <=
+          CASE
+            WHEN json_extract(s.metadata,'$.nav_status') IN ('1','2','5','6') THEN 10.0
+            ELSE 2.0
+          END
+    )
+    SELECT
+      ns.ship_id AS entity_id,
+      ns.ship_name AS name,
+      ns.ship_external_id AS external_id,
+      'ships' AS layer_type,
+      ns.ship_lat AS lat, ns.ship_lon AS lon,
+      0.0 AS altitude_m,
+      ns.ship_ts AS ts,
+      ns.mmsi,
+      COALESCE(ns.ais_ship_name, ns.ship_name) AS vessel_name,
+      COALESCE(ns.nav_status, 'unknown') AS nav_status,
+      -- Human-readable label decoded from the numeric AIS nav_status code.
+      CASE ns.nav_status
+        WHEN '0' THEN 'under way using engine'
+        WHEN '1' THEN 'at anchor'
+        WHEN '2' THEN 'not under command'
+        WHEN '3' THEN 'restricted manoeuvrability'
+        WHEN '5' THEN 'moored'
+        WHEN '6' THEN 'aground'
+        WHEN '7' THEN 'fishing'
+        WHEN '8' THEN 'under way sailing'
+        ELSE 'other/' || COALESCE(ns.nav_status, 'unknown')
+      END AS nav_status_label,
+      ns.cable_landing_name,
+      COALESCE(ns.cable_name, 'unknown') AS cable_name,
+      ns.cable_external_id,
+      ns.distance_m,
+      ns.distance_km,
+      CASE
+        -- Stationary/disabled AIS codes near a landing point are the real signal.
+        WHEN ns.nav_status IN ('1', '2', '5', '6')
+          THEN 'suspicious'
+        WHEN CAST(ns.distance_m AS INTEGER) < 2000
+          THEN 'close_proximity'
+        ELSE 'monitoring'
+      END AS threat_flag
+    FROM nearby_ships ns
+    ORDER BY
+      -- Anchored / moored / not-under-command / aground first.
+      CASE WHEN ns.nav_status IN ('1', '2', '5', '6') THEN 0 ELSE 1 END,
+      CAST(ns.distance_m AS INTEGER) ASC
+    LIMIT 30
+
+ai:
+  enabled: true
+  operations:
+    - name: cable_threat_assessment
+      tags: [osint, maritime, infrastructure, cables, security, cross-layer]
+      prompt: |
+        You are a maritime security analyst specializing in undersea infrastructure protection. Your assessments inform naval patrol priorities and cable monitoring operations.
+
+        MARITIME CABLE THREAT DETECTION: {{.RecordCount}} vessels detected near submarine
+        cable LANDING POINTS (coastal shore-end stations where cables make landfall — NOT
+        deep-water mid-ocean routes) in the last {{.Lookback}}. Candidates were pre-filtered
+        by status-aware geometry: stationary/disabled vessels (at anchor, not under command,
+        moored, aground) within 10km, and under-way vessels only within 2km.
+
+        Vessel-to-cable proximity data:
+        {{range .Records}}
+        - VESSEL: {{index .Metadata "vessel_name"}} (MMSI: {{index .Metadata "mmsi"}}, ID: {{.ExternalID}})
+          Nav status: {{index .Metadata "nav_status_label"}} | Threat flag: {{index .Metadata "threat_flag"}}
+          Position: {{.Lat}}, {{.Lon}}
+          CABLE: {{index .Metadata "cable_name"}} at {{index .Metadata "cable_landing_name"}} (ref: {{index .Metadata "cable_external_id"}})
+          Distance: {{index .Metadata "distance_km"}}km ({{index .Metadata "distance_m"}}m)
+        {{end}}
+
+        Use MMSI to identify vessel nationality: first 3 digits = MID (Maritime Identification Digits). Common: 2xx=Europe, 3xx=Americas, 4xx=Asia, 5xx=Australasia.
+
+        Nav status reference:
+        - "under way using engine" / "under way sailing" = normal transit
+        - "at anchor" / "moored" = stationary — suspicious if near cable, unless at port
+        - "not under command" = drifting — could indicate deliberate loitering
+        - "aground" = vessel grounded on/near the seabed — potential cable contact
+        - "fishing" = could mask cable survey/interference activity
+
+        Notable undersea cable incidents: Nord Stream sabotage (2022), Balticconnector damage by Chinese vessel (2023), Red Sea cable damage from Houthi attacks (2024), Taiwan strait cable cuts. Cable sabotage is a documented hybrid warfare tactic.
+
+        Assess whether the cable landing point is in a busy port/shipping lane (high traffic explains vessel presence) or a remote/isolated location (vessel presence more suspicious). Major port areas: Singapore Strait, English Channel, Taiwan Strait, Strait of Malacca have routine high traffic density.
+
+        For each vessel-cable pair, assess:
+        1. Threat level based on nav_status + distance + vessel type
+        2. Whether the vessel's position is near a port (explainable) or open water (suspicious)
+        3. Potential intent: legitimate transit, port activity, fishing, or cable interference
+        4. Risk classification: benign/watchlist/suspicious/high_threat
+        5. Recommended action: routine_monitoring, enhanced_surveillance, alert_patrol_authority, or immediate_investigation
+        6. Vessel flag state derived from MMSI MID prefix
+
+        Provide 2-3 sentence assessments for each vessel-cable pair you report.
+
+        CRITICAL — USEFULNESS RULES (these reduce notification noise):
+        - OMIT benign and routine traffic entirely. Do NOT emit a threat row for a vessel
+          whose presence is explained by ordinary port activity, normal transit through a
+          busy shipping lane, or otherwise poses no plausible threat to the cable. Returning
+          FEWER, higher-quality items is correct — never pad the array with "no action" /
+          "negligible" / "all clear" / benign rows just because a vessel appeared in the data.
+        - Set "attention" DIRECTLY from your own risk_classification for that vessel; do not
+          auto-elevate. Map: benign -> "info" (and you should usually OMIT these),
+          watchlist -> "low", suspicious -> "medium", high_threat -> "high". Reserve
+          "critical" only for an active/imminent sabotage indication you explicitly justify
+          in the assessment.
+
+        Respond with JSON matching this schema:
+        {{.OutputSchema}}
+
+      output_schema:
+        type: object
+        required: [threats, summary]
+        properties:
+          summary:
+            type: string
+          threats:
+            type: array
+            items:
+              type: object
+              required: [entity_external_id, vessel_name, cable_name, risk_classification, attention, assessment, recommended_action, vessel_flag_state]
+              properties:
+                vessel_name: { type: string }
+                mmsi: { type: string }
+                cable_name: { type: string }
+                cable_landing: { type: string }
+                distance_km: { type: number }
+                nav_status: { type: string }
+                risk_classification:
+                  type: string
+                  enum: [benign, watchlist, suspicious, high_threat]
+                attention:
+                  type: string
+                  enum: [info, low, medium, high, critical]
+                assessment: { type: string }
+                recommended_action:
+                  type: string
+                  enum: [routine_monitoring, enhanced_surveillance, alert_patrol_authority, immediate_investigation]
+                vessel_flag_state: { type: string }
+                entity_external_id: { type: string }
+                cable_external_id: { type: string }
+      max_tokens: 12000
+      temperature: 0.1
+      output:
+        store_insights: true
+        min_attention: "medium"   # noise gate: drop results below this attention
+        insight_type: "maritime_cable_threat"
+        results_path: "threats"
+        ref_fields:
+          - field: "cable_external_id"
+            layer_type: "subsea_cables"
+        websocket_push: true
+        retention: "336h"

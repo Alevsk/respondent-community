@@ -1,0 +1,181 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "indicators.proto",
+    "version": "version not set"
+  },
+  "tags": [
+    {
+      "name": "IndicatorService"
+    }
+  ],
+  "consumes": [
+    "application/json"
+  ],
+  "produces": [
+    "application/json"
+  ],
+  "paths": {
+    "/v1/indicators": {
+      "get": {
+        "summary": "GetGlobalIndicators returns the latest indicator values for global indicator layers.",
+        "operationId": "IndicatorService_GetGlobalIndicators",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1GetGlobalIndicatorsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "layerIds",
+            "description": "empty = all indicator layers",
+            "in": "query",
+            "required": false,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "collectionFormat": "multi"
+          }
+        ],
+        "tags": [
+          "IndicatorService"
+        ]
+      }
+    }
+  },
+  "definitions": {
+    "protobufAny": {
+      "type": "object",
+      "properties": {
+        "@type": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": {}
+    },
+    "rpcStatus": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "message": {
+          "type": "string"
+        },
+        "details": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/protobufAny"
+          }
+        }
+      }
+    },
+    "v1GetGlobalIndicatorsResponse": {
+      "type": "object",
+      "properties": {
+        "indicators": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1IndicatorSnapshot"
+          }
+        }
+      }
+    },
+    "v1IndicatorSnapshot": {
+      "type": "object",
+      "properties": {
+        "layerId": {
+          "type": "string"
+        },
+        "layerName": {
+          "type": "string"
+        },
+        "timestampMs": {
+          "type": "string",
+          "format": "int64"
+        },
+        "values": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1IndicatorValue"
+          }
+        },
+        "summary": {
+          "type": "string",
+          "title": "e.g. \"Quiet\", \"Minor Storm\""
+        },
+        "overallLevel": {
+          "type": "integer",
+          "format": "int32",
+          "title": "max severity across values"
+        }
+      },
+      "description": "IndicatorSnapshot is the current state of a global indicator layer."
+    },
+    "v1IndicatorValue": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "title": "e.g. \"kp_index\", \"r_scale\", \"g_scale\""
+        },
+        "value": {
+          "type": "string",
+          "title": "current value as string"
+        },
+        "label": {
+          "type": "string",
+          "title": "human-readable label, e.g. \"Kp Index\""
+        },
+        "unit": {
+          "type": "string",
+          "title": "e.g. \"\", \"km/s\", \"uSv/h\""
+        },
+        "level": {
+          "type": "integer",
+          "format": "int32",
+          "title": "severity 0-5 (0=quiet, 5=extreme)"
+        },
+        "changePct": {
+          "type": "number",
+          "format": "double",
+          "description": "% change (signed), e.g. +8.2 or -0.4",
+          "title": "--- extended display fields ---"
+        },
+        "changeAbs": {
+          "type": "number",
+          "format": "double",
+          "title": "absolute change (signed)"
+        },
+        "format": {
+          "type": "string",
+          "title": "display hint: \"scale\" (default), \"number\", \"currency\", \"percent\""
+        },
+        "precision": {
+          "type": "integer",
+          "format": "int32",
+          "title": "decimal places for display"
+        },
+        "prefix": {
+          "type": "string",
+          "title": "display prefix, e.g. \"$\""
+        }
+      },
+      "description": "IndicatorValue represents a single global indicator reading."
+    }
+  }
+}

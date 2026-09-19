@@ -1,0 +1,1574 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "Respondent API",
+    "version": "1.0.0"
+  },
+  "host": "localhost:8090",
+  "basePath": "/",
+  "schemes": [
+    "http",
+    "https"
+  ],
+  "consumes": [
+    "application/json"
+  ],
+  "produces": [
+    "application/json"
+  ],
+  "tags": [
+    {
+      "name": "AIService"
+    },
+    {
+      "name": "EntityService"
+    },
+    {
+      "name": "EntityStreamService"
+    },
+    {
+      "name": "IndicatorService"
+    },
+    {
+      "name": "LayerService"
+    }
+  ],
+  "paths": {
+    "/v1/ai/analysis": {
+      "get": {
+        "summary": "List loaded analysis definitions",
+        "operationId": "AIService_ListAnalysisDefinitions",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ListAnalysisDefinitionsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "AIService"
+        ]
+      }
+    },
+    "/v1/ai/analyze": {
+      "post": {
+        "summary": "Analyze an entity using AI based on its data and observations",
+        "operationId": "AIService_AnalyzeEntity",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1AnalyzeEntityResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "description": "AnalyzeEntityRequest is the request for AI entity analysis.",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1AnalyzeEntityRequest"
+            }
+          }
+        ],
+        "tags": [
+          "AIService"
+        ]
+      }
+    },
+    "/v1/ai/explain": {
+      "post": {
+        "summary": "Explain a SQL query in plain English",
+        "operationId": "AIService_ExplainQuery",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ExplainQueryResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "description": "ExplainQueryRequest is the request for SQL explanation.",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1ExplainQueryRequest"
+            }
+          }
+        ],
+        "tags": [
+          "AIService"
+        ]
+      }
+    },
+    "/v1/ai/insights": {
+      "get": {
+        "summary": "Get stored AI insights with optional filters",
+        "operationId": "AIService_GetInsights",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1GetInsightsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "insightType",
+            "description": "Optional: filter by insight type (dynamic string)",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "layerType",
+            "description": "Optional: filter by layer type (dynamic string)",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "entityId",
+            "description": "Optional: filter by associated entity",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "limit",
+            "description": "Max results (default 20, max 100)",
+            "in": "query",
+            "required": false,
+            "type": "integer",
+            "format": "int32"
+          },
+          {
+            "name": "offset",
+            "description": "Pagination offset",
+            "in": "query",
+            "required": false,
+            "type": "integer",
+            "format": "int32"
+          },
+          {
+            "name": "attention",
+            "description": "Optional: exact attention level filter",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "enum": [
+              "ATTENTION_LEVEL_UNSPECIFIED",
+              "ATTENTION_LEVEL_INFO",
+              "ATTENTION_LEVEL_LOW",
+              "ATTENTION_LEVEL_MEDIUM",
+              "ATTENTION_LEVEL_HIGH",
+              "ATTENTION_LEVEL_CRITICAL"
+            ],
+            "default": "ATTENTION_LEVEL_UNSPECIFIED"
+          },
+          {
+            "name": "minAttention",
+            "description": "Optional: minimum attention level (inclusive)",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "enum": [
+              "ATTENTION_LEVEL_UNSPECIFIED",
+              "ATTENTION_LEVEL_INFO",
+              "ATTENTION_LEVEL_LOW",
+              "ATTENTION_LEVEL_MEDIUM",
+              "ATTENTION_LEVEL_HIGH",
+              "ATTENTION_LEVEL_CRITICAL"
+            ],
+            "default": "ATTENTION_LEVEL_UNSPECIFIED"
+          }
+        ],
+        "tags": [
+          "AIService"
+        ]
+      }
+    },
+    "/v1/ai/notifications/filters": {
+      "get": {
+        "summary": "Get available notification filter options",
+        "operationId": "AIService_GetNotificationFilterOptions",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1GetNotificationFilterOptionsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "AIService"
+        ]
+      }
+    },
+    "/v1/ai/search": {
+      "post": {
+        "summary": "Natural language search over entities using LLM-generated SQL",
+        "operationId": "AIService_NaturalLanguageSearch",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1NaturalLanguageSearchResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "description": "NaturalLanguageSearchRequest is the request for natural language entity search.",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1NaturalLanguageSearchRequest"
+            }
+          }
+        ],
+        "tags": [
+          "AIService"
+        ]
+      }
+    },
+    "/v1/entities/batch": {
+      "post": {
+        "summary": "Get batch entity details including latest observations",
+        "operationId": "EntityService_GetEntitiesBatch",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1GetEntitiesBatchResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "description": "GetEntitiesBatchRequest is the request for the GetEntitiesBatch RPC.",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1GetEntitiesBatchRequest"
+            }
+          }
+        ],
+        "tags": [
+          "EntityService"
+        ]
+      }
+    },
+    "/v1/entities/detail": {
+      "get": {
+        "summary": "Get full entity details including latest observation",
+        "operationId": "EntityService_GetEntityDetail",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1GetEntityDetailResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "entityId",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "EntityService"
+        ]
+      }
+    },
+    "/v1/entities/observations": {
+      "get": {
+        "summary": "Get paginated observation history for an entity",
+        "operationId": "EntityService_GetObservationHistory",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1GetObservationHistoryResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "entityId",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "limit",
+            "description": "Max observations to return (default 50)",
+            "in": "query",
+            "required": false,
+            "type": "integer",
+            "format": "int32"
+          },
+          {
+            "name": "beforeMs",
+            "description": "Unix millis cursor — return observations before this timestamp (0 = now)",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "int64"
+          }
+        ],
+        "tags": [
+          "EntityService"
+        ]
+      }
+    },
+    "/v1/entities/search": {
+      "get": {
+        "summary": "Search entities by ID, name, or metadata values",
+        "operationId": "EntityService_SearchEntities",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1SearchEntitiesResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "query",
+            "description": "Search term (partial match on id, name, metadata)",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "layerType",
+            "description": "Optional: filter by layer type",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "limit",
+            "description": "Max results (default 20, max 100)",
+            "in": "query",
+            "required": false,
+            "type": "integer",
+            "format": "int32"
+          }
+        ],
+        "tags": [
+          "EntityService"
+        ]
+      }
+    },
+    "/v1/indicators": {
+      "get": {
+        "summary": "GetGlobalIndicators returns the latest indicator values for global indicator layers.",
+        "operationId": "IndicatorService_GetGlobalIndicators",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1GetGlobalIndicatorsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "layerIds",
+            "description": "empty = all indicator layers",
+            "in": "query",
+            "required": false,
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "collectionFormat": "multi"
+          }
+        ],
+        "tags": [
+          "IndicatorService"
+        ]
+      }
+    },
+    "/v1/layers": {
+      "get": {
+        "summary": "Get all available layers",
+        "operationId": "LayerService_GetLayers",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1GetLayersResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "LayerService"
+        ]
+      }
+    },
+    "/v1/layers/{layerId}/snapshot": {
+      "get": {
+        "summary": "Get current snapshot of entities for a layer",
+        "operationId": "LayerService_GetLayerSnapshot",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1GetLayerSnapshotResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "layerId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "limit",
+            "description": "Max entities to return (default 500)",
+            "in": "query",
+            "required": false,
+            "type": "integer",
+            "format": "int32"
+          },
+          {
+            "name": "offset",
+            "description": "Pagination offset",
+            "in": "query",
+            "required": false,
+            "type": "integer",
+            "format": "int32"
+          }
+        ],
+        "tags": [
+          "LayerService"
+        ]
+      }
+    },
+    "/v1/layers/{toggle.layerId}": {
+      "put": {
+        "summary": "Toggle layer enable/disable, mode, and density",
+        "operationId": "LayerService_ToggleLayer",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ToggleLayerResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "toggle.layerId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "toggle",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "mode": {
+                  "$ref": "#/definitions/v1LayerMode"
+                },
+                "density": {
+                  "type": "integer",
+                  "format": "int32",
+                  "title": "0-100"
+                }
+              }
+            }
+          }
+        ],
+        "tags": [
+          "LayerService"
+        ]
+      }
+    }
+  },
+  "definitions": {
+    "protobufAny": {
+      "type": "object",
+      "properties": {
+        "@type": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": {}
+    },
+    "protobufNullValue": {
+      "type": "string",
+      "enum": [
+        "NULL_VALUE"
+      ],
+      "default": "NULL_VALUE",
+      "description": "`NullValue` is a singleton enumeration to represent the null value for the\n`Value` type union.\n\nThe JSON representation for `NullValue` is JSON `null`.\n\n - NULL_VALUE: Null value."
+    },
+    "rpcStatus": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "message": {
+          "type": "string"
+        },
+        "details": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/protobufAny"
+          }
+        }
+      }
+    },
+    "v1AIInsight": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "insightType": {
+          "type": "string",
+          "title": "Dynamic insight type string (e.g. \"entity_analysis\", \"anomaly_detection\")"
+        },
+        "sourceName": {
+          "type": "string"
+        },
+        "operationName": {
+          "type": "string"
+        },
+        "layerType": {
+          "type": "string",
+          "title": "Dynamic layer type string"
+        },
+        "result": {
+          "type": "object"
+        },
+        "entityIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "observationIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "attention": {
+          "$ref": "#/definitions/v1AttentionLevel"
+        },
+        "attentionRank": {
+          "type": "integer",
+          "format": "int32",
+          "title": "Computed rank: 0=info, 1=low, 2=medium, 3=high, 4=critical"
+        },
+        "entities": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1InsightEntityRef"
+          }
+        }
+      },
+      "description": "AIInsight represents a stored AI-generated insight."
+    },
+    "v1AnalysisDefinitionInfo": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "displayName": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "schedule": {
+          "type": "string",
+          "title": "Interval or cron expression"
+        },
+        "layers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "title": "Target layer types"
+        },
+        "insightTypes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "title": "Insight types produced by operations"
+        }
+      },
+      "description": "AnalysisDefinitionInfo provides summary info about a loaded analysis definition."
+    },
+    "v1AnalyzeEntityRequest": {
+      "type": "object",
+      "properties": {
+        "entityId": {
+          "type": "string",
+          "title": "Composite entity ID \"layerType:externalId\""
+        },
+        "observationLimit": {
+          "type": "integer",
+          "format": "int32",
+          "title": "Max observations to include in analysis (default 10)"
+        }
+      },
+      "description": "AnalyzeEntityRequest is the request for AI entity analysis."
+    },
+    "v1AnalyzeEntityResponse": {
+      "type": "object",
+      "properties": {
+        "entityId": {
+          "type": "string",
+          "title": "Echo back the entity ID"
+        },
+        "analysis": {
+          "type": "string",
+          "title": "AI-generated analysis text"
+        },
+        "insightId": {
+          "type": "string",
+          "title": "ID of the stored insight (if persisted)"
+        }
+      },
+      "description": "AnalyzeEntityResponse is the response for AI entity analysis."
+    },
+    "v1AttentionLevel": {
+      "type": "string",
+      "enum": [
+        "ATTENTION_LEVEL_UNSPECIFIED",
+        "ATTENTION_LEVEL_INFO",
+        "ATTENTION_LEVEL_LOW",
+        "ATTENTION_LEVEL_MEDIUM",
+        "ATTENTION_LEVEL_HIGH",
+        "ATTENTION_LEVEL_CRITICAL"
+      ],
+      "default": "ATTENTION_LEVEL_UNSPECIFIED",
+      "description": "AttentionLevel indicates the severity or importance of an AI insight."
+    },
+    "v1EntitySearchResult": {
+      "type": "object",
+      "properties": {
+        "entityId": {
+          "type": "string",
+          "title": "composite: \"layerType:externalId\""
+        },
+        "externalId": {
+          "type": "string"
+        },
+        "layerType": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "latestObservation": {
+          "$ref": "#/definitions/v1Observation",
+          "title": "Last known position"
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "description": "EntitySearchResult represents a single entity search result."
+    },
+    "v1ExplainQueryRequest": {
+      "type": "object",
+      "properties": {
+        "sql": {
+          "type": "string",
+          "title": "SQL query to explain in plain English"
+        }
+      },
+      "description": "ExplainQueryRequest is the request for SQL explanation."
+    },
+    "v1ExplainQueryResponse": {
+      "type": "object",
+      "properties": {
+        "explanation": {
+          "type": "string",
+          "title": "Plain-English explanation of the SQL"
+        }
+      },
+      "description": "ExplainQueryResponse is the response for SQL explanation."
+    },
+    "v1GeoPoint": {
+      "type": "object",
+      "properties": {
+        "lat": {
+          "type": "number",
+          "format": "double"
+        },
+        "lon": {
+          "type": "number",
+          "format": "double"
+        },
+        "altM": {
+          "type": "number",
+          "format": "double"
+        }
+      }
+    },
+    "v1GetInsightsResponse": {
+      "type": "object",
+      "properties": {
+        "insights": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1AIInsight"
+          }
+        },
+        "totalCount": {
+          "type": "integer",
+          "format": "int32"
+        }
+      },
+      "description": "GetInsightsResponse is the response for listing AI insights."
+    },
+    "v1GetNotificationFilterOptionsResponse": {
+      "type": "object",
+      "properties": {
+        "insightTypes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1InsightTypeOption"
+          }
+        },
+        "attentionLevels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "layerTypes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "description": "GetNotificationFilterOptionsResponse returns available filter options\nfor the frontend notification filter UI."
+    },
+    "v1InsightEntityRef": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "externalId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "layerType": {
+          "type": "string"
+        }
+      },
+      "description": "InsightEntityRef is a lightweight entity reference embedded in AIInsight responses."
+    },
+    "v1InsightTypeOption": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "type": "string"
+        },
+        "displayName": {
+          "type": "string"
+        },
+        "sourceName": {
+          "type": "string"
+        }
+      },
+      "description": "InsightTypeOption describes one available insight type for filtering."
+    },
+    "v1ListAnalysisDefinitionsResponse": {
+      "type": "object",
+      "properties": {
+        "definitions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1AnalysisDefinitionInfo"
+          }
+        }
+      },
+      "description": "ListAnalysisDefinitionsResponse is the response for listing analysis definitions."
+    },
+    "v1NaturalLanguageSearchRequest": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "title": "Natural language query (e.g. \"find all flights near LAX\")"
+        },
+        "layerType": {
+          "type": "string",
+          "title": "Optional: restrict to a specific layer type (dynamic string)"
+        },
+        "limit": {
+          "type": "integer",
+          "format": "int32",
+          "title": "Max results to return (default 20, max 100)"
+        }
+      },
+      "description": "NaturalLanguageSearchRequest is the request for natural language entity search."
+    },
+    "v1NaturalLanguageSearchResponse": {
+      "type": "object",
+      "properties": {
+        "generatedSql": {
+          "type": "string",
+          "title": "The SQL generated from the NL query"
+        },
+        "results": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1EntitySearchResult"
+          },
+          "title": "Matching entities"
+        },
+        "totalCount": {
+          "type": "integer",
+          "format": "int32",
+          "title": "Total matches"
+        },
+        "explanation": {
+          "type": "string",
+          "title": "Human-readable explanation of what was searched"
+        }
+      },
+      "description": "NaturalLanguageSearchResponse is the response for natural language entity search."
+    },
+    "v1Observation": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "entityId": {
+          "type": "string"
+        },
+        "ts": {
+          "type": "string",
+          "format": "int64",
+          "title": "Unix timestamp in milliseconds (last poll / collection time)"
+        },
+        "position": {
+          "$ref": "#/definitions/v1GeoPoint"
+        },
+        "altitudeM": {
+          "type": "number",
+          "format": "double"
+        },
+        "velocity": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "number",
+            "format": "double"
+          }
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "eventTimeMs": {
+          "type": "string",
+          "format": "int64",
+          "title": "When the event actually occurred (0 = not set)"
+        },
+        "eventEndMs": {
+          "type": "string",
+          "format": "int64",
+          "title": "When the event ended, for range events (0 = not set)"
+        }
+      },
+      "title": "Observation represents a time-series record of an entity"
+    },
+    "v1BatchEntityDetail": {
+      "type": "object",
+      "properties": {
+        "entity": {
+          "$ref": "#/definitions/v1Entity"
+        },
+        "latestObservation": {
+          "$ref": "#/definitions/v1Observation"
+        }
+      },
+      "description": "BatchEntityDetail contains an entity with its latest observation."
+    },
+    "v1Entity": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "externalId": {
+          "type": "string"
+        },
+        "layerType": {
+          "type": "string",
+          "title": "flights_commercial, flights_military, satellites, earthquakes, traffic, cctv"
+        },
+        "name": {
+          "type": "string"
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "aiMetadataJson": {
+          "type": "string",
+          "title": "AI enrichment data as JSON string (nested objects not representable in proto map)"
+        }
+      },
+      "title": "Entity represents a normalized geospatial object"
+    },
+    "v1GetEntitiesBatchRequest": {
+      "type": "object",
+      "properties": {
+        "entityIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "title": "composite IDs: \"layerType:externalId\" (max 50)"
+        }
+      },
+      "description": "GetEntitiesBatchRequest is the request for the GetEntitiesBatch RPC."
+    },
+    "v1GetEntitiesBatchResponse": {
+      "type": "object",
+      "properties": {
+        "entities": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1BatchEntityDetail"
+          }
+        }
+      },
+      "description": "GetEntitiesBatchResponse is the response for the GetEntitiesBatch RPC."
+    },
+    "v1GetEntityDetailResponse": {
+      "type": "object",
+      "properties": {
+        "entity": {
+          "$ref": "#/definitions/v1Entity"
+        },
+        "latestObservation": {
+          "$ref": "#/definitions/v1Observation"
+        }
+      }
+    },
+    "v1GetObservationHistoryResponse": {
+      "type": "object",
+      "properties": {
+        "observations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1Observation"
+          }
+        },
+        "hasMore": {
+          "type": "boolean"
+        }
+      }
+    },
+    "v1SearchEntitiesResponse": {
+      "type": "object",
+      "properties": {
+        "results": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1EntitySearchResult"
+          }
+        },
+        "totalCount": {
+          "type": "integer",
+          "format": "int32",
+          "title": "Total matches (for \"N more results\" UI)"
+        }
+      },
+      "description": "SearchEntitiesResponse is the response for the SearchEntities RPC."
+    },
+    "v1GetGlobalIndicatorsResponse": {
+      "type": "object",
+      "properties": {
+        "indicators": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1IndicatorSnapshot"
+          }
+        }
+      }
+    },
+    "v1IndicatorSnapshot": {
+      "type": "object",
+      "properties": {
+        "layerId": {
+          "type": "string"
+        },
+        "layerName": {
+          "type": "string"
+        },
+        "timestampMs": {
+          "type": "string",
+          "format": "int64"
+        },
+        "values": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1IndicatorValue"
+          }
+        },
+        "summary": {
+          "type": "string",
+          "title": "e.g. \"Quiet\", \"Minor Storm\""
+        },
+        "overallLevel": {
+          "type": "integer",
+          "format": "int32",
+          "title": "max severity across values"
+        }
+      },
+      "description": "IndicatorSnapshot is the current state of a global indicator layer."
+    },
+    "v1IndicatorValue": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "title": "e.g. \"kp_index\", \"r_scale\", \"g_scale\""
+        },
+        "value": {
+          "type": "string",
+          "title": "current value as string"
+        },
+        "label": {
+          "type": "string",
+          "title": "human-readable label, e.g. \"Kp Index\""
+        },
+        "unit": {
+          "type": "string",
+          "title": "e.g. \"\", \"km/s\", \"uSv/h\""
+        },
+        "level": {
+          "type": "integer",
+          "format": "int32",
+          "title": "severity 0-5 (0=quiet, 5=extreme)"
+        },
+        "changePct": {
+          "type": "number",
+          "format": "double",
+          "description": "% change (signed), e.g. +8.2 or -0.4",
+          "title": "--- extended display fields ---"
+        },
+        "changeAbs": {
+          "type": "number",
+          "format": "double",
+          "title": "absolute change (signed)"
+        },
+        "format": {
+          "type": "string",
+          "title": "display hint: \"scale\" (default), \"number\", \"currency\", \"percent\""
+        },
+        "precision": {
+          "type": "integer",
+          "format": "int32",
+          "title": "decimal places for display"
+        },
+        "prefix": {
+          "type": "string",
+          "title": "display prefix, e.g. \"$\""
+        }
+      },
+      "description": "IndicatorValue represents a single global indicator reading."
+    },
+    "v1ColorByConfig": {
+      "type": "object",
+      "properties": {
+        "field": {
+          "type": "string",
+          "title": "metadata field name whose value selects the color"
+        },
+        "values": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "field value -> hex color"
+        },
+        "defaultColor": {
+          "type": "string",
+          "title": "hex color used when the value is not in the map"
+        }
+      },
+      "description": "ColorByConfig derives an entity's render color from the value of a metadata\nfield, e.g. coloring facilities by their \"status\". This keeps per-value color\nrules declarative (in the source YAML) instead of hardcoded in the client."
+    },
+    "v1FieldFormat": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "$ref": "#/definitions/v1FieldType"
+        },
+        "precision": {
+          "type": "integer",
+          "format": "int32",
+          "title": "For float/integer types"
+        },
+        "prefix": {
+          "type": "string"
+        },
+        "suffix": {
+          "type": "string"
+        },
+        "transform": {
+          "$ref": "#/definitions/v1FieldTransform"
+        }
+      },
+      "description": "FieldFormat describes the formatting rules for a rendered field value."
+    },
+    "v1FieldRendererConfig": {
+      "type": "object",
+      "properties": {
+        "keys": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "label": {
+          "type": "string"
+        },
+        "format": {
+          "$ref": "#/definitions/v1FieldFormat"
+        },
+        "priority": {
+          "type": "integer",
+          "format": "int32"
+        }
+      },
+      "description": "FieldRendererConfig defines how a metadata field is displayed in the UI."
+    },
+    "v1FieldTransform": {
+      "type": "string",
+      "enum": [
+        "FIELD_TRANSFORM_UNSPECIFIED",
+        "FIELD_TRANSFORM_UPPER",
+        "FIELD_TRANSFORM_LOWER"
+      ],
+      "default": "FIELD_TRANSFORM_UNSPECIFIED",
+      "description": "FieldTransform defines text transformation for string fields."
+    },
+    "v1FieldType": {
+      "type": "string",
+      "enum": [
+        "FIELD_TYPE_UNSPECIFIED",
+        "FIELD_TYPE_STRING",
+        "FIELD_TYPE_FLOAT",
+        "FIELD_TYPE_INTEGER",
+        "FIELD_TYPE_RAW"
+      ],
+      "default": "FIELD_TYPE_UNSPECIFIED",
+      "description": "FieldType defines the data type of a rendered field value."
+    },
+    "v1FilteringMode": {
+      "type": "string",
+      "enum": [
+        "FILTERING_MODE_UNSPECIFIED",
+        "FILTERING_MODE_VIEWPORT"
+      ],
+      "default": "FILTERING_MODE_UNSPECIFIED",
+      "description": "FilteringMode defines how a layer delivers data to clients."
+    },
+    "v1GetLayerSnapshotResponse": {
+      "type": "object",
+      "properties": {
+        "entities": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1Entity"
+          }
+        },
+        "observations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1Observation"
+          }
+        },
+        "totalCount": {
+          "type": "string",
+          "format": "int64",
+          "title": "Total available entities"
+        },
+        "hasMore": {
+          "type": "boolean",
+          "title": "More entities available"
+        }
+      }
+    },
+    "v1GetLayersResponse": {
+      "type": "object",
+      "properties": {
+        "layers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1Layer"
+          }
+        }
+      }
+    },
+    "v1HistoryConfig": {
+      "type": "object",
+      "properties": {
+        "maxLookbackHours": {
+          "type": "integer",
+          "format": "int32",
+          "title": "Max hours into the past (0 = server default 48h)"
+        },
+        "maxRangeSpanHours": {
+          "type": "integer",
+          "format": "int32",
+          "title": "Max hours per query window (0 = server default 24h)"
+        }
+      },
+      "description": "HistoryConfig defines per-layer time range limits for historical exploration.\nWhen present, the frontend custom range picker uses these limits instead of the server defaults.\nZero values mean \"use server default\"."
+    },
+    "v1IconConfig": {
+      "type": "object",
+      "properties": {
+        "shape": {
+          "type": "string",
+          "title": "Free-form shape name (e.g. \"flight\", \"ship\", \"missile\")"
+        },
+        "rotatable": {
+          "type": "boolean"
+        },
+        "interpolation": {
+          "type": "boolean",
+          "title": "Dead-reckoning motion interpolation"
+        },
+        "scale": {
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "description": "IconConfig defines icon rendering properties for entities on the globe."
+    },
+    "v1Layer": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "title": "Dynamic layer type string (e.g. flights_commercial, satellites)"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "mode": {
+          "$ref": "#/definitions/v1LayerMode"
+        },
+        "density": {
+          "type": "integer",
+          "format": "int32",
+          "title": "0-100"
+        },
+        "source": {
+          "type": "string"
+        },
+        "lastUpdate": {
+          "type": "string",
+          "format": "int64",
+          "title": "Unix timestamp in milliseconds"
+        },
+        "count": {
+          "type": "string",
+          "format": "int64",
+          "title": "Entity count (for high-volume layers)"
+        },
+        "color": {
+          "type": "string",
+          "title": "CSS color string for rendering (e.g., \"#00ff9d\")"
+        },
+        "pointSize": {
+          "type": "integer",
+          "format": "int32",
+          "title": "Point size in pixels for rendering"
+        },
+        "displayConfig": {
+          "$ref": "#/definitions/v1LayerDisplayConfig",
+          "title": "Display configuration from declarative source YAML"
+        },
+        "historyConfig": {
+          "$ref": "#/definitions/v1HistoryConfig",
+          "title": "Per-layer time range limits (nil = server defaults: 48h lookback, 24h span)"
+        },
+        "renderingMode": {
+          "$ref": "#/definitions/v1RenderingMode",
+          "title": "Determines frontend rendering strategy"
+        },
+        "filteringMode": {
+          "$ref": "#/definitions/v1FilteringMode",
+          "title": "When FILTERING_MODE_VIEWPORT, frontend sends camera bounds for progressive loading"
+        }
+      },
+      "title": "Layer represents a configurable data layer"
+    },
+    "v1LayerDisplayConfig": {
+      "type": "object",
+      "properties": {
+        "icon": {
+          "$ref": "#/definitions/v1IconConfig"
+        },
+        "trail": {
+          "$ref": "#/definitions/v1TrailConfig"
+        },
+        "style": {
+          "$ref": "#/definitions/v1StyleConfig"
+        },
+        "fieldRenderers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1FieldRendererConfig"
+          }
+        },
+        "colorBy": {
+          "$ref": "#/definitions/v1ColorByConfig",
+          "title": "optional: derive entity color from a metadata field's value"
+        }
+      },
+      "description": "LayerDisplayConfig holds rendering metadata for a layer, populated from declarative source definitions."
+    },
+    "v1LayerMode": {
+      "type": "string",
+      "enum": [
+        "LAYER_MODE_UNSPECIFIED",
+        "LAYER_MODE_SPARSE",
+        "LAYER_MODE_FULL"
+      ],
+      "default": "LAYER_MODE_UNSPECIFIED",
+      "description": "LayerMode defines the density mode for a layer."
+    },
+    "v1LayerToggle": {
+      "type": "object",
+      "properties": {
+        "layerId": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "mode": {
+          "$ref": "#/definitions/v1LayerMode"
+        },
+        "density": {
+          "type": "integer",
+          "format": "int32",
+          "title": "0-100"
+        }
+      }
+    },
+    "v1RenderingMode": {
+      "type": "string",
+      "enum": [
+        "RENDERING_MODE_UNSPECIFIED",
+        "RENDERING_MODE_MAP",
+        "RENDERING_MODE_INDICATOR"
+      ],
+      "default": "RENDERING_MODE_UNSPECIFIED",
+      "description": "RenderingMode defines how the frontend renders a layer."
+    },
+    "v1StyleConfig": {
+      "type": "object",
+      "properties": {
+        "color": {
+          "type": "string",
+          "title": "hex color"
+        },
+        "pointSize": {
+          "type": "integer",
+          "format": "int32"
+        }
+      },
+      "description": "StyleConfig defines general visual style for a layer."
+    },
+    "v1ToggleLayerResponse": {
+      "type": "object",
+      "properties": {
+        "layer": {
+          "$ref": "#/definitions/v1Layer"
+        }
+      }
+    },
+    "v1TrailConfig": {
+      "type": "object",
+      "properties": {
+        "color": {
+          "type": "string",
+          "title": "hex color"
+        },
+        "width": {
+          "type": "number",
+          "format": "double",
+          "title": "polyline width"
+        },
+        "opacity": {
+          "type": "number",
+          "format": "double",
+          "title": "trail alpha"
+        }
+      },
+      "description": "TrailConfig defines trail rendering properties for entity movement paths."
+    }
+  }
+}

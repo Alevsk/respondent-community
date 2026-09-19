@@ -1,0 +1,190 @@
+# sources.d/sondehub_radiosondes.yaml
+# Weather balloon radiosonde tracking via SondeHub community network.
+# Source: https://sondehub.org / Project Horus
+# API: https://api.v2.sondehub.org
+#
+# The SondeHub /sondes API returns a dictionary keyed by serial number:
+#   {"X4716829": {"lat": ..., "lon": ..., ...}, "X4677065": {...}, ...}
+# The parser's object_to_records transform flattens this into an array of
+# records, injecting the dictionary key as the "serial" field.
+#
+# API notes (no authentication required):
+#   GET /sondes              -> all active sondes (dict keyed by serial)
+#   GET /sondes?lat=40&lon=-100&distance=5000 -> filtered by location (km)
+#   GET /sondes/telemetry?duration=1h         -> recent telemetry (nested dict-of-dicts)
+#
+# Sample record fields from /sondes:
+#   serial, manufacturer, type, subtype, lat, lon, alt, temp, humidity,
+#   pressure, vel_v, vel_h, heading, sats, batt, frequency, datetime
+schema_version: 2
+
+name: sondehub_radiosondes
+labels:
+  category: meteorological
+  priority: medium
+
+# --- Identity ---
+source_type: sondehub_radiosondes
+layer_type: radiosondes
+display_name: "SondeHub Radiosondes"
+
+enabled: true
+
+filtering: viewport
+
+geo_cache:
+  overfetch_ratio: 2.0
+  alive_ratio_threshold: 0.5
+  gc_batch_size: 500
+
+# --- Ingestion ---
+transport:
+  type: http_poll
+  url: "https://api.v2.sondehub.org/sondes"
+  method: GET
+  headers:
+    Accept: "application/json"
+  timeout: "15s"
+  interval: "60s"
+  max_response_bytes: 52428800  # 50MB — can be hundreds of active sondes globally
+  retry:
+    max_attempts: 3
+    backoff: "exponential"
+    initial_delay: "2s"
+    max_delay: "30s"
+
+# --- Response Parsing ---
+parser:
+  format: json
+  records_path: ""
+  max_records: 10000
+  object_to_records: true
+  object_key_field: "serial"
+
+# --- Record Filtering (CEL) ---
+# Only process records that have valid coordinates and are recent enough.
+filter: >
+  has(record.lat) && has(record.lon) && has(record.alt) && has(record.serial)
+
+# --- Entity Mapping (CEL) ---
+entity:
+  external_id: >
+    record.serial
+  name: >
+    has(record.subtype) ? record.subtype + " " + record.serial : record.serial
+  metadata:
+    manufacturer: >
+      has(record.manufacturer) ? record.manufacturer : "Unknown"
+    type: >
+      has(record.type) ? record.type : "Unknown"
+    subtype: >
+      has(record.subtype) ? record.subtype : ""
+    frequency_mhz: >
+      has(record.tx_frequency) ? string(record.tx_frequency) : ""
+    battery_v: >
+      has(record.batt) ? string(record.batt) : ""
+    satellites: >
+      has(record.sats) ? string(record.sats) : ""
+
+# --- Observation Mapping (CEL) ---
+observation:
+  latitude: >
+    double(record.lat)
+  longitude: >
+    double(record.lon)
+  altitude: >
+    double(record.alt)
+  timestamp: >
+    has(record.datetime) ? parse_iso8601(record.datetime) : now()
+  velocity:
+    heading: >
+      has(record.heading) ? double(record.heading) : 0.0
+    speed: >
+      has(record.vel_h) ? double(record.vel_h) : 0.0
+    vertical_speed: >
+      has(record.vel_v) ? double(record.vel_v) : 0.0
+  metadata:
+    temperature_c: >
+      has(record.temp) ? string(record.temp) : ""
+    pressure_hpa: >
+      has(record.pressure) ? string(record.pressure) : ""
+    humidity_pct: >
+      has(record.humidity) ? string(record.humidity) : ""
+    altitude_m: >
+      has(record.alt) ? string(record.alt) : ""
+  content_hash: ""
+
+# --- Recording ---
+recording:
+  mode: upsert
+
+# --- Cache ---
+cache:
+  ttl: "300s"
+
+# --- Display (consumed by frontend) ---
+display:
+  icon:
+    shape: radio
+    rotatable: false
+    interpolation: true
+    scale: 1.0
+  trail:
+    color: "#bb66ff"
+    width: 1.5
+    opacity: 0.7
+  style:
+    color: "#bb66ff"
+    point_size: 6
+  field_renderers:
+    - keys: [altitude_m, alt]
+      label: "ALTITUDE"
+      format:
+        type: float
+        precision: 0
+        suffix: " m"
+      priority: 0
+    - keys: [temperature_c, temp]
+      label: "TEMPERATURE"
+      format:
+        type: float
+        precision: 1
+        suffix: " C"
+      priority: 1
+    - keys: [pressure_hpa, pressure]
+      label: "PRESSURE"
+      format:
+        type: float
+        precision: 1
+        suffix: " hPa"
+      priority: 2
+    - keys: [humidity_pct, humidity]
+      label: "HUMIDITY"
+      format:
+        type: float
+        precision: 1
+        suffix: " %"
+      priority: 3
+    - keys: [manufacturer]
+      label: "MANUFACTURER"
+      format:
+        type: string
+        transform: upper
+      priority: 4
+    - keys: [type, subtype]
+      label: "SONDE TYPE"
+      format:
+        type: string
+      priority: 5
+    - keys: [frequency_mhz]
+      label: "FREQUENCY"
+      format:
+        type: float
+        precision: 1
+        suffix: " MHz"
+      priority: 6
+
+# --- History (per-layer time range limits) ---
+history:
+  max_lookback: "168h"     # 7 days — sondes are short-lived (typically 1-3 hours)
+  max_range_span: "24h"    # 1 day per query window

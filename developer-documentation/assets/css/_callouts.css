@@ -1,0 +1,47 @@
+.callout {
+  margin: 1rem 0 1.5rem;
+  padding: 1rem 1.25rem;
+  border-radius: var(--code-radius);
+  border-left: 4px solid;
+  font-size: var(--text-sm);
+}
+
+.callout-title {
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.callout-content p:last-child {
+  margin-bottom: 0;
+}
+
+.callout-info {
+  background: rgba(59, 130, 246, 0.08);
+  border-color: var(--color-info);
+}
+
+.callout-info .callout-title { color: var(--color-info); }
+
+.callout-warning {
+  background: rgba(245, 158, 11, 0.08);
+  border-color: var(--color-warning);
+}
+
+.callout-warning .callout-title { color: var(--color-warning); }
+
+.callout-danger {
+  background: rgba(239, 68, 68, 0.08);
+  border-color: var(--color-danger);
+}
+
+.callout-danger .callout-title { color: var(--color-danger); }
+
+.callout-tip {
+  background: rgba(16, 185, 129, 0.08);
+  border-color: var(--color-success);
+}
+
+.callout-tip .callout-title { color: var(--color-success); }

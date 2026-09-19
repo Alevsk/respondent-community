@@ -1,0 +1,147 @@
+# sources.d/blitzortung_lightning.yaml
+# Blitzortung — Real-time Global Lightning Strike Detection
+# Source: https://www.blitzortung.org/
+# Auth: None required (public WebSocket)
+# Format: JSON per message — one lightning strike per message
+#
+# Connects to the Blitzortung community lightning detection network.
+# Sends {"time": 0} to subscribe to the real-time global feed.
+# Volume: tens to hundreds of strikes/sec during active storms.
+schema_version: 2
+
+name: blitzortung_lightning
+labels:
+  category: environmental
+  priority: high
+source_type: blitzortung_lightning
+layer_type: lightning
+display_name: "Lightning Strikes"
+enabled: true
+
+filtering: viewport
+
+geo_cache:
+  overfetch_ratio: 3.0
+  alive_ratio_threshold: 0.5
+  gc_batch_size: 500
+
+transport:
+  type: websocket
+  url: "wss://ws1.blitzortung.org/"
+  timeout: "15s"
+  websocket:
+    subscribe_messages:
+      - '{"a":111}'
+    ping_interval: "30s"
+    message_format: text
+    decode: lzw
+  reconnect:
+    max_attempts: 0
+    backoff: exponential
+    initial_delay: "2s"
+    max_delay: "60s"
+  batching:
+    mode: window
+    window: "3s"
+    max_size: 1000
+
+parser:
+  format: json
+  records_path: ""
+  max_records: 1000
+
+# Only process strikes with valid coordinates.
+filter: >
+  has(record.lat) && has(record.lon) && has(record.time)
+
+entity:
+  external_id: >
+    "bolt_" + string(record.time)
+  name: >
+    "Lightning Strike"
+  metadata:
+    polarity: >
+      has(record.pol) ? string(record.pol) : ""
+    region: >
+      has(record.region) ? string(record.region) : ""
+    station_count: >
+      has(record.sig) ? string(size(record.sig)) : "0"
+
+observation:
+  latitude: >
+    record.lat
+  longitude: >
+    record.lon
+  altitude: >
+    has(record.alt) ? double(record.alt) : 0.0
+  timestamp: >
+    unix_ms(record.time / 1000000.0)
+  metadata:
+    polarity: >
+      has(record.pol) ? string(record.pol) : ""
+    max_deviation: >
+      has(record.mds) ? string(record.mds) : ""
+    max_circular_gap: >
+      has(record.mcg) ? string(record.mcg) : ""
+    delay_s: >
+      has(record.delay) ? string(record.delay) : ""
+    region_code: >
+      has(record.region) ? string(record.region) : ""
+    station_count: >
+      has(record.sig) ? string(size(record.sig)) : "0"
+
+recording:
+  mode: append
+
+cache:
+  ttl: "120s"
+
+display:
+  icon:
+    shape: lightning
+    rotatable: false
+    interpolation: false
+    scale: 1.0
+  trail:
+    color: "#ffeb3b"
+    width: 1.0
+    opacity: 0.6
+  style:
+    color: "#ffeb3b"
+    point_size: 6
+  field_renderers:
+    - keys: [polarity]
+      label: "POLARITY"
+      format:
+        type: integer
+      priority: 0
+    - keys: [station_count]
+      label: "STATIONS"
+      format:
+        type: integer
+      priority: 1
+    - keys: [max_deviation]
+      label: "DEVIATION"
+      format:
+        type: float
+        precision: 0
+      priority: 2
+    - keys: [max_circular_gap]
+      label: "CIRC GAP"
+      format:
+        type: float
+        precision: 1
+        suffix: "°"
+      priority: 3
+    - keys: [delay_s]
+      label: "DELAY"
+      format:
+        type: float
+        precision: 1
+        suffix: " s"
+      priority: 4
+    - keys: [region_code]
+      label: "REGION"
+      format:
+        type: integer
+      priority: 5

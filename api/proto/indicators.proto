@@ -1,0 +1,51 @@
+syntax = "proto3";
+
+package respondent.v1;
+
+option go_package = "github.com/Alevsk/respondent/gen/go/respondent/v1;respondentv1";
+
+import "google/api/annotations.proto";
+
+// IndicatorValue represents a single global indicator reading.
+message IndicatorValue {
+  string key   = 1;  // e.g. "kp_index", "r_scale", "g_scale"
+  string value = 2;  // current value as string
+  string label = 3;  // human-readable label, e.g. "Kp Index"
+  string unit  = 4;  // e.g. "", "km/s", "uSv/h"
+  int32  level = 5;  // severity 0-5 (0=quiet, 5=extreme)
+  // --- extended display fields ---
+  double change_pct = 6;  // % change (signed), e.g. +8.2 or -0.4
+  double change_abs = 7;  // absolute change (signed)
+  string format     = 8;  // display hint: "scale" (default), "number", "currency", "percent"
+  int32  precision  = 9;  // decimal places for display
+  string prefix     = 10; // display prefix, e.g. "$"
+}
+
+// IndicatorSnapshot is the current state of a global indicator layer.
+message IndicatorSnapshot {
+  string layer_id                    = 1;
+  string layer_name                  = 2;
+  int64  timestamp_ms                = 3;
+  repeated IndicatorValue values     = 4;
+  string summary                     = 5;  // e.g. "Quiet", "Minor Storm"
+  int32  overall_level               = 6;  // max severity across values
+}
+
+// GetGlobalIndicatorsRequest optionally filters by layer IDs.
+message GetGlobalIndicatorsRequest {
+  repeated string layer_ids = 1; // empty = all indicator layers
+}
+
+message GetGlobalIndicatorsResponse {
+  repeated IndicatorSnapshot indicators = 1;
+}
+
+// IndicatorService provides access to global indicator data.
+service IndicatorService {
+  // GetGlobalIndicators returns the latest indicator values for global indicator layers.
+  rpc GetGlobalIndicators(GetGlobalIndicatorsRequest) returns (GetGlobalIndicatorsResponse) {
+    option (google.api.http) = {
+      get: "/v1/indicators"
+    };
+  }
+}

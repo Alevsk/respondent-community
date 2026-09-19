@@ -1,0 +1,137 @@
+syntax = "proto3";
+
+package respondent.v1;
+
+option go_package = "github.com/Alevsk/respondent/gen/go/respondent/v1;respondentv1";
+
+import "common.proto";
+import "google/api/annotations.proto";
+
+// Entity represents a normalized geospatial object
+message Entity {
+  string id = 1;
+  string external_id = 2;
+  string layer_type = 3; // flights_commercial, flights_military, satellites, earthquakes, traffic, cctv
+  string name = 4;
+  map<string, string> metadata = 5;
+  string ai_metadata_json = 6; // AI enrichment data as JSON string (nested objects not representable in proto map)
+}
+
+// Observation represents a time-series record of an entity
+message Observation {
+  string id = 1;
+  string entity_id = 2;
+  int64 ts = 3; // Unix timestamp in milliseconds (last poll / collection time)
+  GeoPoint position = 4;
+  double altitude_m = 5;
+  map<string, double> velocity = 6;
+  map<string, string> metadata = 7;
+  int64 event_time_ms = 8; // When the event actually occurred (0 = not set)
+  int64 event_end_ms = 9;  // When the event ended, for range events (0 = not set)
+}
+
+// EntityUpdate is a delta update from the real-time stream
+message EntityUpdate {
+  enum UpdateType {
+    UPDATE_TYPE_UNSPECIFIED = 0;
+    UPDATE_TYPE_CREATE = 1;
+    UPDATE_TYPE_UPDATE = 2;
+    UPDATE_TYPE_DELETE = 3;
+  }
+  UpdateType type = 1;
+  Entity entity = 2;
+  Observation observation = 3;
+}
+
+// ── EntityService ───────────────────────────────────────────────────
+
+message GetEntityDetailRequest {
+  string entity_id = 1;
+}
+
+message GetEntityDetailResponse {
+  Entity entity = 1;
+  Observation latest_observation = 2;
+}
+
+message GetObservationHistoryRequest {
+  string entity_id = 1;
+  int32 limit = 2;     // Max observations to return (default 50)
+  int64 before_ms = 3; // Unix millis cursor — return observations before this timestamp (0 = now)
+}
+
+message GetObservationHistoryResponse {
+  repeated Observation observations = 1;
+  bool has_more = 2;
+}
+
+// SearchEntitiesRequest is the request for the SearchEntities RPC.
+message SearchEntitiesRequest {
+  string query = 1;           // Search term (partial match on id, name, metadata)
+  string layer_type = 2;      // Optional: filter by layer type
+  int32 limit = 3;            // Max results (default 20, max 100)
+}
+
+// SearchEntitiesResponse is the response for the SearchEntities RPC.
+message SearchEntitiesResponse {
+  repeated EntitySearchResult results = 1;
+  int32 total_count = 2;      // Total matches (for "N more results" UI)
+}
+
+// EntitySearchResult represents a single entity search result.
+message EntitySearchResult {
+  string entity_id = 1;       // composite: "layerType:externalId"
+  string external_id = 2;
+  string layer_type = 3;
+  string name = 4;
+  Observation latest_observation = 5;  // Last known position
+  map<string, string> metadata = 6;
+}
+
+// GetEntitiesBatchRequest is the request for the GetEntitiesBatch RPC.
+message GetEntitiesBatchRequest {
+  repeated string entity_ids = 1; // composite IDs: "layerType:externalId" (max 50)
+}
+
+// BatchEntityDetail contains an entity with its latest observation.
+message BatchEntityDetail {
+  Entity entity = 1;
+  Observation latest_observation = 2;
+}
+
+// GetEntitiesBatchResponse is the response for the GetEntitiesBatch RPC.
+message GetEntitiesBatchResponse {
+  repeated BatchEntityDetail entities = 1;
+}
+
+// EntityService provides detail and history lookups for individual entities.
+service EntityService {
+  // Get full entity details including latest observation
+  rpc GetEntityDetail(GetEntityDetailRequest) returns (GetEntityDetailResponse) {
+    option (google.api.http) = {
+      get: "/v1/entities/detail"
+    };
+  }
+
+  // Get paginated observation history for an entity
+  rpc GetObservationHistory(GetObservationHistoryRequest) returns (GetObservationHistoryResponse) {
+    option (google.api.http) = {
+      get: "/v1/entities/observations"
+    };
+  }
+
+  // Search entities by ID, name, or metadata values
+  rpc SearchEntities(SearchEntitiesRequest) returns (SearchEntitiesResponse) {
+    option (google.api.http) = {
+      get: "/v1/entities/search"
+    };
+  }
+
+  // Get batch entity details including latest observations
+  rpc GetEntitiesBatch(GetEntitiesBatchRequest) returns (GetEntitiesBatchResponse) {
+    option (google.api.http) = {
+      post: "/v1/entities/batch"
+      body: "*"
+    };
+  }
+}

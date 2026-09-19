@@ -1,0 +1,687 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "ai.proto",
+    "version": "version not set"
+  },
+  "tags": [
+    {
+      "name": "AIService"
+    }
+  ],
+  "consumes": [
+    "application/json"
+  ],
+  "produces": [
+    "application/json"
+  ],
+  "paths": {
+    "/v1/ai/analysis": {
+      "get": {
+        "summary": "List loaded analysis definitions",
+        "operationId": "AIService_ListAnalysisDefinitions",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ListAnalysisDefinitionsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "AIService"
+        ]
+      }
+    },
+    "/v1/ai/analyze": {
+      "post": {
+        "summary": "Analyze an entity using AI based on its data and observations",
+        "operationId": "AIService_AnalyzeEntity",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1AnalyzeEntityResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "description": "AnalyzeEntityRequest is the request for AI entity analysis.",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1AnalyzeEntityRequest"
+            }
+          }
+        ],
+        "tags": [
+          "AIService"
+        ]
+      }
+    },
+    "/v1/ai/explain": {
+      "post": {
+        "summary": "Explain a SQL query in plain English",
+        "operationId": "AIService_ExplainQuery",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ExplainQueryResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "description": "ExplainQueryRequest is the request for SQL explanation.",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1ExplainQueryRequest"
+            }
+          }
+        ],
+        "tags": [
+          "AIService"
+        ]
+      }
+    },
+    "/v1/ai/insights": {
+      "get": {
+        "summary": "Get stored AI insights with optional filters",
+        "operationId": "AIService_GetInsights",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1GetInsightsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "insightType",
+            "description": "Optional: filter by insight type (dynamic string)",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "layerType",
+            "description": "Optional: filter by layer type (dynamic string)",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "entityId",
+            "description": "Optional: filter by associated entity",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "limit",
+            "description": "Max results (default 20, max 100)",
+            "in": "query",
+            "required": false,
+            "type": "integer",
+            "format": "int32"
+          },
+          {
+            "name": "offset",
+            "description": "Pagination offset",
+            "in": "query",
+            "required": false,
+            "type": "integer",
+            "format": "int32"
+          },
+          {
+            "name": "attention",
+            "description": "Optional: exact attention level filter",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "enum": [
+              "ATTENTION_LEVEL_UNSPECIFIED",
+              "ATTENTION_LEVEL_INFO",
+              "ATTENTION_LEVEL_LOW",
+              "ATTENTION_LEVEL_MEDIUM",
+              "ATTENTION_LEVEL_HIGH",
+              "ATTENTION_LEVEL_CRITICAL"
+            ],
+            "default": "ATTENTION_LEVEL_UNSPECIFIED"
+          },
+          {
+            "name": "minAttention",
+            "description": "Optional: minimum attention level (inclusive)",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "enum": [
+              "ATTENTION_LEVEL_UNSPECIFIED",
+              "ATTENTION_LEVEL_INFO",
+              "ATTENTION_LEVEL_LOW",
+              "ATTENTION_LEVEL_MEDIUM",
+              "ATTENTION_LEVEL_HIGH",
+              "ATTENTION_LEVEL_CRITICAL"
+            ],
+            "default": "ATTENTION_LEVEL_UNSPECIFIED"
+          }
+        ],
+        "tags": [
+          "AIService"
+        ]
+      }
+    },
+    "/v1/ai/notifications/filters": {
+      "get": {
+        "summary": "Get available notification filter options",
+        "operationId": "AIService_GetNotificationFilterOptions",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1GetNotificationFilterOptionsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "AIService"
+        ]
+      }
+    },
+    "/v1/ai/search": {
+      "post": {
+        "summary": "Natural language search over entities using LLM-generated SQL",
+        "operationId": "AIService_NaturalLanguageSearch",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1NaturalLanguageSearchResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "description": "NaturalLanguageSearchRequest is the request for natural language entity search.",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1NaturalLanguageSearchRequest"
+            }
+          }
+        ],
+        "tags": [
+          "AIService"
+        ]
+      }
+    }
+  },
+  "definitions": {
+    "protobufAny": {
+      "type": "object",
+      "properties": {
+        "@type": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": {}
+    },
+    "protobufNullValue": {
+      "type": "string",
+      "enum": [
+        "NULL_VALUE"
+      ],
+      "default": "NULL_VALUE",
+      "description": "`NullValue` is a singleton enumeration to represent the null value for the\n`Value` type union.\n\nThe JSON representation for `NullValue` is JSON `null`.\n\n - NULL_VALUE: Null value."
+    },
+    "rpcStatus": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "message": {
+          "type": "string"
+        },
+        "details": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/protobufAny"
+          }
+        }
+      }
+    },
+    "v1AIInsight": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "insightType": {
+          "type": "string",
+          "title": "Dynamic insight type string (e.g. \"entity_analysis\", \"anomaly_detection\")"
+        },
+        "sourceName": {
+          "type": "string"
+        },
+        "operationName": {
+          "type": "string"
+        },
+        "layerType": {
+          "type": "string",
+          "title": "Dynamic layer type string"
+        },
+        "result": {
+          "type": "object"
+        },
+        "entityIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "observationIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "attention": {
+          "$ref": "#/definitions/v1AttentionLevel"
+        },
+        "attentionRank": {
+          "type": "integer",
+          "format": "int32",
+          "title": "Computed rank: 0=info, 1=low, 2=medium, 3=high, 4=critical"
+        },
+        "entities": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1InsightEntityRef"
+          }
+        }
+      },
+      "description": "AIInsight represents a stored AI-generated insight."
+    },
+    "v1AnalysisDefinitionInfo": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "displayName": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "schedule": {
+          "type": "string",
+          "title": "Interval or cron expression"
+        },
+        "layers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "title": "Target layer types"
+        },
+        "insightTypes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "title": "Insight types produced by operations"
+        }
+      },
+      "description": "AnalysisDefinitionInfo provides summary info about a loaded analysis definition."
+    },
+    "v1AnalyzeEntityRequest": {
+      "type": "object",
+      "properties": {
+        "entityId": {
+          "type": "string",
+          "title": "Composite entity ID \"layerType:externalId\""
+        },
+        "observationLimit": {
+          "type": "integer",
+          "format": "int32",
+          "title": "Max observations to include in analysis (default 10)"
+        }
+      },
+      "description": "AnalyzeEntityRequest is the request for AI entity analysis."
+    },
+    "v1AnalyzeEntityResponse": {
+      "type": "object",
+      "properties": {
+        "entityId": {
+          "type": "string",
+          "title": "Echo back the entity ID"
+        },
+        "analysis": {
+          "type": "string",
+          "title": "AI-generated analysis text"
+        },
+        "insightId": {
+          "type": "string",
+          "title": "ID of the stored insight (if persisted)"
+        }
+      },
+      "description": "AnalyzeEntityResponse is the response for AI entity analysis."
+    },
+    "v1AttentionLevel": {
+      "type": "string",
+      "enum": [
+        "ATTENTION_LEVEL_UNSPECIFIED",
+        "ATTENTION_LEVEL_INFO",
+        "ATTENTION_LEVEL_LOW",
+        "ATTENTION_LEVEL_MEDIUM",
+        "ATTENTION_LEVEL_HIGH",
+        "ATTENTION_LEVEL_CRITICAL"
+      ],
+      "default": "ATTENTION_LEVEL_UNSPECIFIED",
+      "description": "AttentionLevel indicates the severity or importance of an AI insight."
+    },
+    "v1EntitySearchResult": {
+      "type": "object",
+      "properties": {
+        "entityId": {
+          "type": "string",
+          "title": "composite: \"layerType:externalId\""
+        },
+        "externalId": {
+          "type": "string"
+        },
+        "layerType": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "latestObservation": {
+          "$ref": "#/definitions/v1Observation",
+          "title": "Last known position"
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "description": "EntitySearchResult represents a single entity search result."
+    },
+    "v1ExplainQueryRequest": {
+      "type": "object",
+      "properties": {
+        "sql": {
+          "type": "string",
+          "title": "SQL query to explain in plain English"
+        }
+      },
+      "description": "ExplainQueryRequest is the request for SQL explanation."
+    },
+    "v1ExplainQueryResponse": {
+      "type": "object",
+      "properties": {
+        "explanation": {
+          "type": "string",
+          "title": "Plain-English explanation of the SQL"
+        }
+      },
+      "description": "ExplainQueryResponse is the response for SQL explanation."
+    },
+    "v1GeoPoint": {
+      "type": "object",
+      "properties": {
+        "lat": {
+          "type": "number",
+          "format": "double"
+        },
+        "lon": {
+          "type": "number",
+          "format": "double"
+        },
+        "altM": {
+          "type": "number",
+          "format": "double"
+        }
+      }
+    },
+    "v1GetInsightsResponse": {
+      "type": "object",
+      "properties": {
+        "insights": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1AIInsight"
+          }
+        },
+        "totalCount": {
+          "type": "integer",
+          "format": "int32"
+        }
+      },
+      "description": "GetInsightsResponse is the response for listing AI insights."
+    },
+    "v1GetNotificationFilterOptionsResponse": {
+      "type": "object",
+      "properties": {
+        "insightTypes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1InsightTypeOption"
+          }
+        },
+        "attentionLevels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "layerTypes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "description": "GetNotificationFilterOptionsResponse returns available filter options\nfor the frontend notification filter UI."
+    },
+    "v1InsightEntityRef": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "externalId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "layerType": {
+          "type": "string"
+        }
+      },
+      "description": "InsightEntityRef is a lightweight entity reference embedded in AIInsight responses."
+    },
+    "v1InsightTypeOption": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "type": "string"
+        },
+        "displayName": {
+          "type": "string"
+        },
+        "sourceName": {
+          "type": "string"
+        }
+      },
+      "description": "InsightTypeOption describes one available insight type for filtering."
+    },
+    "v1ListAnalysisDefinitionsResponse": {
+      "type": "object",
+      "properties": {
+        "definitions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1AnalysisDefinitionInfo"
+          }
+        }
+      },
+      "description": "ListAnalysisDefinitionsResponse is the response for listing analysis definitions."
+    },
+    "v1NaturalLanguageSearchRequest": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "title": "Natural language query (e.g. \"find all flights near LAX\")"
+        },
+        "layerType": {
+          "type": "string",
+          "title": "Optional: restrict to a specific layer type (dynamic string)"
+        },
+        "limit": {
+          "type": "integer",
+          "format": "int32",
+          "title": "Max results to return (default 20, max 100)"
+        }
+      },
+      "description": "NaturalLanguageSearchRequest is the request for natural language entity search."
+    },
+    "v1NaturalLanguageSearchResponse": {
+      "type": "object",
+      "properties": {
+        "generatedSql": {
+          "type": "string",
+          "title": "The SQL generated from the NL query"
+        },
+        "results": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1EntitySearchResult"
+          },
+          "title": "Matching entities"
+        },
+        "totalCount": {
+          "type": "integer",
+          "format": "int32",
+          "title": "Total matches"
+        },
+        "explanation": {
+          "type": "string",
+          "title": "Human-readable explanation of what was searched"
+        }
+      },
+      "description": "NaturalLanguageSearchResponse is the response for natural language entity search."
+    },
+    "v1Observation": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "entityId": {
+          "type": "string"
+        },
+        "ts": {
+          "type": "string",
+          "format": "int64",
+          "title": "Unix timestamp in milliseconds (last poll / collection time)"
+        },
+        "position": {
+          "$ref": "#/definitions/v1GeoPoint"
+        },
+        "altitudeM": {
+          "type": "number",
+          "format": "double"
+        },
+        "velocity": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "number",
+            "format": "double"
+          }
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "eventTimeMs": {
+          "type": "string",
+          "format": "int64",
+          "title": "When the event actually occurred (0 = not set)"
+        },
+        "eventEndMs": {
+          "type": "string",
+          "format": "int64",
+          "title": "When the event ended, for range events (0 = not set)"
+        }
+      },
+      "title": "Observation represents a time-series record of an entity"
+    }
+  }
+}

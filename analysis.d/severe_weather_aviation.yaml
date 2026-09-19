@@ -1,0 +1,265 @@
+# =============================================================================
+# SEVERE WEATHER AVIATION IMPACT — Weather-to-Flight Correlation
+# =============================================================================
+# Detects commercial aircraft operating in or near severe/extreme weather alert
+# zones. NOAA weather alerts with high severity intersected with real-time
+# flight positions identify aircraft at risk from thunderstorms, icing,
+# turbulence, and other meteorological hazards.
+#
+# Data layers: weather_alerts (NOAA) × flights_commercial (ADS-B)
+#              + aviation_weather (SIGMETs) for additional context
+# =============================================================================
+
+schema_version: 1
+name: severe_weather_aviation
+display_name: "Severe Weather Aviation Impact"
+enabled: true
+
+schedule:
+  interval: "120s"
+
+data:
+  layers: [flights_commercial]
+  lookback: "6h"
+  min_records: 1
+  max_records: 30
+  dedup:
+    # NOAA reissues each warning under a fresh weather_external_id, so keying on
+    # that ID defeats dedup (every reissue looks new). Key on the derived
+    # storm_key instead — a stable identity from event + rounded storm location —
+    # and widen the window so reissues of the same storm collapse together.
+    window: "90m"
+    key_fields: ["entity_external_id", "storm_key"]
+  sql: |
+    WITH latest_weather AS (
+      SELECT o.entity_id, o.lat, o.lon, o.ts,
+             ROW_NUMBER() OVER (PARTITION BY o.entity_id ORDER BY o.ts DESC) AS rn
+      FROM observations o
+      JOIN entities e ON e.id = o.entity_id
+      WHERE e.layer_type = 'weather_alerts'
+        -- Recency bound (the temporal-correlation fix): NOAA polls active alerts
+        -- every 5 min and does NOT populate event_time/event_end, so a latest obs
+        -- older than ~1h means the alert is no longer being reported (stale). Without
+        -- this, a 10h-stale alert correlated with a live flight. 1h = generous vs the
+        -- 5-min poll, tight enough to exclude stale alerts.
+        AND o.ts > strftime('%Y-%m-%dT%H:%M:%SZ','now','-1 hours')
+    ),
+    severe_weather AS MATERIALIZED (
+      -- Weather alerts: only ~319 Severe/Extreme — small set.
+      -- MATERIALIZED: force SQLite to compute this filtered set once instead of
+      -- re-evaluating it for every flight in the spatial join (which would scan
+      -- all ~2k weather entities per flight => tens of millions of pairs).
+      SELECT w.id, w.name, w.external_id, w.metadata,
+             o.lat, o.lon, o.ts,
+             COALESCE(json_extract(w.metadata,'$.event'), 'unknown') AS weather_event,
+             COALESCE(json_extract(w.metadata,'$.severity'), 'unknown') AS severity,
+             COALESCE(json_extract(w.metadata,'$.urgency'), 'unknown') AS urgency,
+             COALESCE(json_extract(w.metadata,'$.certainty'), 'unknown') AS certainty,
+             COALESCE(json_extract(w.metadata,'$.area_desc'), 'unknown') AS area_desc,
+             -- Precompute the 100km bounding box once per alert (~319 rows) so the
+             -- spatial join is plain column comparisons, not millions of COS/RADIANS calls.
+             o.lat - 0.9 AS lat_min,
+             o.lat + 0.9 AS lat_max,
+             o.lon - (0.9 / max(COS(RADIANS(o.lat)), 0.01)) AS lon_min,
+             o.lon + (0.9 / max(COS(RADIANS(o.lat)), 0.01)) AS lon_max
+      FROM entities w
+      JOIN latest_weather o ON o.entity_id = w.id AND o.rn = 1
+      WHERE w.layer_type = 'weather_alerts'
+        AND json_extract(w.metadata,'$.severity') IN ('Severe', 'Extreme')
+    ),
+    recent_flights AS (
+      -- Observation-first: ~18K active flights vs 72K total entities.
+      SELECT entity_id, lat, lon, altitude_m, ts
+      FROM (
+        SELECT o.entity_id, o.lat, o.lon, o.altitude_m, o.ts,
+               ROW_NUMBER() OVER (PARTITION BY o.entity_id ORDER BY o.ts DESC) AS rn
+        FROM observations o
+        JOIN entities e ON e.id = o.entity_id AND e.layer_type = 'flights_commercial'
+        -- ADS-B updates every few seconds; a position older than 15 min is stale
+        -- (the aircraft has landed or moved hundreds of km), so only correlate live
+        -- positions with current weather.
+        WHERE o.ts > strftime('%Y-%m-%dT%H:%M:%SZ','now','-15 minutes')
+      )
+      WHERE rn = 1
+    ),
+    affected_flights AS (
+      -- Flights within 100km of severe weather zones.
+      SELECT
+        f.id AS flight_id,
+        f.name AS flight_name,
+        f.external_id AS flight_hex,
+        json_extract(f.metadata,'$.callsign') AS callsign,
+        json_extract(f.metadata,'$.type') AS aircraft_type,
+        rf.lat AS flight_lat, rf.lon AS flight_lon,
+        rf.altitude_m AS flight_alt,
+        rf.ts AS flight_ts,
+        sw.name AS alert_name,
+        sw.external_id AS weather_external_id,
+        sw.lat AS weather_lat,
+        sw.lon AS weather_lon,
+        sw.weather_event,
+        sw.severity,
+        sw.urgency,
+        sw.certainty,
+        sw.area_desc,
+        CAST(ROUND(haversine_km(rf.lat, rf.lon, sw.lat, sw.lon)) AS TEXT) AS distance_km
+      FROM recent_flights rf
+      JOIN entities f ON f.id = rf.entity_id
+      JOIN severe_weather sw ON
+        -- Bounding box pre-filter for 100km using bounds precomputed per alert.
+        rf.lat BETWEEN sw.lat_min AND sw.lat_max
+        AND rf.lon BETWEEN sw.lon_min AND sw.lon_max
+        AND haversine_km(rf.lat, rf.lon, sw.lat, sw.lon) <= 100
+        -- Cross-observation temporal proximity: the flight fix and the weather obs
+        -- must share a <=1h timeslot. Per-side recency bounds already constrain each,
+        -- but this guarantees the correlated pair co-occurs (no current-flight vs
+        -- stale-alert mismatch).
+        AND ABS(julianday(rf.ts) - julianday(sw.ts)) * 24.0 <= 1
+    )
+    SELECT
+      af.flight_id AS entity_id,
+      af.flight_name AS name,
+      af.flight_hex AS external_id,
+      'flights_commercial' AS layer_type,
+      af.flight_lat AS lat, af.flight_lon AS lon,
+      af.flight_alt AS altitude_m,
+      af.flight_ts AS ts,
+      COALESCE(af.callsign, af.flight_name) AS callsign,
+      COALESCE(af.aircraft_type, 'unknown') AS aircraft_type,
+      af.alert_name AS weather_alert,
+      af.weather_event,
+      af.severity AS weather_severity,
+      af.urgency,
+      af.certainty,
+      af.area_desc,
+      af.distance_km,
+      af.weather_external_id,
+      -- Stable storm identity for dedup: NOAA reissues rotate weather_external_id,
+      -- but event + rounded storm centroid stays put across reissues, so the same
+      -- storm collapses to one key even as its alert ID churns.
+      af.weather_event || ':' ||
+        CAST(ROUND(af.weather_lat, 1) AS TEXT) || ',' ||
+        CAST(ROUND(af.weather_lon, 1) AS TEXT) AS storm_key
+    FROM affected_flights af
+    ORDER BY
+      CASE WHEN af.severity = 'Extreme' THEN 0 ELSE 1 END,
+      CAST(af.distance_km AS INTEGER) ASC
+    LIMIT 30
+
+ai:
+  enabled: true
+  operations:
+    - name: weather_aviation_assessment
+      tags: [osint, weather, aviation, safety, cross-layer]
+      prompt: |
+        You are an aviation meteorologist producing safety assessments for active flights near severe weather systems.
+
+        SEVERE WEATHER AVIATION IMPACT: {{.RecordCount}} flights detected within
+        100km of severe/extreme weather alerts (last {{.Lookback}}).
+
+        Flight-to-weather correlation data:
+        {{range .Records}}
+        - FLIGHT: {{index .Metadata "callsign"}} ({{index .Metadata "aircraft_type"}}, ID: {{.ExternalID}})
+          Position: {{.Lat}}, {{.Lon}} | Alt: {{.Altitude}}m
+          ALERT: {{index .Metadata "weather_alert"}} (ref: {{index .Metadata "weather_external_id"}}) — {{index .Metadata "weather_event"}}
+          Severity: {{index .Metadata "weather_severity"}} | Urgency: {{index .Metadata "urgency"}}
+          Area: {{index .Metadata "area_desc"}}
+          Distance: {{index .Metadata "distance_km"}}km
+        {{end}}
+
+        Weather-altitude interaction matrix:
+        - Thunderstorm/Tornado: Dangerous at ALL altitudes. Cumulonimbus tops can reach FL450 (13.7km). Severe turbulence, hail, wind shear even outside the cell.
+        - Winter Storm/Ice Storm: Critical below FL200 (6km) for icing. Approach/departure most dangerous.
+        - Hurricane/Typhoon: Avoid within 200nm. Turbulence extends to FL450+. Eye wall especially dangerous.
+        - Flood/Flash Flood: Ground-level only. Affects departure/arrival airports, NOT en-route flights at altitude. Only a concern if flight is departing/arriving at affected airport.
+        - Extreme Wind/Wind Advisory: Wind shear on approach below 2000ft. Crosswind limits for landing.
+        - Dense Fog: Surface only. Affects CAT I/II/III approach minimums.
+
+        CRITICAL — Determine the flight phase based on altitude:
+        - Ground/taxi: 0m (airport operations affected by all surface weather)
+        - Departure/arrival: 0-3000m (vulnerable to icing, wind shear, thunderstorm cells)
+        - Climb/descent: 3000-8000m (icing zone, embedded thunderstorms)
+        - Cruise: >8000m (generally above weather, except severe thunderstorms and hurricanes)
+
+        A flood warning is IRRELEVANT to a flight cruising at 10km. Say so briefly and move on — do not waste words stating the obvious. Focus analytical effort on genuinely dangerous combinations.
+
+        For low-risk combinations (e.g., ground-level flood + cruise altitude), keep assessment to one sentence. Reserve detailed 2-3 sentence assessments for genuinely dangerous situations.
+
+        For each flight-weather pair, assess:
+        1. Whether the weather hazard affects the flight's current altitude
+        2. Risk of continued flight through/near the weather system
+        3. Diversion recommendation: none/monitor/consider/recommended/immediate
+        4. Impact severity: minimal/moderate/significant/dangerous/critical
+
+        OUTPUT DISCIPLINE — this controls notification usefulness, follow it exactly:
+        - OMIT entirely any flight with no genuine hazard. Do NOT emit "no action",
+          "negligible", "all clear", "monitoring only", or otherwise benign rows.
+          Returning fewer items is correct and expected — only include flights that
+          represent a real safety concern. A typical batch yields just a handful of
+          true threats out of {{.RecordCount}} candidates.
+        - Set "attention" DIRECTLY from this pair's own impact_severity. Never
+          auto-elevate, never round up, never inflate to seem useful. Map:
+            minimal -> info, moderate -> low, significant -> medium,
+            dangerous -> high, critical -> critical.
+        - SEVERITY GATING (do not exceed these ceilings):
+          * Reserve high / critical attention ONLY for pairs where distance_km <= 5
+            OR flight_phase is departure_arrival or climb_descent. A close strike or
+            a flight in a vulnerable phase is where action is warranted.
+          * A flight cruising at 8000-9000m clipping the anvil/outflow of a distant
+            storm (the "anvil" case) is at most info or low — emit it as such (it
+            will be gated out downstream). Do NOT mark anvil-grazing cruise traffic
+            as medium or above just because the parent storm is Extreme.
+        - Genuinely useful threats — e.g. a flight within 5km of a tornado supercell,
+          or climbing/descending through an embedded thunderstorm — SHOULD be
+          surfaced at high/critical. Do not suppress real danger; the goal is to cut
+          duplicate re-fires and soft anvil noise, not to silence true hazards.
+
+        Respond with JSON matching this schema:
+        {{.OutputSchema}}
+
+      output_schema:
+        type: object
+        required: [impacts, summary]
+        properties:
+          summary:
+            type: string
+          impacts:
+            type: array
+            items:
+              type: object
+              required: [entity_external_id, callsign, weather_event, impact_severity, attention, assessment, flight_phase]
+              properties:
+                callsign: { type: string }
+                aircraft_type: { type: string }
+                flight_altitude_m: { type: number }
+                weather_event: { type: string }
+                weather_severity: { type: string }
+                distance_km: { type: number }
+                flight_phase:
+                  type: string
+                  enum: [ground, departure_arrival, climb_descent, cruise]
+                weather_affects_altitude: { type: boolean }
+                impact_severity:
+                  type: string
+                  enum: [minimal, moderate, significant, dangerous, critical]
+                attention:
+                  type: string
+                  enum: [info, low, medium, high, critical]
+                diversion_recommendation:
+                  type: string
+                  enum: [none, monitor, consider, recommended, immediate]
+                assessment: { type: string }
+                entity_external_id: { type: string }
+                weather_external_id: { type: string }
+      max_tokens: 12000
+      temperature: 0.1
+      output:
+        store_insights: true
+        min_attention: "medium"   # noise gate: drop results below this attention
+        insight_type: "weather_aviation_impact"
+        results_path: "impacts"
+        ref_fields:
+          - field: "weather_external_id"
+            layer_type: "weather_alerts"
+        websocket_push: true
+        retention: "168h"

@@ -1,0 +1,239 @@
+# =============================================================================
+# AIRPORT HAZARD DISRUPTION — Aviation Infrastructure vs Natural Hazards
+# =============================================================================
+# Correlates point-precise natural hazards (major earthquakes, GDACS disasters,
+# Extreme weather alerts) with named airports (OurAirports large/medium) to flag
+# facilities facing operational disruption or physical damage.
+#
+# Distinct from severe_weather_aviation / volcanic_aviation_hazard, which assess
+# moving COMMERCIAL AIRCRAFT. This one assesses the fixed AIRPORT itself — runway,
+# tower, terminal — so the impact is named-facility, not in-flight.
+#
+# Hazard sources:
+#   - Earthquakes M5.5+ (last 24h), magnitude-scaled radius (airports are more
+#     robust than cables; floor is higher): shallow M5.5-6 <=80km, M6+ <=180km;
+#     deep (>=100km) only <=50km.
+#   - Disaster alerts (GDACS — cyclones, floods, tsunamis) within 120km.
+#   - Extreme weather alerts (NOAA, severity 'Extreme', last 1h) within 80km.
+# =============================================================================
+
+schema_version: 1
+name: airport_hazard_disruption
+display_name: "Airport Hazard Disruption"
+enabled: true
+
+schedule:
+  interval: "300s"
+
+data:
+  layers: [earthquakes, disaster_alerts, weather_alerts, airports]
+  lookback: "24h"
+  min_records: 1
+  max_records: 30
+  dedup:
+    window: "3h"
+    key_fields: ["hazard_key", "airport_external_id"]
+  sql: |
+    WITH latest_hazard AS (
+      SELECT o.entity_id, o.lat, o.lon, o.altitude_m, o.ts,
+             ROW_NUMBER() OVER (PARTITION BY o.entity_id ORDER BY o.ts DESC) AS rn
+      FROM observations o
+      JOIN entities e ON e.id = o.entity_id
+      WHERE e.layer_type IN ('earthquakes', 'disaster_alerts', 'weather_alerts')
+    ),
+    latest_airport AS (
+      SELECT o.entity_id, o.lat, o.lon,
+             ROW_NUMBER() OVER (PARTITION BY o.entity_id ORDER BY o.ts DESC) AS rn
+      FROM observations o
+      JOIN entities e ON e.id = o.entity_id
+      WHERE e.layer_type = 'airports'
+    ),
+    recent_hazards AS MATERIALIZED (
+      -- MATERIALIZED: compute the hazard set once (otherwise SQLite re-runs this
+      -- UNION once per airport in the spatial join and never finishes in time).
+      -- Major earthquakes M5.5+ in last 24h
+      SELECT e.id, e.name, e.external_id, e.layer_type, e.metadata,
+             o.lat, o.lon, o.altitude_m, o.ts,
+             'earthquake' AS hazard_type,
+             COALESCE(json_extract(e.metadata,'$.magnitude'), json_extract(e.metadata,'$.mag'), '0') AS severity_value,
+             COALESCE(json_extract(e.metadata,'$.depth'), '0') AS depth_km
+      FROM entities e
+      JOIN latest_hazard o ON o.entity_id = e.id AND o.rn = 1
+      WHERE e.layer_type = 'earthquakes'
+        AND o.ts > strftime('%Y-%m-%dT%H:%M:%SZ','now','-24 hours')
+        AND CAST(COALESCE(json_extract(e.metadata,'$.magnitude'), json_extract(e.metadata,'$.mag'), '0') AS REAL) >= 5.5
+      UNION ALL
+      -- Active disaster alerts (GDACS)
+      SELECT e.id, e.name, e.external_id, e.layer_type, e.metadata,
+             o.lat, o.lon, o.altitude_m, o.ts,
+             'disaster' AS hazard_type,
+             COALESCE(json_extract(e.metadata,'$.alertlevel'), 'unknown') AS severity_value,
+             '0' AS depth_km
+      FROM entities e
+      JOIN latest_hazard o ON o.entity_id = e.id AND o.rn = 1
+      WHERE e.layer_type = 'disaster_alerts'
+        AND o.ts > strftime('%Y-%m-%dT%H:%M:%SZ','now','-24 hours')
+      UNION ALL
+      -- Extreme weather alerts (NOAA) — goes stale fast, so a 1h recency bound.
+      SELECT e.id, e.name, e.external_id, e.layer_type, e.metadata,
+             o.lat, o.lon, o.altitude_m, o.ts,
+             'extreme_weather' AS hazard_type,
+             COALESCE(json_extract(e.metadata,'$.severity'), 'unknown') AS severity_value,
+             '0' AS depth_km
+      FROM entities e
+      JOIN latest_hazard o ON o.entity_id = e.id AND o.rn = 1
+      WHERE e.layer_type = 'weather_alerts'
+        AND o.ts > strftime('%Y-%m-%dT%H:%M:%SZ','now','-1 hours')
+        AND json_extract(e.metadata,'$.severity') = 'Extreme'
+    )
+    SELECT
+      h.id AS entity_id,
+      h.name,
+      h.external_id AS external_id,
+      h.layer_type,
+      h.lat, h.lon, h.altitude_m, h.ts,
+      h.hazard_type,
+      h.severity_value,
+      h.depth_km,
+      airport.name AS airport_name,
+      json_extract(airport.metadata,'$.iata') AS airport_iata,
+      json_extract(airport.metadata,'$.airport_type') AS airport_class,
+      json_extract(airport.metadata,'$.country') AS airport_country,
+      airport.external_id AS airport_external_id,
+      h.hazard_type || ':' || CAST(ROUND(h.lat,1) AS TEXT) || ',' || CAST(ROUND(h.lon,1) AS TEXT) AS hazard_key,
+      CAST(ROUND(haversine_km(h.lat, h.lon, o_airport.lat, o_airport.lon)) AS TEXT) AS distance_km
+    FROM recent_hazards h
+    JOIN entities airport ON airport.layer_type = 'airports'
+    JOIN latest_airport o_airport ON o_airport.entity_id = airport.id AND o_airport.rn = 1
+    -- bbox prefilter at the widest admitted radius (180km) before exact haversine.
+    WHERE o_airport.lat BETWEEN h.lat-(180/111.32) AND h.lat+(180/111.32)
+      AND o_airport.lon BETWEEN h.lon-(180/(111.32*max(COS(RADIANS(h.lat)),0.01))) AND h.lon+(180/(111.32*max(COS(RADIANS(h.lat)),0.01)))
+      AND CASE
+        -- Deep M5.5+ (>=100km depth): attenuated; admit only <=50km.
+        WHEN h.hazard_type = 'earthquake' AND CAST(h.depth_km AS REAL) >= 100
+          THEN haversine_km(h.lat, h.lon, o_airport.lat, o_airport.lon) <= 50
+        -- Shallow M5.5+ (<70km depth): M6+ <=180km, M5.5-6 <=80km.
+        WHEN h.hazard_type = 'earthquake' AND CAST(h.depth_km AS REAL) < 70 THEN
+          CASE
+            WHEN CAST(h.severity_value AS REAL) >= 6.0
+              THEN haversine_km(h.lat, h.lon, o_airport.lat, o_airport.lon) <= 180
+            ELSE haversine_km(h.lat, h.lon, o_airport.lat, o_airport.lon) <= 80
+          END
+        -- Intermediate-depth (70-100km) earthquakes excluded.
+        WHEN h.hazard_type = 'earthquake' THEN 0
+        -- Extreme weather: <=80km of the alert centroid.
+        WHEN h.hazard_type = 'extreme_weather'
+          THEN haversine_km(h.lat, h.lon, o_airport.lat, o_airport.lon) <= 80
+        -- Disasters (cyclone/flood/tsunami): <=120km.
+        ELSE haversine_km(h.lat, h.lon, o_airport.lat, o_airport.lon) <= 120
+      END
+    ORDER BY
+      CASE WHEN h.hazard_type = 'earthquake' THEN CAST(h.severity_value AS REAL) ELSE 0 END DESC,
+      haversine_km(h.lat, h.lon, o_airport.lat, o_airport.lon) ASC
+    LIMIT 30
+
+ai:
+  enabled: true
+  operations:
+    - name: airport_disruption_analysis
+      tags: [osint, infrastructure, aviation, airport, earthquake, disaster, weather, cross-layer]
+      prompt: |
+        You are an aviation operations analyst assessing disruption risk to airports from natural hazards.
+
+        AIRPORT HAZARD DISRUPTION: {{.RecordCount}} hazards detected near airports
+        (last {{.Lookback}}). Hazard types: earthquake, disaster (GDACS),
+        extreme_weather (NOAA).
+
+        IMPORTANT: these are FIXED AIRPORTS (runway/tower/terminal), not aircraft in
+        flight. Assess facility-level impact: closures, diversions, ground stops.
+
+        DAMAGE / DISRUPTION GUIDANCE:
+        - Earthquake M5.5-6 <80km: runway/taxiway cracking, tower evacuation, possible closure.
+        - Earthquake M6+ <180km: structural damage potential; major hubs may close for inspection.
+        - Shallow quakes (<70km depth) cause far more surface damage than deep events.
+        - Disaster (cyclone/flood/tsunami) <120km: flooding of low-lying fields, wind closures, coastal tsunami inundation.
+        - Extreme weather <80km: ground stops, de-icing/wind limits, temporary closures.
+        - A large_airport hub closure cascades into network-wide delays; a medium_airport closure is more localized.
+
+        Hazard-to-airport proximity data:
+        {{range .Records}}
+        - HAZARD: {{.EntityName}} ({{index .Metadata "hazard_type"}}, severity: {{index .Metadata "severity_value"}}, ID: {{.ExternalID}}, layer: {{.LayerType}})
+          {{if index .Metadata "depth_km"}}Depth: {{index .Metadata "depth_km"}}km | {{end}}Position: {{.Lat}}, {{.Lon}}
+          THREATENED AIRPORT: {{index .Metadata "airport_name"}} (IATA: {{index .Metadata "airport_iata"}}, class: {{index .Metadata "airport_class"}}, country: {{index .Metadata "airport_country"}}, ref: {{index .Metadata "airport_external_id"}})
+          Distance: {{index .Metadata "distance_km"}}km
+        {{end}}
+
+        For each hazard-airport pair, assess:
+        1. Disruption probability (closure / ground stop / diversion) calibrated to distance, magnitude, and airport class.
+        2. Physical damage probability to the facility.
+        3. Network impact — hub vs regional.
+        4. Recommended action — no_action, monitor, advise_operator, or expect_closure.
+        5. Overall threat level: low/moderate/elevated/high/critical.
+        6. disruption_assessment MUST be 2-3 sentences on operational impact.
+        7. attention — set DIRECTLY from threat_level (do NOT auto-elevate):
+           low -> low, moderate -> medium, elevated -> medium, high -> high, critical -> critical.
+           (Use "info" only for purely informational rows you choose to keep.)
+
+        OMIT NON-THREATS — the core usefulness requirement. Return FEWER items rather
+        than benign rows. DO NOT include a pair when ANY of the following holds:
+        - recommended_action would be "no_action"
+        - disruption probability is negligible
+        - threat_level is "low" with no realistic disruption pathway
+        - the row duplicates another pair (the SAME physical quake may arrive under
+          both EMSC and USGS ids — report it ONCE; drop the duplicate)
+        An empty "threats" array is a valid, expected response when nothing is actionable.
+
+        ENTITY IDENTITY (required): in each threat object set entity_external_id to
+        THIS pair's HAZARD ID and entity_layer_type to THIS pair's HAZARD layer (the
+        "ID:" and "layer:" shown for the hazard) — NOT the airport. Copy verbatim.
+
+        Respond with JSON matching this schema:
+        {{.OutputSchema}}
+
+      output_schema:
+        type: object
+        required: [threats, summary]
+        properties:
+          summary:
+            type: string
+          threats:
+            type: array
+            items:
+              type: object
+              required: [entity_external_id, entity_layer_type, hazard_name, airport_name, threat_level, attention, disruption_probability, disruption_assessment, recommended_action]
+              properties:
+                hazard_name: { type: string }
+                hazard_type: { type: string }
+                airport_name: { type: string }
+                airport_iata: { type: string }
+                airport_class: { type: string }
+                distance_km: { type: number }
+                threat_level:
+                  type: string
+                  enum: [low, moderate, elevated, high, critical]
+                attention:
+                  type: string
+                  enum: [info, low, medium, high, critical]
+                disruption_probability: { type: string }
+                damage_probability: { type: string }
+                disruption_assessment: { type: string }
+                recommended_action:
+                  type: string
+                  enum: [no_action, monitor, advise_operator, expect_closure]
+                entity_external_id: { type: string }
+                entity_layer_type:
+                  type: string
+                  enum: [earthquakes, disaster_alerts, weather_alerts]
+                airport_external_id: { type: string }
+      max_tokens: 12000
+      temperature: 0.1
+      output:
+        store_insights: true
+        min_attention: "medium"
+        insight_type: "airport_hazard"
+        results_path: "threats"
+        websocket_push: true
+        retention: "336h"
+        ref_fields:
+          - field: "airport_external_id"
+            layer_type: "airports"

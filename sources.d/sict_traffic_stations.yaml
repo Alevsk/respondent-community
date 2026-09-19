@@ -1,0 +1,138 @@
+# sources.d/sict_traffic_stations.yaml
+# SICT Mexico road traffic counting stations
+# TDPA = Tránsito Diario Promedio Anual (annual average daily traffic count)
+# Attribution: Source: github.com/iChocko/Datos-Viales-SICT (SICT)
+# Auth: None (public GeoJSON via GitHub raw)
+# Format: GeoJSON FeatureCollection with Point features
+#
+# Static infrastructure overlay showing ~12,248 road traffic counting
+# stations across Mexico. Each feature includes TDPA and vehicle-type
+# breakdown percentages for the reference year 2024.
+schema_version: 1
+
+name: sict_traffic_stations
+labels:
+  category: infrastructure
+  priority: low
+source_type: sict_traffic_stations
+layer_type: traffic_stations
+display_name: "Traffic Stations (Mexico)"
+# Layer label shown in the UI layers panel (overrides the title-cased layer_type
+# "Traffic Stations", which would otherwise drop the country qualifier).
+layer_display_name: "Traffic Stations (Mexico)"
+
+enabled: true
+
+transport:
+  type: http_poll
+  url: "https://raw.githubusercontent.com/iChocko/Datos-Viales-SICT/main/geodata/geojson/light/u1_estaciones.geojson"
+  method: GET
+  headers:
+    Accept: "application/json"
+  timeout: "30s"
+  interval: "604800s" # 7 days — static annual traffic census data
+  max_response_bytes: 20971520  # 20MB
+  retry:
+    max_attempts: 3
+    backoff: "exponential"
+    initial_delay: "2s"
+    max_delay: "30s"
+
+parser:
+  format: geojson
+  records_path: "features"
+  max_records: 15000
+
+# Filter: require a non-empty station_id and valid geometry coordinates
+filter: >
+  has(record.properties) && has(record.properties.station_id)
+  && record.properties.station_id != ""
+  && has(record.geometry) && has(record.geometry.coordinates)
+
+entity:
+  external_id: >
+    "sict_station_" + record.properties.station_id
+  name: >
+    has(record.properties.carretera) && record.properties.carretera != ""
+      ? record.properties.carretera
+      : record.properties.station_id
+  metadata:
+    station_id: >
+      record.properties.station_id
+    highway: >
+      has(record.properties.carretera) ? record.properties.carretera : ""
+    route: >
+      has(record.properties.ruta) ? record.properties.ruta : ""
+    state: >
+      has(record.properties.state_slug) ? record.properties.state_slug : ""
+    # coerce_double is null-safe: GeoJSON properties are sometimes JSON null, and
+    # has() is true for a present-but-null key, so string(record.properties.X) would
+    # error on those rows. coerce_double(x, 0.0) handles null/absent → 0.0.
+    km: >
+      string(coerce_double(record.properties.km, 0.0))
+    tdpa: >
+      string(coerce_double(record.properties.tdpa_2024, 0.0))
+    pct_autos: >
+      string(coerce_double(record.properties.pct_A, 0.0))
+    pct_buses: >
+      string(coerce_double(record.properties.pct_B, 0.0))
+    # Sum of heavy-vehicle classes (trucks + articulated) = freight share, rounded to
+    # 1 decimal (int(x*10 + 0.5)/10) to avoid float-sum artifacts like 3.4000000000004.
+    heavy_vehicle_pct: >
+      string(double(int((coerce_double(record.properties.pct_C2,0.0) + coerce_double(record.properties.pct_C3,0.0) + coerce_double(record.properties.pct_T3S2,0.0) + coerce_double(record.properties.pct_T3S3,0.0) + coerce_double(record.properties.pct_T3S2R4,0.0)) * 10.0 + 0.5)) / 10.0)
+
+observation:
+  latitude: >
+    record.geometry.coordinates[1]
+  longitude: >
+    record.geometry.coordinates[0]
+  altitude: "0.0"
+  timestamp: >
+    now()
+  velocity: {}
+  metadata:
+    tdpa: >
+      string(coerce_double(record.properties.tdpa_2024, 0.0))
+  content_hash: >
+    record.properties.station_id + "_" + string(coerce_double(record.properties.tdpa_2024, 0.0))
+
+recording:
+  mode: dedupe
+
+cache:
+  ttl: "86400s"
+
+display:
+  icon:
+    shape: radar
+    rotatable: false
+    interpolation: false
+    scale: 1.0
+  trail:
+    color: "#ff9e00"
+    width: 1.5
+    opacity: 0.7
+  style:
+    color: "#ff9e00"
+    point_size: 6
+  field_renderers:
+    - keys: [highway]
+      label: "HIGHWAY"
+      format:
+        type: string
+      priority: 0
+    - keys: [route]
+      label: "ROUTE"
+      format:
+        type: string
+      priority: 1
+    - keys: [tdpa]
+      label: "TDPA 2024"
+      format:
+        type: number
+      priority: 2
+    - keys: [heavy_vehicle_pct]
+      label: "HEAVY VEHICLES %"
+      format:
+        type: number
+      priority: 3

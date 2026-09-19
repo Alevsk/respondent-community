@@ -1,0 +1,131 @@
+# --- Secrets (MUST stay first) ---
+.env
+.env.local
+.env.*.local
+*.env
+!.env.example
+
+# --- Go build artifacts ---
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+*.coverprofile
+vendor/
+
+# --- Frontend build artifacts ---
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# --- Runtime data (SQLite database files + bind-mount dir) ---
+data/
+respondent.db
+respondent*.db
+respondent*.db-shm
+respondent*.db-wal
+*.sqlite
+*.sqlite3
+*.sqlite-shm
+*.sqlite-wal
+*.db-shm
+*.db-wal
+*.db-journal
+
+# --- Logs ---
+*.log
+logs/
+
+# --- Hugo build output (developer-documentation/) ---
+developer-documentation/public/
+developer-documentation/resources/_gen/
+developer-documentation/.hugo_build.lock
+public/
+resources/_gen/
+.hugo_build.lock
+
+# --- E2E test artifacts ---
+.e2e/
+frontend/apps/earth/e2e/playwright-report/
+frontend/apps/earth/e2e/test-results/
+test-results/
+
+# --- Coverage ---
+coverage/
+*.lcov
+
+# --- Certificates and keys ---
+*.pem
+*.key
+*.crt
+*.p12
+
+# --- macOS ---
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# --- Linux ---
+*~
+.fuse_hidden*
+.Trash-*
+.nfs*
+
+# --- Windows ---
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# --- Editors / IDEs ---
+.idea/
+.vscode/
+*.swp
+*.swo
+*.swn
+*.bak
+*.tmp
+.netrwhist
+Session.vim
+.vim/
+.nvim/
+
+# --- AI agent directories ---
+.claude/
+.gemini/
+.worktrees/
+.playwright-mcp/
+.superpowers/
+
+# --- Cache & temp ---
+.cache/
+.parcel-cache/
+.turbo/
+tmp/
+temp/
+
+# --- Python (tooling) ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# --- Compose environment files (deployment variants) ---
+deployments/compose/.env.dev
+deployments/compose/.env.native
+deployments/compose/.env.platform
+
+# --- Stray root-level community server binary (build output belongs in bin/) ---
+/community

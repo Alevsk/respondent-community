@@ -1,0 +1,27 @@
+schema_version: 1
+name: slack_alerts
+type: slack
+enabled: false
+
+connection:
+  webhook_url: "${SLACK_WEBHOOK_URL}"
+  channel: "#geo-alerts"
+
+ai:
+  enabled: true
+  operations:
+    - name: slack_alert_formatter
+      tags: [generation, delivery, slack]
+      prompt: |
+        Format this alert for Slack using markdown.
+        Keep it concise (< 500 chars). Use emoji for severity.
+        Alert data: {{.Entity.MetadataJSON}}
+      output_schema:
+        type: object
+        required: [text]
+        properties:
+          text:
+            type: string
+            maxLength: 500
+          emoji:
+            type: string

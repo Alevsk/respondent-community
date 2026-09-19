@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+package respondent.v1;
+
+option go_package = "github.com/Alevsk/respondent/gen/go/respondent/v1;respondentv1";
+
+// Common messages and types shared across services
+
+message GeoPoint {
+  double lat = 1;
+  double lon = 2;
+  double alt_m = 3;
+}
+
+message Camera {
+  GeoPoint position = 1;
+  double heading = 2;
+  double pitch = 3;
+  double roll = 4;
+  double range = 5;
+}
+
+// AttentionLevel indicates the severity or importance of an AI insight.
+enum AttentionLevel {
+  ATTENTION_LEVEL_UNSPECIFIED = 0;
+  ATTENTION_LEVEL_INFO = 1;
+  ATTENTION_LEVEL_LOW = 2;
+  ATTENTION_LEVEL_MEDIUM = 3;
+  ATTENTION_LEVEL_HIGH = 4;
+  ATTENTION_LEVEL_CRITICAL = 5;
+}

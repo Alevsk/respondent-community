@@ -1,0 +1,14 @@
+# Generated code — owned by codegen, never hand- or prettier-formatted
+**/api/generated/
+
+# Build & tooling output
+**/dist/
+**/coverage/
+**/playwright-report/
+**/test-results/
+
+# Embedded filesystem output
+embedfs/
+
+# Node modules
+node_modules/

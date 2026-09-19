@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package respondent.v1;
+
+option go_package = "github.com/Alevsk/respondent/gen/go/respondent/v1;respondentv1";
+
+import "entities.proto";
+
+// StreamEntitiesRequest initiates a real-time entity stream
+message StreamEntitiesRequest {
+  repeated string layer_ids = 1; // Specific layers to stream, empty for all
+}
+
+// StreamEntitiesResponse is a batch of entity updates
+message StreamEntitiesResponse {
+  string layer_id = 1;
+  repeated EntityUpdate updates = 2;
+}
+
+// EntityStreamService provides real-time entity streaming
+// Note: This is implemented via WebSocket (ws://HOST/v1/ws) for browser compatibility
+// The gRPC server streaming is available for native clients
+service EntityStreamService {
+  // Stream entity updates (server streaming)
+  // For browser clients, use WebSocket at /v1/ws instead
+  rpc StreamEntities(StreamEntitiesRequest) returns (stream StreamEntitiesResponse);
+}

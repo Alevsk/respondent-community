@@ -1,0 +1,9 @@
+services:
+  docs:
+    image: docker.io/hugomods/hugo:0.145.0
+    working_dir: /app
+    command: ["hugo", "server", "--buildDrafts", "--port", "1313", "--bind", "0.0.0.0"]
+    volumes:
+      - .:/app
+    ports:
+      - "${DOCS_PORT:-1313}:1313"

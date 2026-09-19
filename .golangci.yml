@@ -1,0 +1,29 @@
+# .golangci.yml
+version: "2"
+
+linters:
+  enable:
+    - govet
+    - errcheck
+    - staticcheck
+    - unused
+    - ineffassign
+    - gocritic
+
+formatters:
+  enable:
+    - goimports
+    - gofmt
+
+formatters-settings:
+  goimports:
+    local-prefixes:
+      - github.com/Alevsk/respondent
+
+run:
+  timeout: 5m
+
+issues:
+  exclude-dirs:
+    - gen
+    - vendor

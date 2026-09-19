@@ -1,0 +1,4 @@
+{{ $name := .Get "title" | default (.Get 0) | default "Tab" }}
+<div class="code-tab-content" data-tab="{{ $name }}">
+{{ .Inner | markdownify }}
+</div>

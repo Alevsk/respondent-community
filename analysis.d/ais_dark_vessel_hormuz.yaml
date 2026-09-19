@@ -1,0 +1,171 @@
+# =============================================================================
+# AIS DARK-VESSEL WATCH — Strait of Hormuz / Persian Gulf
+# =============================================================================
+# Flags vessels last seen inside the Persian Gulf / Strait of Hormuz / Gulf of
+# Oman whose AIS went quiet — i.e. they were reporting, then stopped. "Going
+# dark" near Iran is a known sanctions-evasion / dark-fleet signal. This is a
+# DERIVED analysis over the AIS we already ingest (the `ships` layer); it needs
+# no new data source.
+#
+# COVERAGE CAVEAT (read before trusting a "dark" flag): our AIS is community
+# TERRESTRIAL (aisstream.io) — a vessel can also disappear simply by sailing out
+# of receiver range, not only by switching AIS off. So a gap here is a CANDIDATE
+# signal, not proof of intent. The AI step is told to weigh nav status (an
+# anchored/moored vessel that stops updating is benign) and to OMIT the benign
+# cases. Satellite-AIS / SAR (e.g. Global Fishing Watch) is what disambiguates a
+# true dark transit — correlate there when available.
+#
+# TS NOTE: a dark vessel's LAST position is by definition 1-24h old. We emit a
+# FRESH ts (strftime now) so the engine's post-SQL lookback filter does not
+# starve the result (same fix as military_conflict_proximity); the real
+# last-seen time + gap are carried in metadata. The marker sits at the vessel's
+# last known position.
+# =============================================================================
+
+schema_version: 1
+name: ais_dark_vessel_hormuz
+display_name: "AIS Dark-Vessel Watch (Hormuz)"
+enabled: true
+
+schedule:
+  interval: "300s"
+
+data:
+  layers: [ships]
+  lookback: "48h"
+  min_records: 1
+  max_records: 40
+  dedup:
+    # One dark-event notification per vessel per 12h, not every 300s tick while
+    # it stays quiet. Longer than the schedule interval so it actually suppresses.
+    window: "12h"
+    key_fields: ["entity_external_id"]
+  sql: |
+    -- Latest position per vessel seen in the last 48h (bounds the scan).
+    WITH latest_ship AS (
+      SELECT o.entity_id, o.lat, o.lon, o.altitude_m, o.ts, o.metadata, o.velocity,
+        ROW_NUMBER() OVER (PARTITION BY o.entity_id ORDER BY o.ts DESC) AS rn
+      FROM observations o
+      JOIN entities e ON e.id = o.entity_id
+      WHERE e.layer_type = 'ships'
+        AND o.ts > strftime('%Y-%m-%dT%H:%M:%SZ','now','-48 hours')
+    )
+    SELECT
+      s.id AS entity_id,
+      s.external_id,
+      s.name,
+      'ships' AS layer_type,
+      o.lat,
+      o.lon,
+      o.altitude_m,
+      -- Fresh ts so the post-SQL lookback gate keeps these (the real gap is below).
+      strftime('%Y-%m-%dT%H:%M:%SZ','now') AS ts,
+      json_extract(s.metadata,'$.mmsi') AS mmsi,
+      json_extract(s.metadata,'$.ship_name') AS ship_name,
+      json_extract(s.metadata,'$.nav_status') AS nav_status,
+      json_extract(o.metadata,'$.sog_knots') AS last_sog_knots,
+      json_extract(o.metadata,'$.cog') AS last_cog,
+      strftime('%Y-%m-%dT%H:%M:%SZ', o.ts) AS last_seen_ts,
+      CAST(ROUND((julianday('now') - julianday(o.ts)) * 24, 1) AS TEXT) AS hours_since_last_seen
+    FROM entities s
+    JOIN latest_ship o ON o.entity_id = s.id AND o.rn = 1
+    WHERE s.layer_type = 'ships'
+      -- Last known position inside the Persian Gulf / Strait of Hormuz / Gulf of Oman.
+      AND o.lat BETWEEN 23.0 AND 30.5
+      AND o.lon BETWEEN 47.0 AND 62.0
+      -- Went quiet: last report 1-24h ago. Vessels actively transiting report
+      -- continuously (<1h); >24h is "departed/stale", not a fresh dark signal.
+      AND o.ts <= strftime('%Y-%m-%dT%H:%M:%SZ','now','-1 hours')
+      AND o.ts > strftime('%Y-%m-%dT%H:%M:%SZ','now','-24 hours')
+    ORDER BY o.ts ASC
+    LIMIT 40
+
+ai:
+  enabled: true
+  operations:
+    - name: dark_vessel_assessment
+      tags: [osint, maritime, ais, dark-fleet, hormuz, sanctions]
+      prompt: |
+        You are a maritime intelligence analyst tracking AIS "dark" activity in the
+        Persian Gulf / Strait of Hormuz / Gulf of Oman — a chokepoint where vessels
+        (notably sanctioned-oil tankers) disable AIS to evade tracking.
+
+        DARK-VESSEL CANDIDATES: {{.RecordCount}} vessels last seen inside the
+        Gulf/Hormuz/Gulf-of-Oman box whose AIS went quiet (last report 1-24h ago).
+
+        COVERAGE CAVEAT (critical for calibration): the source is community
+        TERRESTRIAL AIS, so a vessel can vanish simply by sailing out of receiver
+        range — not only by switching AIS off. Treat a gap as a CANDIDATE, not proof.
+        Weight the nav status: an anchored/moored vessel that stops updating is
+        normal and should be OMITTED; an underway vessel (was making way / nonzero
+        speed) that goes quiet mid-strait is the meaningful signal.
+
+        Dark-vessel candidates:
+        {{range .Records}}
+        - {{.EntityName}} (MMSI: {{.ExternalID}}, nav_status: {{index .Metadata "nav_status"}})
+          Last position: {{.Lat}}, {{.Lon}} | last speed: {{index .Metadata "last_sog_knots"}} kn, course {{index .Metadata "last_cog"}}
+          Last seen: {{index .Metadata "last_seen_ts"}} ({{index .Metadata "hours_since_last_seen"}}h ago)
+        {{end}}
+
+        AIS nav_status reference: 0=under way using engine, 1=at anchor, 2=not under
+        command, 5=moored, 8=under way sailing, 15=undefined.
+
+        For each candidate assess:
+        1. Likelihood it is an intentional AIS shut-off vs out-of-range/benign, given
+           nav status, last speed, and position relative to the strait.
+        2. Operational significance.
+        3. attention — set DIRECTLY from significance (do NOT auto-elevate):
+           routine -> info (OMIT), notable -> medium, significant -> high, critical -> critical.
+        4. recommended_action: no_action, monitor, correlate_satellite, escalate.
+
+        USEFULNESS RULES (follow exactly):
+        - OMIT non-threats. Do NOT emit anchored/moored vessels, vessels with a benign
+          out-of-range explanation, or anything you would rate routine / no_action.
+          Return FEWER items. An EMPTY assessments array is the correct, expected
+          output when nothing is suspicious — it is not an error.
+        - Reserve high/critical for an underway vessel going dark mid-strait or a
+          cluster of simultaneous shut-offs, not a single ambiguous gap.
+
+        Respond with JSON matching this schema:
+        {{.OutputSchema}}
+
+      output_schema:
+        type: object
+        required: [assessments, summary]
+        properties:
+          summary:
+            type: string
+          assessments:
+            type: array
+            items:
+              type: object
+              required: [entity_external_id, vessel_name, likelihood, significance, attention, assessment, recommended_action]
+              properties:
+                entity_external_id: { type: string }
+                vessel_name: { type: string }
+                last_seen_hours: { type: number }
+                likelihood:
+                  type: string
+                  enum: [likely_out_of_range, ambiguous, likely_intentional]
+                significance:
+                  type: string
+                  enum: [routine, notable, significant, critical]
+                attention:
+                  type: string
+                  enum: [info, low, medium, high, critical]
+                assessment: { type: string }
+                recommended_action:
+                  type: string
+                  enum: [no_action, monitor, correlate_satellite, escalate]
+      max_tokens: 12000
+      temperature: 0.1
+      output:
+        store_insights: true
+        min_attention: "medium"   # noise gate: drop results below this attention
+        insight_type: "maritime_dark_vessel"
+        results_path: "assessments"
+        ref_fields:
+          - field: "entity_external_id"
+            layer_type: "ships"
+        websocket_push: true
+        retention: "336h"

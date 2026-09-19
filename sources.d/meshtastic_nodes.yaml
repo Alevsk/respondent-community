@@ -1,0 +1,116 @@
+# sources.d/meshtastic_nodes.yaml
+# Meshtastic — LoRa Mesh Network Node Positions via MQTT
+# Source: https://meshtastic.org/
+# Auth: Public default credentials (meshdev / large4cats)
+# Format: JSON per MQTT message — one position report per message
+#
+# Connects to the public Meshtastic MQTT broker to receive position reports
+# from LoRa mesh nodes worldwide. Positions are imprecise (~1.5km accuracy,
+# 10-16 bits precision) and sparse (~hourly per node).
+schema_version: 2
+
+name: meshtastic_nodes
+labels:
+  category: communications
+  priority: medium
+source_type: meshtastic_nodes
+layer_type: meshtastic
+display_name: "Meshtastic LoRa Mesh Nodes"
+enabled: true
+
+transport:
+  type: mqtt
+  timeout: "30s"
+  mqtt:
+    broker: "tcp://mqtt.meshtastic.org:1883"
+    topics:
+      - topic: "msh/+/2/json/#"
+    client_id: "respondent_meshtastic"
+    qos: 0
+    clean_session: true
+    username: "MESHTASTIC_USER"
+    password: "MESHTASTIC_PASS"
+  batching:
+    mode: window
+    window: "10s"
+  reconnect:
+    max_attempts: 0
+    backoff: exponential
+    initial_delay: "5s"
+    max_delay: "60s"
+
+parser:
+  format: json
+  records_path: ""
+
+# Only process position messages with valid (non-zero) coordinates.
+filter: >
+  record.type == "position" && has(record.payload) && has(record.payload.latitude_i) && has(record.payload.longitude_i) && record.payload.latitude_i != 0 && record.payload.longitude_i != 0
+
+entity:
+  external_id: >
+    record.sender
+  name: >
+    record.sender
+  metadata:
+    node_id: >
+      record.sender
+    channel: >
+      string(record.channel)
+
+observation:
+  latitude: >
+    double(record.payload.latitude_i) * 1e-7
+  longitude: >
+    double(record.payload.longitude_i) * 1e-7
+  altitude: >
+    has(record.payload.altitude) ? double(record.payload.altitude) : 0.0
+  timestamp: >
+    has(record.payload.time) && record.payload.time != 0 ? unix_s(record.payload.time) : now()
+  metadata:
+    node_id: >
+      record.sender
+    channel: >
+      string(record.channel)
+
+recording:
+  mode: append
+
+cache:
+  ttl: "7200s"
+
+display:
+  icon:
+    shape: radio
+    rotatable: false
+    interpolation: false
+    scale: 1.0
+  trail:
+    color: "#9b59b6"
+    width: 1.0
+    opacity: 0.6
+  style:
+    color: "#9b59b6"
+    point_size: 6
+  field_renderers:
+    - keys: [node_id]
+      label: "NODE ID"
+      format:
+        type: string
+      priority: 0
+    - keys: [altitude]
+      label: "ALTITUDE"
+      format:
+        type: float
+        precision: 0
+        suffix: " m"
+      priority: 1
+    - keys: [channel]
+      label: "CHANNEL"
+      format:
+        type: integer
+      priority: 2
+
+history:
+  max_lookback: "168h"
+  max_range_span: "48h"

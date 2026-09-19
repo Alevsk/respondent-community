@@ -1,0 +1,40 @@
+# =============================================================================
+# Respondent Community Edition
+# =============================================================================
+#
+# Single static binary with embedded Cesium globe frontend.
+# No external dependencies (Postgres, NATS, Valkey) required.
+#
+# Usage:
+#   docker compose up -d
+#
+# Ports:
+#   http://localhost:8090   — HTTP API + embedded UI
+#   ws://localhost:8092     — WebSocket (real-time entity streaming)
+#
+# =============================================================================
+
+name: respondent
+
+services:
+  community:
+    container_name: respondent-community
+    image: alevsk/respondent-community:latest
+    command: ["serve", "--config", "/etc/respondent/respondent.yaml"]
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - ./respondent.yaml:/etc/respondent/respondent.yaml:ro
+      - ./sources.d:/sources.d:ro
+      - ./analysis.d:/analysis.d:ro
+      - ./data:/data
+    ports:
+      - "127.0.0.1:8090:8090"
+      - "127.0.0.1:8092:8092"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8090/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5

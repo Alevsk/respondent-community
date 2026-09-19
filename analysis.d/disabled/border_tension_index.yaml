@@ -1,0 +1,56 @@
+# =============================================================================
+# BORDER TENSION INDEX — Placeholder
+# =============================================================================
+# TODO: Correlate border crossing wait times with nearby conflict events,
+# military activity, and internet outages to detect escalating tensions
+# or mass displacement events.
+#
+# Data layers: border_crossings (CBP, 81 entities) × conflict_events ×
+#              flights_military × internet_outages
+# Metadata available: [border, crossing_name, hours]
+#
+# Intelligence value:
+#   - Sudden increase in border wait times near conflict zones = refugee surge
+#   - Military flights near border crossings = escalation indicator
+#   - Internet outages near borders = government censorship/blackout
+#   - Cross-referencing CBP data with ACLED conflict events gives a unique
+#     signal that pure conflict analysis misses
+#
+# Potential SQL approach:
+#   border_crossings × conflict_events via ST_DWithin(500km)
+#   LEFT JOIN flights_military via ST_DWithin(200km)
+#   LEFT JOIN internet_outages via ST_DWithin(300km)
+#   Composite scoring similar to geopolitical_hotspot_index
+#
+# Note: CBP data is US-only (81 crossings). For global coverage, would need
+# additional border data sources.
+# =============================================================================
+
+schema_version: 1
+name: border_tension_index
+display_name: "Border Tension Index"
+enabled: false
+
+schedule:
+  interval: "300s"
+
+data:
+  lookback: "24h"
+  min_records: 1
+  sql: "SELECT 1 WHERE false"
+
+ai:
+  enabled: true
+  operations:
+    - name: placeholder
+      tags: [border, tension, migration, conflict, placeholder]
+      prompt: "placeholder"
+      output_schema:
+        type: object
+        required: [results]
+        properties:
+          results: { type: array, items: { type: object } }
+      output:
+        store_insights: true
+        insight_type: "border_tension"
+        results_path: "results"

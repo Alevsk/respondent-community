@@ -1,0 +1,129 @@
+# deployments/venezuela/sources.d/venezuela_relief_centers.yaml
+# Aid collection centers ("acopios") for the 2026 Venezuela earthquake — places
+# accepting donations (water, food, medical supplies, clothing). Sourced from
+# SismoVenezuela, which aggregates centers announced on social media.
+#
+# Endpoint: GET /api/relief-centers  (JSON array, ~110 centers, has lat/lng)
+# Public, no auth.
+schema_version: 2
+
+name: venezuela_relief_centers
+labels:
+  category: humanitarian
+  priority: high
+
+source_type: venezuela_relief_centers
+layer_type: venezuela_relief_centers
+display_name: "VE Relief Centers (Acopios)"
+enabled: true
+
+transport:
+  type: http_poll
+  url: "https://venezuela-earthquake-map.vercel.app/api/relief-centers"
+  method: GET
+  headers:
+    Accept: "application/json"
+    User-Agent: "respondent-community/1.0 (https://github.com/alevsk/respondent-community)"
+  timeout: "20s"
+  interval: "600s"   # 10 min — centers change slowly
+  max_response_bytes: 10485760
+  retry:
+    max_attempts: 3
+    backoff: "exponential"
+    initial_delay: "5s"
+    max_delay: "60s"
+
+# Response is a bare JSON array — records_path is empty.
+parser:
+  format: json
+  records_path: ""
+  max_records: 2000
+
+filter: >
+  has(record.id)
+  && has(record.lat) && record.lat != null
+  && has(record.lng) && record.lng != null
+  && double(record.lat) != 0.0 && double(record.lng) != 0.0
+
+entity:
+  external_id: >
+    string(record.id)
+  name: >
+    has(record.name) && record.name != null ? string(record.name) : "Relief center"
+  metadata:
+    state: >
+      has(record.state) && record.state != null ? string(record.state) : ""
+    address: >
+      has(record.address) && record.address != null ? string(record.address) : ""
+    accepted_items: >
+      has(record.accepted_items) && record.accepted_items != null
+        ? string(record.accepted_items) : ""
+    source_name: >
+      has(record.source_name) && record.source_name != null ? string(record.source_name) : ""
+    source_url: >
+      has(record.source_url) && record.source_url != null ? string(record.source_url) : ""
+
+observation:
+  latitude: >
+    double(record.lat)
+  longitude: >
+    double(record.lng)
+  altitude: "0.0"
+  timestamp: >
+    has(record.scraped_at) && record.scraped_at != null
+      ? parse_iso8601(string(record.scraped_at)) : now()
+  velocity: {}
+  metadata:
+    state: >
+      has(record.state) && record.state != null ? string(record.state) : ""
+  # Re-record only when location/items change (near-static directory).
+  content_hash: >
+    string(record.id)
+    + "_" + (has(record.address) && record.address != null ? string(record.address) : "")
+    + "_" + (has(record.accepted_items) && record.accepted_items != null ? string(record.accepted_items) : "")
+
+recording:
+  mode: dedupe
+
+cache:
+  ttl: "1800s"   # 30 min
+
+display:
+  icon:
+    shape: warehouse
+    rotatable: false
+    interpolation: false
+    scale: 1.0
+  trail:
+    color: "#00e676"
+    width: 1.0
+    opacity: 0.5
+  style:
+    color: "#00e676"   # green — aid/help
+    point_size: 8
+  field_renderers:
+    - keys: [state]
+      label: "STATE"
+      format:
+        type: string
+        transform: upper
+      priority: 0
+    - keys: [address]
+      label: "ADDRESS"
+      format:
+        type: string
+      priority: 1
+    - keys: [accepted_items]
+      label: "ACCEPTS"
+      format:
+        type: string
+      priority: 2
+    - keys: [source_name]
+      label: "SOURCE"
+      format:
+        type: string
+      priority: 3
+
+history:
+  max_lookback: "8760h"
+  max_range_span: "720h"

@@ -1,0 +1,79 @@
+.code-tabs {
+  margin: 1rem 0 1.5rem;
+  border: 1px solid var(--code-border);
+  border-radius: var(--code-radius);
+  overflow: hidden;
+}
+
+.code-tabs-header {
+  display: flex;
+  background: var(--code-tabs-header-bg, #e8e8ec);
+  border-bottom: 1px solid var(--code-border);
+  padding: 0;
+  gap: 0;
+}
+
+.code-tab-btn {
+  padding: 0.5rem 1rem;
+  background: transparent;
+  border: none;
+  color: var(--code-tab-color, var(--color-gray-500));
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all 0.15s ease;
+}
+
+.code-tab-btn:hover {
+  color: var(--code-tab-hover-color, var(--color-gray-800));
+}
+
+.code-tab-btn.active {
+  color: var(--code-tab-active-color, var(--color-gray-800));
+  border-bottom-color: var(--color-primary-400);
+  background: var(--code-bg);
+}
+
+.code-tab-content {
+  display: none;
+}
+
+.code-tab-content.active {
+  display: block;
+}
+
+.code-tab-content pre {
+  margin: 0;
+  border: none;
+  border-radius: 0;
+}
+
+.copy-btn {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  padding: 0.375rem 0.625rem;
+  background: var(--copy-btn-bg, rgba(0, 0, 0, 0.06));
+  border: none;
+  border-radius: 4px;
+  color: var(--copy-btn-color, var(--color-gray-500));
+  font-size: var(--text-xs);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
+  font-family: var(--font-sans);
+}
+
+pre:hover .copy-btn {
+  opacity: 1;
+}
+
+.copy-btn:hover {
+  background: var(--copy-btn-hover-bg, rgba(0, 0, 0, 0.1));
+  color: var(--copy-btn-hover-color, var(--color-gray-800));
+}
+
+.copy-btn.copied {
+  color: var(--color-success);
+}

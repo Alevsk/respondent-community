@@ -1,0 +1,186 @@
+# deployments/venezuela/sources.d/venezuela_damage_reports.yaml
+# Crowd-sourced earthquake damage reports for the 2026 Venezuela earthquake.
+# Harvested from SismoVenezuela (https://venezuela-earthquake-map.vercel.app),
+# which scrapes social media + web. The `source` field distinguishes the
+# platform — YouTube, X (Twitter), Instagram, Web — so this single layer covers
+# the "reports / YouTube / X / IG" categories from the site, color-coded by
+# platform. damage_level is a 1–5 severity scale shown in the detail panel.
+#
+# Endpoint: GET /api/reports/geojson  (GeoJSON FeatureCollection, ~1000–5000 pts)
+# Public, no auth.
+schema_version: 2
+
+name: venezuela_damage_reports
+labels:
+  category: disaster
+  priority: high
+
+source_type: venezuela_damage_reports
+layer_type: venezuela_reports
+display_name: "VE Damage Reports"
+enabled: true
+
+transport:
+  type: http_poll
+  url: "https://venezuela-earthquake-map.vercel.app/api/reports/geojson"
+  method: GET
+  headers:
+    Accept: "application/json"
+    User-Agent: "respondent-community/1.0 (https://github.com/alevsk/respondent-community)"
+  timeout: "30s"
+  interval: "300s"   # 5 min — crowd reports trickle in, no need to poll fast
+  max_response_bytes: 31457280  # 30MB (~0.75MB actual)
+  retry:
+    max_attempts: 3
+    backoff: "exponential"
+    initial_delay: "5s"
+    max_delay: "60s"
+
+parser:
+  format: geojson
+  records_path: "features"
+  max_records: 10000
+
+# Keep primary reports with a valid position. Drop replies/comments.
+filter: >
+  has(record.properties.id)
+  && has(record.geometry) && has(record.geometry.coordinates)
+  && size(record.geometry.coordinates) >= 2
+  && double(record.geometry.coordinates[0]) != 0.0
+  && double(record.geometry.coordinates[1]) != 0.0
+  && (!has(record.properties.is_comment) || record.properties.is_comment != true)
+
+entity:
+  external_id: >
+    string(record.properties.id)
+  name: >
+    has(record.properties.author) && record.properties.author != null && record.properties.author != ""
+      ? string(record.properties.author)
+      : (has(record.properties.location_name) && record.properties.location_name != null
+          ? string(record.properties.location_name) : "Damage report")
+  metadata:
+    # Raw platform value (twitter|youtube|instagram|web) — drives color_by.
+    source: >
+      has(record.properties.source) && record.properties.source != null
+        ? string(record.properties.source) : "web"
+    # Friendly platform label for the detail panel.
+    platform: >
+      has(record.properties.source) && record.properties.source == "twitter" ? "X (Twitter)" :
+      has(record.properties.source) && record.properties.source == "youtube" ? "YouTube" :
+      has(record.properties.source) && record.properties.source == "instagram" ? "Instagram" :
+      "Web"
+    author: >
+      has(record.properties.author) && record.properties.author != null
+        ? string(record.properties.author) : ""
+    text: >
+      has(record.properties.text_content) && record.properties.text_content != null
+        ? string(record.properties.text_content) : ""
+    location_name: >
+      has(record.properties.location_name) && record.properties.location_name != null
+        ? string(record.properties.location_name) : ""
+    damage_level: >
+      has(record.properties.damage_level) && record.properties.damage_level != null
+        ? string(record.properties.damage_level) : ""
+    credibility: >
+      has(record.properties.credibility) && record.properties.credibility != null
+        ? string(record.properties.credibility) : ""
+    verified: >
+      has(record.properties.verified) ? string(record.properties.verified) : "false"
+    source_url: >
+      has(record.properties.source_url) && record.properties.source_url != null
+        ? string(record.properties.source_url) : ""
+    media_url: >
+      has(record.properties.media_urls) && record.properties.media_urls != null
+        && size(record.properties.media_urls) > 0
+        ? string(record.properties.media_urls[0]) : ""
+
+observation:
+  latitude: >
+    double(record.geometry.coordinates[1])
+  longitude: >
+    double(record.geometry.coordinates[0])
+  altitude: "0.0"
+  timestamp: >
+    has(record.properties.post_time) && record.properties.post_time != null
+      ? parse_iso8601(string(record.properties.post_time))
+      : parse_iso8601(string(record.properties.scraped_at))
+  velocity: {}
+  metadata:
+    damage_level: >
+      has(record.properties.damage_level) && record.properties.damage_level != null
+        ? string(record.properties.damage_level) : ""
+    source: >
+      has(record.properties.source) && record.properties.source != null
+        ? string(record.properties.source) : "web"
+  content_hash: ""
+
+recording:
+  mode: upsert
+
+cache:
+  ttl: "900s"   # 15 min — survive a few missed 5-min polls
+
+display:
+  icon:
+    shape: warning
+    rotatable: false
+    interpolation: false
+    scale: 1.0
+  trail:
+    color: "#ffb300"
+    width: 1.0
+    opacity: 0.5
+  style:
+    color: "#ffb300"
+    point_size: 7
+  # Color reports by the platform they came from.
+  color_by:
+    field: source
+    values:
+      twitter: "#1d9bf0"     # X / Twitter — blue
+      youtube: "#ff0000"     # YouTube — red
+      instagram: "#e1306c"   # Instagram — magenta
+      web: "#9e9e9e"         # Web — grey
+    default_color: "#9e9e9e"
+  field_renderers:
+    - keys: [platform]
+      label: "PLATFORM"
+      format:
+        type: string
+      priority: 0
+    - keys: [damage_level]
+      label: "DAMAGE LEVEL"
+      format:
+        type: string
+        prefix: "Level "
+      priority: 1
+    - keys: [author]
+      label: "AUTHOR"
+      format:
+        type: string
+      priority: 2
+    - keys: [text]
+      label: "REPORT"
+      format:
+        type: string
+      priority: 3
+    - keys: [location_name]
+      label: "LOCATION"
+      format:
+        type: string
+      priority: 4
+    - keys: [credibility]
+      label: "CREDIBILITY"
+      format:
+        type: string
+        transform: upper
+      priority: 5
+    - keys: [source_url]
+      label: "SOURCE"
+      format:
+        type: string
+      priority: 6
+
+history:
+  max_lookback: "2160h"   # 90 days
+  max_range_span: "168h"  # 7 days per window

@@ -1,0 +1,58 @@
+# =============================================================================
+# SPACE LAUNCH AWARENESS — Placeholder
+# =============================================================================
+# TODO: Correlate rocket launch windows with nearby airspace activity and
+# satellite positions to detect launch corridor conflicts and provide
+# space situational awareness.
+#
+# Data layers: rocket_launches (SpaceDevs, 50 entities) ×
+#              flights_commercial × flights_military × satellites
+# Metadata available:
+#   rocket_launches: [location, mission, mission_type, net, orbit, pad_name,
+#                     provider, rocket, status, status_abbrev, window_end,
+#                     window_start]
+#   satellites: [norad_id, tle_line1, tle_line2]
+#
+# Intelligence value:
+#   - Aircraft near active launch corridors during launch windows
+#   - Launch impact on satellite constellation tracking
+#   - Correlation of military launches with geopolitical events
+#   - Monitoring of non-allied nation launch activity
+#
+# Potential SQL approach:
+#   rocket_launches (WHERE status = 'Go' AND window_start < NOW() + '24h')
+#   × flights_commercial via ST_DWithin(200km) of launch pad
+#   Focus: identify airspace conflicts with upcoming launches
+#
+# Challenge: Launch windows are time-based (window_start/window_end), so the
+# analysis needs time-aware filtering, not just spatial proximity.
+# =============================================================================
+
+schema_version: 1
+name: space_launch_awareness
+display_name: "Space Launch Awareness"
+enabled: false
+
+schedule:
+  interval: "300s"
+
+data:
+  lookback: "24h"
+  min_records: 1
+  sql: "SELECT 1 WHERE false"
+
+ai:
+  enabled: true
+  operations:
+    - name: placeholder
+      tags: [space, launch, rocket, satellite, placeholder]
+      prompt: "placeholder"
+      output_schema:
+        type: object
+        required: [results]
+        properties:
+          results: { type: array, items: { type: object } }
+      output:
+        store_insights: true
+        insight_type: "space_launch"
+        results_path: "results"

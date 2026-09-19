@@ -1,0 +1,149 @@
+# deployments/venezuela/sources.d/venezuela_building_damage.yaml
+# Reported damaged/collapsed buildings from the 2026 Venezuela earthquake.
+# Sourced from SismoVenezuela. damage_type is the Spanish severity scale:
+#   parcial = partial, severo = severe, total = total/collapsed.
+# Color-coded by severity. `needs` carries a free-text description (Spanish).
+#
+# Endpoint: GET /api/building-damage  (GeoJSON FeatureCollection, ~750 pts)
+# Public, no auth.
+schema_version: 2
+
+name: venezuela_building_damage
+labels:
+  category: disaster
+  priority: high
+
+source_type: venezuela_building_damage
+layer_type: venezuela_building_damage
+display_name: "VE Building Damage"
+enabled: true
+
+transport:
+  type: http_poll
+  url: "https://venezuela-earthquake-map.vercel.app/api/building-damage"
+  method: GET
+  headers:
+    Accept: "application/json"
+    User-Agent: "respondent-community/1.0 (https://github.com/alevsk/respondent-community)"
+  timeout: "30s"
+  interval: "300s"
+  max_response_bytes: 31457280  # 30MB (~0.5MB actual)
+  retry:
+    max_attempts: 3
+    backoff: "exponential"
+    initial_delay: "5s"
+    max_delay: "60s"
+
+parser:
+  format: geojson
+  records_path: "features"
+  max_records: 10000
+
+filter: >
+  has(record.properties.id)
+  && has(record.geometry) && has(record.geometry.coordinates)
+  && size(record.geometry.coordinates) >= 2
+  && double(record.geometry.coordinates[0]) != 0.0
+  && double(record.geometry.coordinates[1]) != 0.0
+
+entity:
+  external_id: >
+    string(record.properties.id)
+  name: >
+    has(record.properties.place) && record.properties.place != null && record.properties.place != ""
+      ? string(record.properties.place)
+      : "Damaged building"
+  metadata:
+    # Raw severity value (parcial|severo|total) — drives color_by.
+    damage_type: >
+      has(record.properties.damage_type) && record.properties.damage_type != null
+        ? string(record.properties.damage_type) : ""
+    # English severity label.
+    severity: >
+      has(record.properties.damage_type) && record.properties.damage_type == "total" ? "Total / collapsed" :
+      has(record.properties.damage_type) && record.properties.damage_type == "severo" ? "Severe" :
+      has(record.properties.damage_type) && record.properties.damage_type == "parcial" ? "Partial" :
+      "Unknown"
+    place: >
+      has(record.properties.place) && record.properties.place != null ? string(record.properties.place) : ""
+    needs: >
+      has(record.properties.needs) && record.properties.needs != null ? string(record.properties.needs) : ""
+    affected: >
+      has(record.properties.affected) && record.properties.affected != null ? string(record.properties.affected) : ""
+    confirmations: >
+      has(record.properties.confirmations) && record.properties.confirmations != null
+        ? string(record.properties.confirmations) : "0"
+    source_url: >
+      has(record.properties.source) && record.properties.source != null ? string(record.properties.source) : ""
+    photo_url: >
+      has(record.properties.photo_url) && record.properties.photo_url != null ? string(record.properties.photo_url) : ""
+
+observation:
+  latitude: >
+    double(record.geometry.coordinates[1])
+  longitude: >
+    double(record.geometry.coordinates[0])
+  altitude: "0.0"
+  timestamp: >
+    has(record.properties.reported_at) && record.properties.reported_at != null
+      ? parse_iso8601(string(record.properties.reported_at)) : now()
+  velocity: {}
+  metadata:
+    damage_type: >
+      has(record.properties.damage_type) && record.properties.damage_type != null
+        ? string(record.properties.damage_type) : ""
+  content_hash: ""
+
+recording:
+  mode: upsert
+
+cache:
+  ttl: "900s"
+
+display:
+  icon:
+    shape: building
+    rotatable: false
+    interpolation: false
+    scale: 1.0
+  trail:
+    color: "#ff7043"
+    width: 1.0
+    opacity: 0.5
+  style:
+    color: "#ff7043"
+    point_size: 7
+  # Color by structural damage severity.
+  color_by:
+    field: damage_type
+    values:
+      total: "#d50000"      # collapsed — deep red
+      severo: "#ff6d00"     # severe — orange
+      parcial: "#ffd600"    # partial — yellow
+    default_color: "#ff7043"
+  field_renderers:
+    - keys: [severity]
+      label: "SEVERITY"
+      format:
+        type: string
+        transform: upper
+      priority: 0
+    - keys: [place]
+      label: "PLACE"
+      format:
+        type: string
+      priority: 1
+    - keys: [needs]
+      label: "DESCRIPTION"
+      format:
+        type: string
+      priority: 2
+    - keys: [confirmations]
+      label: "CONFIRMATIONS"
+      format:
+        type: string
+      priority: 3
+
+history:
+  max_lookback: "2160h"
+  max_range_span: "168h"

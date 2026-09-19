@@ -1,0 +1,413 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "entities.proto",
+    "version": "version not set"
+  },
+  "tags": [
+    {
+      "name": "EntityService"
+    }
+  ],
+  "consumes": [
+    "application/json"
+  ],
+  "produces": [
+    "application/json"
+  ],
+  "paths": {
+    "/v1/entities/batch": {
+      "post": {
+        "summary": "Get batch entity details including latest observations",
+        "operationId": "EntityService_GetEntitiesBatch",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1GetEntitiesBatchResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "description": "GetEntitiesBatchRequest is the request for the GetEntitiesBatch RPC.",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1GetEntitiesBatchRequest"
+            }
+          }
+        ],
+        "tags": [
+          "EntityService"
+        ]
+      }
+    },
+    "/v1/entities/detail": {
+      "get": {
+        "summary": "Get full entity details including latest observation",
+        "operationId": "EntityService_GetEntityDetail",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1GetEntityDetailResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "entityId",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "EntityService"
+        ]
+      }
+    },
+    "/v1/entities/observations": {
+      "get": {
+        "summary": "Get paginated observation history for an entity",
+        "operationId": "EntityService_GetObservationHistory",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1GetObservationHistoryResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "entityId",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "limit",
+            "description": "Max observations to return (default 50)",
+            "in": "query",
+            "required": false,
+            "type": "integer",
+            "format": "int32"
+          },
+          {
+            "name": "beforeMs",
+            "description": "Unix millis cursor — return observations before this timestamp (0 = now)",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "int64"
+          }
+        ],
+        "tags": [
+          "EntityService"
+        ]
+      }
+    },
+    "/v1/entities/search": {
+      "get": {
+        "summary": "Search entities by ID, name, or metadata values",
+        "operationId": "EntityService_SearchEntities",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1SearchEntitiesResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "query",
+            "description": "Search term (partial match on id, name, metadata)",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "layerType",
+            "description": "Optional: filter by layer type",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "limit",
+            "description": "Max results (default 20, max 100)",
+            "in": "query",
+            "required": false,
+            "type": "integer",
+            "format": "int32"
+          }
+        ],
+        "tags": [
+          "EntityService"
+        ]
+      }
+    }
+  },
+  "definitions": {
+    "protobufAny": {
+      "type": "object",
+      "properties": {
+        "@type": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": {}
+    },
+    "rpcStatus": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "message": {
+          "type": "string"
+        },
+        "details": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/protobufAny"
+          }
+        }
+      }
+    },
+    "v1BatchEntityDetail": {
+      "type": "object",
+      "properties": {
+        "entity": {
+          "$ref": "#/definitions/v1Entity"
+        },
+        "latestObservation": {
+          "$ref": "#/definitions/v1Observation"
+        }
+      },
+      "description": "BatchEntityDetail contains an entity with its latest observation."
+    },
+    "v1Entity": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "externalId": {
+          "type": "string"
+        },
+        "layerType": {
+          "type": "string",
+          "title": "flights_commercial, flights_military, satellites, earthquakes, traffic, cctv"
+        },
+        "name": {
+          "type": "string"
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "aiMetadataJson": {
+          "type": "string",
+          "title": "AI enrichment data as JSON string (nested objects not representable in proto map)"
+        }
+      },
+      "title": "Entity represents a normalized geospatial object"
+    },
+    "v1EntitySearchResult": {
+      "type": "object",
+      "properties": {
+        "entityId": {
+          "type": "string",
+          "title": "composite: \"layerType:externalId\""
+        },
+        "externalId": {
+          "type": "string"
+        },
+        "layerType": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "latestObservation": {
+          "$ref": "#/definitions/v1Observation",
+          "title": "Last known position"
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "description": "EntitySearchResult represents a single entity search result."
+    },
+    "v1GeoPoint": {
+      "type": "object",
+      "properties": {
+        "lat": {
+          "type": "number",
+          "format": "double"
+        },
+        "lon": {
+          "type": "number",
+          "format": "double"
+        },
+        "altM": {
+          "type": "number",
+          "format": "double"
+        }
+      }
+    },
+    "v1GetEntitiesBatchRequest": {
+      "type": "object",
+      "properties": {
+        "entityIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "title": "composite IDs: \"layerType:externalId\" (max 50)"
+        }
+      },
+      "description": "GetEntitiesBatchRequest is the request for the GetEntitiesBatch RPC."
+    },
+    "v1GetEntitiesBatchResponse": {
+      "type": "object",
+      "properties": {
+        "entities": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1BatchEntityDetail"
+          }
+        }
+      },
+      "description": "GetEntitiesBatchResponse is the response for the GetEntitiesBatch RPC."
+    },
+    "v1GetEntityDetailResponse": {
+      "type": "object",
+      "properties": {
+        "entity": {
+          "$ref": "#/definitions/v1Entity"
+        },
+        "latestObservation": {
+          "$ref": "#/definitions/v1Observation"
+        }
+      }
+    },
+    "v1GetObservationHistoryResponse": {
+      "type": "object",
+      "properties": {
+        "observations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1Observation"
+          }
+        },
+        "hasMore": {
+          "type": "boolean"
+        }
+      }
+    },
+    "v1Observation": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "entityId": {
+          "type": "string"
+        },
+        "ts": {
+          "type": "string",
+          "format": "int64",
+          "title": "Unix timestamp in milliseconds (last poll / collection time)"
+        },
+        "position": {
+          "$ref": "#/definitions/v1GeoPoint"
+        },
+        "altitudeM": {
+          "type": "number",
+          "format": "double"
+        },
+        "velocity": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "number",
+            "format": "double"
+          }
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "eventTimeMs": {
+          "type": "string",
+          "format": "int64",
+          "title": "When the event actually occurred (0 = not set)"
+        },
+        "eventEndMs": {
+          "type": "string",
+          "format": "int64",
+          "title": "When the event ended, for range events (0 = not set)"
+        }
+      },
+      "title": "Observation represents a time-series record of an entity"
+    },
+    "v1SearchEntitiesResponse": {
+      "type": "object",
+      "properties": {
+        "results": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1EntitySearchResult"
+          }
+        },
+        "totalCount": {
+          "type": "integer",
+          "format": "int32",
+          "title": "Total matches (for \"N more results\" UI)"
+        }
+      },
+      "description": "SearchEntitiesResponse is the response for the SearchEntities RPC."
+    }
+  }
+}

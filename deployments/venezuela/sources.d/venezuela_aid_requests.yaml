@@ -1,0 +1,135 @@
+# deployments/venezuela/sources.d/venezuela_aid_requests.yaml
+# Aid requests ("solicitudes") for the 2026 Venezuela earthquake from
+# SismoVenezuela — community requests for help / supplies at specific places.
+#
+# DISABLED BY DEFAULT — the upstream endpoint currently returns an EMPTY set
+# ({"data":[],"total":0}) and exposes no schema, so the field mapping below is a
+# BEST-EFFORT inference mirroring the sibling `{data:[...]}` endpoints
+# (missing-persons). Every field is null-guarded, so wrong names degrade to empty
+# strings rather than errors. Before enabling: re-fetch the endpoint once it has
+# data, confirm the real field names (id, lat/lng, description, urgency, …),
+# correct the CEL below, then set `enabled: true`.
+#
+# Endpoint: GET /api/needs?limit=500  ({ "data": [...], "total": N })
+# Public, no auth.
+schema_version: 2
+
+name: venezuela_aid_requests
+labels:
+  category: humanitarian
+  priority: high
+
+source_type: venezuela_aid_requests
+layer_type: venezuela_aid_requests
+display_name: "VE Aid Requests (Solicitudes)"
+enabled: false   # see header — schema unverified (endpoint empty)
+
+transport:
+  type: http_poll
+  url: "https://venezuela-earthquake-map.vercel.app/api/needs?limit=500"
+  method: GET
+  headers:
+    Accept: "application/json"
+    User-Agent: "respondent-community/1.0 (https://github.com/alevsk/respondent-community)"
+  timeout: "20s"
+  interval: "300s"
+  max_response_bytes: 10485760
+  retry:
+    max_attempts: 3
+    backoff: "exponential"
+    initial_delay: "5s"
+    max_delay: "60s"
+
+parser:
+  format: json
+  records_path: "data"
+  max_records: 5000
+
+# Best-effort: require an id + usable coordinates (field names assumed).
+filter: >
+  has(record.id)
+  && has(record.lat) && record.lat != null
+  && has(record.lng) && record.lng != null
+  && double(record.lat) != 0.0 && double(record.lng) != 0.0
+
+entity:
+  external_id: >
+    string(record.id)
+  name: >
+    has(record.title) && record.title != null ? string(record.title) :
+    (has(record.description) && record.description != null ? string(record.description) : "Aid request")
+  metadata:
+    description: >
+      has(record.description) && record.description != null ? string(record.description) : ""
+    urgency: >
+      has(record.urgency) && record.urgency != null ? string(record.urgency) : ""
+    items_needed: >
+      has(record.items_needed) && record.items_needed != null ? string(record.items_needed) : ""
+    location_name: >
+      has(record.location) && record.location != null ? string(record.location) : ""
+    contact: >
+      has(record.contact_info) && record.contact_info != null ? string(record.contact_info) : ""
+    source_url: >
+      has(record.source_url) && record.source_url != null ? string(record.source_url) : ""
+
+observation:
+  latitude: >
+    double(record.lat)
+  longitude: >
+    double(record.lng)
+  altitude: "0.0"
+  timestamp: >
+    has(record.created_at) && record.created_at != null
+      ? parse_iso8601(string(record.created_at)) : now()
+  velocity: {}
+  metadata:
+    urgency: >
+      has(record.urgency) && record.urgency != null ? string(record.urgency) : ""
+  content_hash: >
+    string(record.id)
+
+recording:
+  mode: dedupe
+
+cache:
+  ttl: "900s"
+
+display:
+  icon:
+    shape: warning
+    rotatable: false
+    interpolation: false
+    scale: 1.0
+  trail:
+    color: "#40c4ff"
+    width: 1.0
+    opacity: 0.5
+  style:
+    color: "#40c4ff"
+    point_size: 7
+  field_renderers:
+    - keys: [urgency]
+      label: "URGENCY"
+      format:
+        type: string
+        transform: upper
+      priority: 0
+    - keys: [items_needed]
+      label: "NEEDS"
+      format:
+        type: string
+      priority: 1
+    - keys: [description]
+      label: "DESCRIPTION"
+      format:
+        type: string
+      priority: 2
+    - keys: [location_name]
+      label: "LOCATION"
+      format:
+        type: string
+      priority: 3
+
+history:
+  max_lookback: "8760h"
+  max_range_span: "720h"

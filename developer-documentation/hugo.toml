@@ -1,0 +1,46 @@
+baseURL = "https://respondent-docs.alevsk.dev"
+title = "Respondent Developer Documentation"
+languageCode = "en-us"
+enableRobotsTXT = true
+enableGitInfo = false
+disableKinds = ["taxonomy", "term"]
+
+[params]
+  brand_name = "Respondent"
+  tagline    = "Real-time geospatial intelligence"
+  github_org  = "https://github.com/alevsk"
+  github_docs = "https://github.com/alevsk/respondent-community"
+
+[outputs]
+  home = ["HTML", "JSON"]
+
+[markup]
+  [markup.highlight]
+    style = "dracula"
+    lineNos = false
+    guessSyntax = false
+    noClasses = false
+  [markup.tableOfContents]
+    startLevel = 2
+    endLevel = 4
+  [markup.goldmark]
+    [markup.goldmark.renderer]
+      unsafe = true
+
+[menu]
+  [[menu.main]]
+    name = "Getting Started"
+    url = "/getting-started/"
+    weight = 1
+  [[menu.main]]
+    name = "Sources"
+    url = "/sources/"
+    weight = 2
+  [[menu.main]]
+    name = "Analysis"
+    url = "/analysis/"
+    weight = 3
+  [[menu.main]]
+    name = "Reference"
+    url = "/reference/"
+    weight = 4

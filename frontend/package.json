@@ -1,0 +1,57 @@
+{
+  "name": "@respondent/frontend",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @respondent/earth",
+    "dev:earth": "npm run dev -w @respondent/earth",
+    "build": "npm run build -w @respondent/earth",
+    "build:earth": "npm run build -w @respondent/earth",
+    "test": "vitest",
+    "lint": "eslint .",
+    "format": "prettier --write 'apps/**/*.{ts,tsx,css,json}' 'packages/**/*.{ts,tsx,css,json}'",
+    "format:check": "prettier --check 'apps/**/*.{ts,tsx,css,json}' 'packages/**/*.{ts,tsx,css,json}'",
+    "icons": "npm run dev -w @respondent/earth -- --open /icon-preview.html"
+  },
+  "dependencies": {
+    "@emotion/react": "^11.11.4",
+    "@emotion/styled": "^11.11.5",
+    "@mui/material": "^5.16.0",
+    "@tanstack/react-query": "^5.45.0",
+    "@tanstack/react-table": "^8.21.3",
+    "@tanstack/react-virtual": "^3.13.23",
+    "lucide-react": "^1.7.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-resizable-panels": "^4.10.0",
+    "recharts": "^3.8.1",
+    "zustand": "^4.5.2"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.0",
+    "@react-scan/vite-plugin-react-scan": "^0.2.7",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^5.2.0",
+    "eslint": "^10.0.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.0",
+    "globals": "^17.0.0",
+    "jsdom": "^29.1.0",
+    "prettier": "^3.8.1",
+    "react-scan": "^0.5.7",
+    "typescript": "^5.5.3",
+    "typescript-eslint": "^8.65.0",
+    "vite": "^6.0.0",
+    "vite-plugin-cesium": "^1.2.22",
+    "vitest": "^4.0.0"
+  }
+}

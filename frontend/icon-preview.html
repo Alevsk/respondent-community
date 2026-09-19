@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Icon Preview — HUD Symbology</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #000;
+      color: #ccc;
+      font-family: 'Courier New', monospace;
+      padding: 24px;
+    }
+    h1 {
+      color: #00ff9d;
+      font-size: 14px;
+      text-transform: uppercase;
+      letter-spacing: 3px;
+      margin-bottom: 8px;
+    }
+    .subtitle {
+      color: #555;
+      font-size: 11px;
+      margin-bottom: 32px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+      gap: 2px;
+    }
+    .icon-cell {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 16px 8px;
+      border: 1px solid rgba(17, 17, 17, 0.5);
+      transition: border-color 0.15s;
+    }
+    .icon-cell:hover {
+      border-color: #333;
+    }
+    .icon-cell.status-yes { border-left: 2px solid #00ff9d; }
+    .icon-cell.status-maybe { border-left: 2px solid #ff9d00; }
+    .icon-cell.status-no { border-left: 2px solid #ff006e; }
+    .icon-cell.status-needs-improvement { border-left: 2px solid #ffff00; }
+    .canvas-wrap {
+      position: relative;
+      margin-bottom: 8px;
+    }
+    /* Native size (64x64 rendered, displayed at various scales) */
+    canvas.native {
+      width: 32px;
+      height: 32px;
+      image-rendering: pixelated;
+    }
+    canvas.x2 {
+      width: 64px;
+      height: 64px;
+      image-rendering: pixelated;
+    }
+    canvas.x4 {
+      width: 128px;
+      height: 128px;
+      image-rendering: pixelated;
+    }
+    .canvases {
+      display: flex;
+      gap: 8px;
+      align-items: flex-end;
+      margin-bottom: 6px;
+    }
+    .icon-label {
+      font-size: 10px;
+      color: #00ff9d;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    .icon-status {
+      font-size: 9px;
+      margin-top: 2px;
+    }
+    .icon-status.yes { color: #00ff9d; }
+    .icon-status.maybe { color: #ff9d00; }
+    .icon-status.no { color: #ff006e; }
+    .icon-status.needs-improvement { color: #ffff00; }
+
+    /* Controls */
+    .controls {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 24px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .controls label {
+      font-size: 11px;
+      color: #888;
+      cursor: pointer;
+    }
+    .controls input[type="color"] {
+      width: 24px;
+      height: 24px;
+      border: 1px solid #333;
+      background: none;
+      cursor: pointer;
+    }
+    .controls select, .controls input[type="checkbox"] {
+      cursor: pointer;
+    }
+    .legend {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 16px;
+      font-size: 10px;
+    }
+    .legend-item { display: flex; align-items: center; gap: 4px; }
+    .legend-swatch {
+      width: 10px;
+      height: 10px;
+      display: inline-block;
+    }
+  </style>
+</head>
+<body>
+  <h1>Icon Preview — HUD Symbology</h1>
+  <div class="subtitle">52 shapes &middot; Canvas2D &middot; 64x64 @ 2x scale</div>
+
+  <div class="legend">
+    <div class="legend-item"><span class="legend-swatch" style="background:#00ff9d"></span> Yes</div>
+    <div class="legend-item"><span class="legend-swatch" style="background:#ff9d00"></span> Maybe</div>
+    <div class="legend-item"><span class="legend-swatch" style="background:#ff006e"></span> No</div>
+    <div class="legend-item"><span class="legend-swatch" style="background:#ffff00"></span> Needs work</div>
+  </div>
+
+  <div class="controls">
+    <label>Color: <input type="color" id="colorPicker" value="#00ff9d" /></label>
+    <label>Scale:
+      <select id="scalePicker">
+        <option value="1x">1x (32px)</option>
+        <option value="2x" selected>2x (64px)</option>
+        <option value="4x">4x (128px)</option>
+      </select>
+    </label>
+    <label>Background:
+      <select id="bgPicker">
+        <option value="#000000" selected>Black</option>
+        <option value="#111111">Dark gray</option>
+        <option value="#1a1a2e">Navy</option>
+        <option value="#ffffff">White</option>
+        <option value="earth">Earth map</option>
+      </select>
+    </label>
+    <label><input type="checkbox" id="filterNo" /> Hide "yes"</label>
+  </div>
+
+  <div class="grid" id="grid"></div>
+
+  <script type="module" src="/apps/command/src/features/globe/icons/_preview.ts"></script>
+</body>
+</html>

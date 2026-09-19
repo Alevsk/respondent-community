@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="{{ .Site.LanguageCode }}">
+<head>
+  {{- partial "head.html" . -}}
+  <script>
+    // Set theme before first paint to prevent FOUC
+    (function() {
+      var stored = localStorage.getItem('theme');
+      if (stored) {
+        document.documentElement.setAttribute('data-theme', stored);
+      } else {
+        // Default to dark for Respondent's tactical aesthetic
+        document.documentElement.setAttribute('data-theme', 'dark');
+      }
+    })();
+  </script>
+</head>
+<body>
+  {{- partial "header.html" . -}}
+  <div class="layout">
+    {{- partial "sidebar.html" . -}}
+    <main class="content">
+      <div class="content-main">
+        {{ block "main" . }}{{ end }}
+      </div>
+      {{- if and (not .IsHome) .TableOfContents -}}
+        {{- partial "toc.html" . -}}
+      {{- end -}}
+    </main>
+  </div>
+  {{- partial "footer.html" . -}}
+  <button class="sidebar-toggle" onclick="document.querySelector('.sidebar').classList.toggle('open')" aria-label="Toggle navigation">
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+  </button>
+  <script src="/js/copy-code.js"></script>
+  <script src="/js/tabs.js"></script>
+  <script src="/js/search.js"></script>
+  <script src="/js/llm-copy.js"></script>
+  <script src="/js/navigation.js"></script>
+  <script>
+    // Sidebar scroll position persistence
+    (function() {
+      var sidebar = document.querySelector('.sidebar');
+      if (!sidebar) return;
+      var scrollKey = 'sidebar-scroll';
+      var saved = sessionStorage.getItem(scrollKey);
+      if (saved) {
+        sidebar.scrollTop = parseInt(saved, 10);
+      }
+      sidebar.addEventListener('scroll', function() {
+        sessionStorage.setItem(scrollKey, sidebar.scrollTop);
+      });
+    })();
+
+    // Theme toggle click handler
+    (function() {
+      var toggle = document.querySelector('.theme-toggle');
+      if (!toggle) return;
+      var html = document.documentElement;
+      toggle.addEventListener('click', function() {
+        var current = html.getAttribute('data-theme');
+        var next = current === 'dark' ? 'light' : 'dark';
+        html.setAttribute('data-theme', next);
+        localStorage.setItem('theme', next);
+      });
+    })();
+  </script>
+</body>
+</html>

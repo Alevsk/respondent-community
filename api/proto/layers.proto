@@ -1,0 +1,187 @@
+syntax = "proto3";
+
+package respondent.v1;
+
+option go_package = "github.com/Alevsk/respondent/gen/go/respondent/v1;respondentv1";
+
+import "entities.proto";
+import "google/api/annotations.proto";
+
+// LayerMode defines the density mode for a layer.
+enum LayerMode {
+  LAYER_MODE_UNSPECIFIED = 0;
+  LAYER_MODE_SPARSE = 1;
+  LAYER_MODE_FULL = 2;
+}
+
+// RenderingMode defines how the frontend renders a layer.
+enum RenderingMode {
+  RENDERING_MODE_UNSPECIFIED = 0;
+  RENDERING_MODE_MAP = 1;
+  RENDERING_MODE_INDICATOR = 2;
+}
+
+// FilteringMode defines how a layer delivers data to clients.
+enum FilteringMode {
+  FILTERING_MODE_UNSPECIFIED = 0;
+  FILTERING_MODE_VIEWPORT = 1;
+}
+
+// IconShape is deprecated. Icon shapes are now passed as free-form strings
+// so that new icons can be added via YAML + a React component without
+// touching backend code or recompiling protos.
+
+// FieldType defines the data type of a rendered field value.
+enum FieldType {
+  FIELD_TYPE_UNSPECIFIED = 0;
+  FIELD_TYPE_STRING = 1;
+  FIELD_TYPE_FLOAT = 2;
+  FIELD_TYPE_INTEGER = 3;
+  FIELD_TYPE_RAW = 4;
+}
+
+// FieldTransform defines text transformation for string fields.
+enum FieldTransform {
+  FIELD_TRANSFORM_UNSPECIFIED = 0;
+  FIELD_TRANSFORM_UPPER = 1;
+  FIELD_TRANSFORM_LOWER = 2;
+}
+
+// Layer represents a configurable data layer
+message Layer {
+  string id = 1;
+  string name = 2;
+  string type = 3; // Dynamic layer type string (e.g. flights_commercial, satellites)
+  bool enabled = 4;
+  LayerMode mode = 5;
+  int32 density = 6; // 0-100
+  string source = 7;
+  int64 last_update = 8; // Unix timestamp in milliseconds
+  int64 count = 9; // Entity count (for high-volume layers)
+  string color = 10; // CSS color string for rendering (e.g., "#00ff9d")
+  int32 point_size = 11; // Point size in pixels for rendering
+  LayerDisplayConfig display_config = 12; // Display configuration from declarative source YAML
+  HistoryConfig history_config = 13; // Per-layer time range limits (nil = server defaults: 48h lookback, 24h span)
+  RenderingMode rendering_mode = 14; // Determines frontend rendering strategy
+  FilteringMode filtering_mode = 15; // When FILTERING_MODE_VIEWPORT, frontend sends camera bounds for progressive loading
+}
+
+// HistoryConfig defines per-layer time range limits for historical exploration.
+// When present, the frontend custom range picker uses these limits instead of the server defaults.
+// Zero values mean "use server default".
+message HistoryConfig {
+  int32 max_lookback_hours = 1;     // Max hours into the past (0 = server default 48h)
+  int32 max_range_span_hours = 2;   // Max hours per query window (0 = server default 24h)
+}
+
+// LayerDisplayConfig holds rendering metadata for a layer, populated from declarative source definitions.
+message LayerDisplayConfig {
+  IconConfig icon = 1;
+  TrailConfig trail = 2;
+  StyleConfig style = 3;
+  repeated FieldRendererConfig field_renderers = 4;
+  ColorByConfig color_by = 5; // optional: derive entity color from a metadata field's value
+}
+
+// ColorByConfig derives an entity's render color from the value of a metadata
+// field, e.g. coloring facilities by their "status". This keeps per-value color
+// rules declarative (in the source YAML) instead of hardcoded in the client.
+message ColorByConfig {
+  string field = 1; // metadata field name whose value selects the color
+  map<string, string> values = 2; // field value -> hex color
+  string default_color = 3; // hex color used when the value is not in the map
+}
+
+// IconConfig defines icon rendering properties for entities on the globe.
+message IconConfig {
+  string shape = 1; // Free-form shape name (e.g. "flight", "ship", "missile")
+  bool rotatable = 2;
+  bool interpolation = 3; // Dead-reckoning motion interpolation
+  double scale = 4;
+}
+
+// TrailConfig defines trail rendering properties for entity movement paths.
+message TrailConfig {
+  string color = 1; // hex color
+  double width = 2; // polyline width
+  double opacity = 3; // trail alpha
+}
+
+// StyleConfig defines general visual style for a layer.
+message StyleConfig {
+  string color = 1; // hex color
+  int32 point_size = 2;
+}
+
+// FieldRendererConfig defines how a metadata field is displayed in the UI.
+message FieldRendererConfig {
+  repeated string keys = 1;
+  string label = 2;
+  FieldFormat format = 3;
+  int32 priority = 4;
+}
+
+// FieldFormat describes the formatting rules for a rendered field value.
+message FieldFormat {
+  FieldType type = 1;
+  optional int32 precision = 2; // For float/integer types
+  string prefix = 3;
+  string suffix = 4;
+  FieldTransform transform = 5;
+}
+
+message LayerToggle {
+  string layer_id = 1;
+  bool enabled = 2;
+  LayerMode mode = 3;
+  int32 density = 4; // 0-100
+}
+
+message GetLayersRequest {}
+message GetLayersResponse {
+  repeated Layer layers = 1;
+}
+
+message ToggleLayerRequest {
+  LayerToggle toggle = 1;
+}
+message ToggleLayerResponse {
+  Layer layer = 1;
+}
+
+message GetLayerSnapshotRequest {
+  string layer_id = 1;
+  int32 limit = 2;    // Max entities to return (default 500)
+  int32 offset = 3;   // Pagination offset
+}
+message GetLayerSnapshotResponse {
+  repeated Entity entities = 1;
+  repeated Observation observations = 2;
+  int64 total_count = 3;  // Total available entities
+  bool has_more = 4;      // More entities available
+}
+
+// LayerService manages data layer configuration
+service LayerService {
+  // Get all available layers
+  rpc GetLayers(GetLayersRequest) returns (GetLayersResponse) {
+    option (google.api.http) = {
+      get: "/v1/layers"
+    };
+  }
+
+  // Toggle layer enable/disable, mode, and density
+  rpc ToggleLayer(ToggleLayerRequest) returns (ToggleLayerResponse) {
+    option (google.api.http) = {
+      put: "/v1/layers/{toggle.layer_id}"
+      body: "toggle"
+    };
+  }
+
+  // Get current snapshot of entities for a layer
+  rpc GetLayerSnapshot(GetLayerSnapshotRequest) returns (GetLayerSnapshotResponse) {
+    option (google.api.http) = {
+      get: "/v1/layers/{layer_id}/snapshot"
+    };
+  }
+}

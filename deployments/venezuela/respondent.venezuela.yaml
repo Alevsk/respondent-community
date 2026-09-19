@@ -1,0 +1,51 @@
+# Respondent Community Edition — Venezuela earthquake monitoring deployment.
+#
+# Run from the REPO ROOT:
+#   go run ./cmd/community serve --config deployments/venezuela/respondent.venezuela.yaml
+# or with the built binary:
+#   ./bin/community serve --config deployments/venezuela/respondent.venezuela.yaml
+#
+# Serves API + WebSocket + Earth UI on http://localhost:8095 (port chosen to not
+# clash with the default :8090). For a container deployment, switch the paths
+# below to the absolute volume-mount paths (see README.md).
+
+database:
+  path: "deployments/venezuela/data/respondent-venezuela.db"
+  retention:
+    max_size: "2GB"
+    low_water_ratio: 0.90
+    check_interval: "10m"
+    batch_size: 5000
+    max_batches_per_tick: 200
+    incremental_vacuum_pages: 10000
+
+server:
+  port: 8095
+
+ingest:
+  sources_dir: "deployments/venezuela/sources.d"
+
+ai:
+  enabled: true                 # set false (or omit the LLM key) to run without AI
+  analysis_dir: "deployments/venezuela/analysis.d"
+  min_attention: "low"
+  workers:
+    enrichment: 2
+    analysis: 1
+
+llm:
+  provider: "zai"
+  zai:
+    base_url: "https://api.z.ai/api/coding/paas/v4"
+    model: "glm-5.2"
+    max_tokens: 8192
+    timeout: "120s"
+    enable_thinking: false
+
+# Every Venezuela source carries its own coordinates, so no geocoding is needed —
+# run the geocoder fully offline (no external Nominatim calls).
+geocoder:
+  provider: "none"
+
+logging:
+  level: "info"

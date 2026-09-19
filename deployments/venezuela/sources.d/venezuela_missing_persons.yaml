@@ -1,0 +1,155 @@
+# deployments/venezuela/sources.d/venezuela_missing_persons.yaml
+# Missing / located persons for the 2026 Venezuela earthquake, from
+# SismoVenezuela (aggregating localizadosvenezuela.com and social media).
+# status: "sin-contacto" = no contact (still missing), "localizado" = located.
+#
+# NOTE ON COORDINATES: this raw feed returns lat/lng = null for essentially all
+# records (only `last_seen_location` free text), so this source is filtered to
+# records that DO carry coordinates — it shows nothing until upstream geocodes
+# them, rather than dumping everyone at 0,0.
+#
+# ALTERNATIVE (geocoded, but heavy): the upstream app ALSO exposes
+#   GET /api/missing-persons/external  -> GeoJSON FeatureCollection
+# which geocodes `last_seen_location` against a hardcoded place gazetteer (+ a
+# small random jitter). It is unauthenticated and DOES carry coordinates, but it
+# is ~24 MB / ~50k approximate (jittered) points per poll — too heavy and too
+# imprecise for the community edition's RAM profile, so it is NOT used here. To
+# switch: point `url` at .../api/missing-persons/external, set parser.format to
+# geojson + records_path "features", map lat/lon from geometry.coordinates, add
+# filtering: viewport + a Venezuela bbox CEL filter, and cap max_records.
+#
+# SOURCE-PROVENANCE NOTE: the actual data lives in the upstream app's private
+# Supabase DB (queried server-side with a SECRET service key — no public/anon
+# access) fed by credentialed social-media scrapers, so this unauthenticated
+# /api/* endpoint is the only directly-accessible interface.
+#
+# Endpoint: GET /api/missing-persons?count=500  ({ "data": [...] })
+# Public, no auth.
+schema_version: 2
+
+name: venezuela_missing_persons
+labels:
+  category: humanitarian
+  priority: high
+
+source_type: venezuela_missing_persons
+layer_type: venezuela_missing_persons
+display_name: "VE Missing Persons"
+enabled: true
+
+transport:
+  type: http_poll
+  url: "https://venezuela-earthquake-map.vercel.app/api/missing-persons?count=500"
+  method: GET
+  headers:
+    Accept: "application/json"
+    User-Agent: "respondent-community/1.0 (https://github.com/alevsk/respondent-community)"
+  timeout: "20s"
+  interval: "600s"
+  max_response_bytes: 10485760
+  retry:
+    max_attempts: 3
+    backoff: "exponential"
+    initial_delay: "5s"
+    max_delay: "60s"
+
+parser:
+  format: json
+  records_path: "data"
+  max_records: 5000
+
+# Only map records that carry real coordinates (see header note).
+filter: >
+  has(record.id)
+  && has(record.lat) && record.lat != null
+  && has(record.lng) && record.lng != null
+  && double(record.lat) != 0.0 && double(record.lng) != 0.0
+
+entity:
+  external_id: >
+    string(record.id)
+  name: >
+    has(record.name) && record.name != null ? string(record.name) : "Unknown person"
+  metadata:
+    status: >
+      has(record.status) && record.status != null ? string(record.status) : ""
+    status_label: >
+      has(record.status) && record.status == "localizado" ? "Located" :
+      has(record.status) && record.status == "sin-contacto" ? "No contact" : "Unknown"
+    last_seen_location: >
+      has(record.last_seen_location) && record.last_seen_location != null
+        ? string(record.last_seen_location) : ""
+    age: >
+      has(record.age) && record.age != null ? string(record.age) : ""
+    description: >
+      has(record.description) && record.description != null ? string(record.description) : ""
+    source_url: >
+      has(record.source2_url) && record.source2_url != null ? string(record.source2_url) : ""
+
+observation:
+  latitude: >
+    double(record.lat)
+  longitude: >
+    double(record.lng)
+  altitude: "0.0"
+  timestamp: >
+    has(record.submitted_at) && record.submitted_at != null
+      ? parse_iso8601(string(record.submitted_at)) : now()
+  velocity: {}
+  metadata:
+    status: >
+      has(record.status) && record.status != null ? string(record.status) : ""
+  content_hash: >
+    string(record.id) + "_" + (has(record.status) && record.status != null ? string(record.status) : "")
+
+recording:
+  mode: dedupe
+
+cache:
+  ttl: "1800s"
+
+display:
+  icon:
+    shape: marker
+    rotatable: false
+    interpolation: false
+    scale: 1.0
+  trail:
+    color: "#ce93d8"
+    width: 1.0
+    opacity: 0.5
+  style:
+    color: "#ce93d8"
+    point_size: 7
+  color_by:
+    field: status
+    values:
+      sin-contacto: "#ff5252"   # still missing — red
+      localizado: "#69f0ae"     # located — green
+    default_color: "#ce93d8"
+  field_renderers:
+    - keys: [status_label]
+      label: "STATUS"
+      format:
+        type: string
+        transform: upper
+      priority: 0
+    - keys: [last_seen_location]
+      label: "LAST SEEN"
+      format:
+        type: string
+      priority: 1
+    - keys: [age]
+      label: "AGE"
+      format:
+        type: string
+      priority: 2
+    - keys: [description]
+      label: "DETAILS"
+      format:
+        type: string
+      priority: 3
+
+history:
+  max_lookback: "8760h"
+  max_range_span: "720h"

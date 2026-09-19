@@ -1,0 +1,33 @@
+version: v2
+managed:
+  enabled: true
+  override:
+    - file_option: go_package_prefix
+      value: github.com/Alevsk/respondent/gen/go
+    - file_option: go_package
+      module: buf.build/googleapis/googleapis
+      path: google/api/annotations.proto
+      value: google.golang.org/genproto/googleapis/api/annotations;annotations
+    - file_option: go_package
+      module: buf.build/googleapis/googleapis
+      path: google/api/http.proto
+      value: google.golang.org/genproto/googleapis/api/annotations;annotations
+plugins:
+  # Go protobuf messages
+  - remote: buf.build/protocolbuffers/go
+    out: gen/go
+    opt: paths=source_relative
+  # Go gRPC service stubs
+  - remote: buf.build/grpc/go
+    out: gen/go
+    opt: paths=source_relative
+  # gRPC-Gateway HTTP reverse proxy
+  - remote: buf.build/grpc-ecosystem/gateway
+    out: gen/go
+    opt: paths=source_relative
+  # OpenAPI v2 spec for REST clients
+  - remote: buf.build/grpc-ecosystem/openapiv2
+    out: gen/openapi
+    opt: logtostderr=true
+inputs:
+  - directory: api/proto

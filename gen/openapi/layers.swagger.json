@@ -1,0 +1,611 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "layers.proto",
+    "version": "version not set"
+  },
+  "tags": [
+    {
+      "name": "LayerService"
+    }
+  ],
+  "consumes": [
+    "application/json"
+  ],
+  "produces": [
+    "application/json"
+  ],
+  "paths": {
+    "/v1/layers": {
+      "get": {
+        "summary": "Get all available layers",
+        "operationId": "LayerService_GetLayers",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1GetLayersResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "LayerService"
+        ]
+      }
+    },
+    "/v1/layers/{layerId}/snapshot": {
+      "get": {
+        "summary": "Get current snapshot of entities for a layer",
+        "operationId": "LayerService_GetLayerSnapshot",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1GetLayerSnapshotResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "layerId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "limit",
+            "description": "Max entities to return (default 500)",
+            "in": "query",
+            "required": false,
+            "type": "integer",
+            "format": "int32"
+          },
+          {
+            "name": "offset",
+            "description": "Pagination offset",
+            "in": "query",
+            "required": false,
+            "type": "integer",
+            "format": "int32"
+          }
+        ],
+        "tags": [
+          "LayerService"
+        ]
+      }
+    },
+    "/v1/layers/{toggle.layerId}": {
+      "put": {
+        "summary": "Toggle layer enable/disable, mode, and density",
+        "operationId": "LayerService_ToggleLayer",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ToggleLayerResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "toggle.layerId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "toggle",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "mode": {
+                  "$ref": "#/definitions/v1LayerMode"
+                },
+                "density": {
+                  "type": "integer",
+                  "format": "int32",
+                  "title": "0-100"
+                }
+              }
+            }
+          }
+        ],
+        "tags": [
+          "LayerService"
+        ]
+      }
+    }
+  },
+  "definitions": {
+    "protobufAny": {
+      "type": "object",
+      "properties": {
+        "@type": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": {}
+    },
+    "rpcStatus": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "message": {
+          "type": "string"
+        },
+        "details": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/protobufAny"
+          }
+        }
+      }
+    },
+    "v1ColorByConfig": {
+      "type": "object",
+      "properties": {
+        "field": {
+          "type": "string",
+          "title": "metadata field name whose value selects the color"
+        },
+        "values": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "field value -\u003e hex color"
+        },
+        "defaultColor": {
+          "type": "string",
+          "title": "hex color used when the value is not in the map"
+        }
+      },
+      "description": "ColorByConfig derives an entity's render color from the value of a metadata\nfield, e.g. coloring facilities by their \"status\". This keeps per-value color\nrules declarative (in the source YAML) instead of hardcoded in the client."
+    },
+    "v1Entity": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "externalId": {
+          "type": "string"
+        },
+        "layerType": {
+          "type": "string",
+          "title": "flights_commercial, flights_military, satellites, earthquakes, traffic, cctv"
+        },
+        "name": {
+          "type": "string"
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "aiMetadataJson": {
+          "type": "string",
+          "title": "AI enrichment data as JSON string (nested objects not representable in proto map)"
+        }
+      },
+      "title": "Entity represents a normalized geospatial object"
+    },
+    "v1FieldFormat": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "$ref": "#/definitions/v1FieldType"
+        },
+        "precision": {
+          "type": "integer",
+          "format": "int32",
+          "title": "For float/integer types"
+        },
+        "prefix": {
+          "type": "string"
+        },
+        "suffix": {
+          "type": "string"
+        },
+        "transform": {
+          "$ref": "#/definitions/v1FieldTransform"
+        }
+      },
+      "description": "FieldFormat describes the formatting rules for a rendered field value."
+    },
+    "v1FieldRendererConfig": {
+      "type": "object",
+      "properties": {
+        "keys": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "label": {
+          "type": "string"
+        },
+        "format": {
+          "$ref": "#/definitions/v1FieldFormat"
+        },
+        "priority": {
+          "type": "integer",
+          "format": "int32"
+        }
+      },
+      "description": "FieldRendererConfig defines how a metadata field is displayed in the UI."
+    },
+    "v1FieldTransform": {
+      "type": "string",
+      "enum": [
+        "FIELD_TRANSFORM_UNSPECIFIED",
+        "FIELD_TRANSFORM_UPPER",
+        "FIELD_TRANSFORM_LOWER"
+      ],
+      "default": "FIELD_TRANSFORM_UNSPECIFIED",
+      "description": "FieldTransform defines text transformation for string fields."
+    },
+    "v1FieldType": {
+      "type": "string",
+      "enum": [
+        "FIELD_TYPE_UNSPECIFIED",
+        "FIELD_TYPE_STRING",
+        "FIELD_TYPE_FLOAT",
+        "FIELD_TYPE_INTEGER",
+        "FIELD_TYPE_RAW"
+      ],
+      "default": "FIELD_TYPE_UNSPECIFIED",
+      "description": "FieldType defines the data type of a rendered field value."
+    },
+    "v1FilteringMode": {
+      "type": "string",
+      "enum": [
+        "FILTERING_MODE_UNSPECIFIED",
+        "FILTERING_MODE_VIEWPORT"
+      ],
+      "default": "FILTERING_MODE_UNSPECIFIED",
+      "description": "FilteringMode defines how a layer delivers data to clients."
+    },
+    "v1GeoPoint": {
+      "type": "object",
+      "properties": {
+        "lat": {
+          "type": "number",
+          "format": "double"
+        },
+        "lon": {
+          "type": "number",
+          "format": "double"
+        },
+        "altM": {
+          "type": "number",
+          "format": "double"
+        }
+      }
+    },
+    "v1GetLayerSnapshotResponse": {
+      "type": "object",
+      "properties": {
+        "entities": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1Entity"
+          }
+        },
+        "observations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1Observation"
+          }
+        },
+        "totalCount": {
+          "type": "string",
+          "format": "int64",
+          "title": "Total available entities"
+        },
+        "hasMore": {
+          "type": "boolean",
+          "title": "More entities available"
+        }
+      }
+    },
+    "v1GetLayersResponse": {
+      "type": "object",
+      "properties": {
+        "layers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1Layer"
+          }
+        }
+      }
+    },
+    "v1HistoryConfig": {
+      "type": "object",
+      "properties": {
+        "maxLookbackHours": {
+          "type": "integer",
+          "format": "int32",
+          "title": "Max hours into the past (0 = server default 48h)"
+        },
+        "maxRangeSpanHours": {
+          "type": "integer",
+          "format": "int32",
+          "title": "Max hours per query window (0 = server default 24h)"
+        }
+      },
+      "description": "HistoryConfig defines per-layer time range limits for historical exploration.\nWhen present, the frontend custom range picker uses these limits instead of the server defaults.\nZero values mean \"use server default\"."
+    },
+    "v1IconConfig": {
+      "type": "object",
+      "properties": {
+        "shape": {
+          "type": "string",
+          "title": "Free-form shape name (e.g. \"flight\", \"ship\", \"missile\")"
+        },
+        "rotatable": {
+          "type": "boolean"
+        },
+        "interpolation": {
+          "type": "boolean",
+          "title": "Dead-reckoning motion interpolation"
+        },
+        "scale": {
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "description": "IconConfig defines icon rendering properties for entities on the globe."
+    },
+    "v1Layer": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "title": "Dynamic layer type string (e.g. flights_commercial, satellites)"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "mode": {
+          "$ref": "#/definitions/v1LayerMode"
+        },
+        "density": {
+          "type": "integer",
+          "format": "int32",
+          "title": "0-100"
+        },
+        "source": {
+          "type": "string"
+        },
+        "lastUpdate": {
+          "type": "string",
+          "format": "int64",
+          "title": "Unix timestamp in milliseconds"
+        },
+        "count": {
+          "type": "string",
+          "format": "int64",
+          "title": "Entity count (for high-volume layers)"
+        },
+        "color": {
+          "type": "string",
+          "title": "CSS color string for rendering (e.g., \"#00ff9d\")"
+        },
+        "pointSize": {
+          "type": "integer",
+          "format": "int32",
+          "title": "Point size in pixels for rendering"
+        },
+        "displayConfig": {
+          "$ref": "#/definitions/v1LayerDisplayConfig",
+          "title": "Display configuration from declarative source YAML"
+        },
+        "historyConfig": {
+          "$ref": "#/definitions/v1HistoryConfig",
+          "title": "Per-layer time range limits (nil = server defaults: 48h lookback, 24h span)"
+        },
+        "renderingMode": {
+          "$ref": "#/definitions/v1RenderingMode",
+          "title": "Determines frontend rendering strategy"
+        },
+        "filteringMode": {
+          "$ref": "#/definitions/v1FilteringMode",
+          "title": "When FILTERING_MODE_VIEWPORT, frontend sends camera bounds for progressive loading"
+        }
+      },
+      "title": "Layer represents a configurable data layer"
+    },
+    "v1LayerDisplayConfig": {
+      "type": "object",
+      "properties": {
+        "icon": {
+          "$ref": "#/definitions/v1IconConfig"
+        },
+        "trail": {
+          "$ref": "#/definitions/v1TrailConfig"
+        },
+        "style": {
+          "$ref": "#/definitions/v1StyleConfig"
+        },
+        "fieldRenderers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1FieldRendererConfig"
+          }
+        },
+        "colorBy": {
+          "$ref": "#/definitions/v1ColorByConfig",
+          "title": "optional: derive entity color from a metadata field's value"
+        }
+      },
+      "description": "LayerDisplayConfig holds rendering metadata for a layer, populated from declarative source definitions."
+    },
+    "v1LayerMode": {
+      "type": "string",
+      "enum": [
+        "LAYER_MODE_UNSPECIFIED",
+        "LAYER_MODE_SPARSE",
+        "LAYER_MODE_FULL"
+      ],
+      "default": "LAYER_MODE_UNSPECIFIED",
+      "description": "LayerMode defines the density mode for a layer."
+    },
+    "v1LayerToggle": {
+      "type": "object",
+      "properties": {
+        "layerId": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "mode": {
+          "$ref": "#/definitions/v1LayerMode"
+        },
+        "density": {
+          "type": "integer",
+          "format": "int32",
+          "title": "0-100"
+        }
+      }
+    },
+    "v1Observation": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "entityId": {
+          "type": "string"
+        },
+        "ts": {
+          "type": "string",
+          "format": "int64",
+          "title": "Unix timestamp in milliseconds (last poll / collection time)"
+        },
+        "position": {
+          "$ref": "#/definitions/v1GeoPoint"
+        },
+        "altitudeM": {
+          "type": "number",
+          "format": "double"
+        },
+        "velocity": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "number",
+            "format": "double"
+          }
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "eventTimeMs": {
+          "type": "string",
+          "format": "int64",
+          "title": "When the event actually occurred (0 = not set)"
+        },
+        "eventEndMs": {
+          "type": "string",
+          "format": "int64",
+          "title": "When the event ended, for range events (0 = not set)"
+        }
+      },
+      "title": "Observation represents a time-series record of an entity"
+    },
+    "v1RenderingMode": {
+      "type": "string",
+      "enum": [
+        "RENDERING_MODE_UNSPECIFIED",
+        "RENDERING_MODE_MAP",
+        "RENDERING_MODE_INDICATOR"
+      ],
+      "default": "RENDERING_MODE_UNSPECIFIED",
+      "description": "RenderingMode defines how the frontend renders a layer."
+    },
+    "v1StyleConfig": {
+      "type": "object",
+      "properties": {
+        "color": {
+          "type": "string",
+          "title": "hex color"
+        },
+        "pointSize": {
+          "type": "integer",
+          "format": "int32"
+        }
+      },
+      "description": "StyleConfig defines general visual style for a layer."
+    },
+    "v1ToggleLayerResponse": {
+      "type": "object",
+      "properties": {
+        "layer": {
+          "$ref": "#/definitions/v1Layer"
+        }
+      }
+    },
+    "v1TrailConfig": {
+      "type": "object",
+      "properties": {
+        "color": {
+          "type": "string",
+          "title": "hex color"
+        },
+        "width": {
+          "type": "number",
+          "format": "double",
+          "title": "polyline width"
+        },
+        "opacity": {
+          "type": "number",
+          "format": "double",
+          "title": "trail alpha"
+        }
+      },
+      "description": "TrailConfig defines trail rendering properties for entity movement paths."
+    }
+  }
+}

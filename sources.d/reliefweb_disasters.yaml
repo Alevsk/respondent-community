@@ -1,0 +1,299 @@
+# sources.d/reliefweb_disasters.yaml
+# ReliefWeb Disasters — UN OCHA (Office for the Coordination of Humanitarian Affairs)
+# Source: https://api.reliefweb.int/v1/disasters
+# Auth: Requires approved appname query parameter (set via RESPONDENT_RELIEFWEB_APPNAME env var)
+# Format: JSON with nested data[].fields structure
+#
+# NOTE: The ReliefWeb disasters API does NOT return geographic coordinates.
+# primary_country only provides id, iso3, name, and shortname.
+# We use a lookup table mapping ISO3 country codes to country centroids.
+#
+# IMPORTANT: As of November 2025, ReliefWeb requires a pre-approved appname.
+# Register at: https://apidoc.reliefweb.int/parameters#appname
+# Set the env var RESPONDENT_RELIEFWEB_APPNAME to your approved appname.
+schema_version: 1
+
+name: reliefweb_disasters
+labels:
+  category: humanitarian
+  priority: high
+
+# --- Identity ---
+source_type: reliefweb_disasters
+layer_type: humanitarian
+display_name: "ReliefWeb Disasters (UN OCHA)"
+
+# --- Operational Controls ---
+# Disabled: ReliefWeb now requires an approved appname (403 without one).
+# To enable: request an appname at https://apidoc.reliefweb.int/parameters#appname
+enabled: false
+
+# ISO3 country code -> centroid coordinates lookup table.
+# Covers the most disaster-prone countries tracked by ReliefWeb.
+lookup_tables:
+  - name: "country_centroids"
+    key_field: "iso3"
+    entries:
+      # ── Africa ───────────────────────────────────────────────────────
+      - { iso3: "AGO", lat: -12.29, lon: 17.87, name: "Angola" }
+      - { iso3: "BDI", lat: -3.37, lon: 29.92, name: "Burundi" }
+      - { iso3: "BEN", lat: 9.31, lon: 2.32, name: "Benin" }
+      - { iso3: "BFA", lat: 12.24, lon: -1.56, name: "Burkina Faso" }
+      - { iso3: "BWA", lat: -22.33, lon: 24.68, name: "Botswana" }
+      - { iso3: "CAF", lat: 6.61, lon: 20.94, name: "Central African Republic" }
+      - { iso3: "CIV", lat: 7.54, lon: -5.55, name: "Côte d'Ivoire" }
+      - { iso3: "CMR", lat: 7.37, lon: 12.35, name: "Cameroon" }
+      - { iso3: "COD", lat: -4.04, lon: 21.76, name: "DR Congo" }
+      - { iso3: "COG", lat: -0.23, lon: 15.83, name: "Congo" }
+      - { iso3: "COM", lat: -11.88, lon: 43.87, name: "Comoros" }
+      - { iso3: "DJI", lat: 11.83, lon: 42.59, name: "Djibouti" }
+      - { iso3: "DZA", lat: 28.03, lon: 1.66, name: "Algeria" }
+      - { iso3: "EGY", lat: 26.82, lon: 30.80, name: "Egypt" }
+      - { iso3: "ERI", lat: 15.18, lon: 39.78, name: "Eritrea" }
+      - { iso3: "ETH", lat: 9.15, lon: 40.49, name: "Ethiopia" }
+      - { iso3: "GAB", lat: -0.80, lon: 11.61, name: "Gabon" }
+      - { iso3: "GHA", lat: 7.95, lon: -1.02, name: "Ghana" }
+      - { iso3: "GIN", lat: 9.95, lon: -11.36, name: "Guinea" }
+      - { iso3: "GMB", lat: 13.44, lon: -15.31, name: "Gambia" }
+      - { iso3: "GNB", lat: 11.80, lon: -15.18, name: "Guinea-Bissau" }
+      - { iso3: "GNQ", lat: 1.65, lon: 10.27, name: "Equatorial Guinea" }
+      - { iso3: "KEN", lat: -0.02, lon: 37.91, name: "Kenya" }
+      - { iso3: "LBR", lat: 6.43, lon: -9.43, name: "Liberia" }
+      - { iso3: "LBY", lat: 26.34, lon: 17.23, name: "Libya" }
+      - { iso3: "LSO", lat: -29.61, lon: 28.23, name: "Lesotho" }
+      - { iso3: "MAR", lat: 31.79, lon: -7.09, name: "Morocco" }
+      - { iso3: "MDG", lat: -18.77, lon: 46.87, name: "Madagascar" }
+      - { iso3: "MLI", lat: 17.57, lon: -4.00, name: "Mali" }
+      - { iso3: "MOZ", lat: -18.67, lon: 35.53, name: "Mozambique" }
+      - { iso3: "MRT", lat: 21.01, lon: -10.94, name: "Mauritania" }
+      - { iso3: "MUS", lat: -20.35, lon: 57.55, name: "Mauritius" }
+      - { iso3: "MWI", lat: -13.25, lon: 34.30, name: "Malawi" }
+      - { iso3: "NAM", lat: -22.96, lon: 18.49, name: "Namibia" }
+      - { iso3: "NER", lat: 17.61, lon: 8.08, name: "Niger" }
+      - { iso3: "NGA", lat: 9.08, lon: 8.68, name: "Nigeria" }
+      - { iso3: "RWA", lat: -1.94, lon: 29.87, name: "Rwanda" }
+      - { iso3: "SDN", lat: 12.86, lon: 30.22, name: "Sudan" }
+      - { iso3: "SEN", lat: 14.50, lon: -14.45, name: "Senegal" }
+      - { iso3: "SLE", lat: 8.46, lon: -11.78, name: "Sierra Leone" }
+      - { iso3: "SOM", lat: 5.15, lon: 46.20, name: "Somalia" }
+      - { iso3: "SSD", lat: 6.88, lon: 31.31, name: "South Sudan" }
+      - { iso3: "SWZ", lat: -26.52, lon: 31.47, name: "Eswatini" }
+      - { iso3: "TCD", lat: 15.45, lon: 18.73, name: "Chad" }
+      - { iso3: "TGO", lat: 8.62, lon: 0.82, name: "Togo" }
+      - { iso3: "TUN", lat: 33.89, lon: 9.54, name: "Tunisia" }
+      - { iso3: "TZA", lat: -6.37, lon: 34.89, name: "Tanzania" }
+      - { iso3: "UGA", lat: 1.37, lon: 32.29, name: "Uganda" }
+      - { iso3: "ZAF", lat: -30.56, lon: 22.94, name: "South Africa" }
+      - { iso3: "ZMB", lat: -13.13, lon: 27.85, name: "Zambia" }
+      - { iso3: "ZWE", lat: -19.02, lon: 29.15, name: "Zimbabwe" }
+      # ── Asia ─────────────────────────────────────────────────────────
+      - { iso3: "AFG", lat: 33.94, lon: 67.71, name: "Afghanistan" }
+      - { iso3: "BGD", lat: 23.68, lon: 90.36, name: "Bangladesh" }
+      - { iso3: "BTN", lat: 27.51, lon: 90.43, name: "Bhutan" }
+      - { iso3: "CHN", lat: 35.86, lon: 104.20, name: "China" }
+      - { iso3: "IDN", lat: -0.79, lon: 113.92, name: "Indonesia" }
+      - { iso3: "IND", lat: 20.59, lon: 78.96, name: "India" }
+      - { iso3: "IRN", lat: 32.43, lon: 53.69, name: "Iran" }
+      - { iso3: "IRQ", lat: 33.22, lon: 43.68, name: "Iraq" }
+      - { iso3: "JPN", lat: 36.20, lon: 138.25, name: "Japan" }
+      - { iso3: "KGZ", lat: 41.20, lon: 74.77, name: "Kyrgyzstan" }
+      - { iso3: "KHM", lat: 12.57, lon: 104.99, name: "Cambodia" }
+      - { iso3: "LAO", lat: 19.86, lon: 102.50, name: "Laos" }
+      - { iso3: "LKA", lat: 7.87, lon: 80.77, name: "Sri Lanka" }
+      - { iso3: "MMR", lat: 21.91, lon: 95.96, name: "Myanmar" }
+      - { iso3: "MNG", lat: 46.86, lon: 103.85, name: "Mongolia" }
+      - { iso3: "NPL", lat: 28.39, lon: 84.12, name: "Nepal" }
+      - { iso3: "PAK", lat: 30.38, lon: 69.35, name: "Pakistan" }
+      - { iso3: "PHL", lat: 12.88, lon: 121.77, name: "Philippines" }
+      - { iso3: "PRK", lat: 40.34, lon: 127.51, name: "North Korea" }
+      - { iso3: "THA", lat: 15.87, lon: 100.99, name: "Thailand" }
+      - { iso3: "TJK", lat: 38.86, lon: 71.28, name: "Tajikistan" }
+      - { iso3: "TKM", lat: 38.97, lon: 59.56, name: "Turkmenistan" }
+      - { iso3: "TLS", lat: -8.87, lon: 125.73, name: "Timor-Leste" }
+      - { iso3: "UZB", lat: 41.38, lon: 64.59, name: "Uzbekistan" }
+      - { iso3: "VNM", lat: 14.06, lon: 108.28, name: "Vietnam" }
+      # ── Middle East ──────────────────────────────────────────────────
+      - { iso3: "ISR", lat: 31.05, lon: 34.85, name: "Israel" }
+      - { iso3: "JOR", lat: 30.59, lon: 36.24, name: "Jordan" }
+      - { iso3: "LBN", lat: 33.85, lon: 35.86, name: "Lebanon" }
+      - { iso3: "PSE", lat: 31.95, lon: 35.23, name: "Palestine" }
+      - { iso3: "SYR", lat: 34.80, lon: 39.00, name: "Syria" }
+      - { iso3: "TUR", lat: 38.96, lon: 35.24, name: "Türkiye" }
+      - { iso3: "YEM", lat: 15.55, lon: 48.52, name: "Yemen" }
+      # ── Americas ─────────────────────────────────────────────────────
+      - { iso3: "ARG", lat: -38.42, lon: -63.62, name: "Argentina" }
+      - { iso3: "BOL", lat: -16.29, lon: -63.59, name: "Bolivia" }
+      - { iso3: "BRA", lat: -14.24, lon: -51.93, name: "Brazil" }
+      - { iso3: "CHL", lat: -35.68, lon: -71.54, name: "Chile" }
+      - { iso3: "COL", lat: 4.57, lon: -74.30, name: "Colombia" }
+      - { iso3: "CRI", lat: 9.75, lon: -83.75, name: "Costa Rica" }
+      - { iso3: "CUB", lat: 21.52, lon: -77.78, name: "Cuba" }
+      - { iso3: "DOM", lat: 18.74, lon: -70.16, name: "Dominican Republic" }
+      - { iso3: "ECU", lat: -1.83, lon: -78.18, name: "Ecuador" }
+      - { iso3: "GTM", lat: 15.78, lon: -90.23, name: "Guatemala" }
+      - { iso3: "HND", lat: 15.20, lon: -86.24, name: "Honduras" }
+      - { iso3: "HTI", lat: 18.97, lon: -72.29, name: "Haiti" }
+      - { iso3: "JAM", lat: 18.11, lon: -77.30, name: "Jamaica" }
+      - { iso3: "MEX", lat: 23.63, lon: -102.55, name: "Mexico" }
+      - { iso3: "NIC", lat: 12.87, lon: -85.21, name: "Nicaragua" }
+      - { iso3: "PAN", lat: 8.54, lon: -80.78, name: "Panama" }
+      - { iso3: "PER", lat: -9.19, lon: -75.02, name: "Peru" }
+      - { iso3: "PRI", lat: 18.22, lon: -66.59, name: "Puerto Rico" }
+      - { iso3: "PRY", lat: -23.44, lon: -58.44, name: "Paraguay" }
+      - { iso3: "SLV", lat: 13.79, lon: -88.90, name: "El Salvador" }
+      - { iso3: "URY", lat: -32.52, lon: -55.77, name: "Uruguay" }
+      - { iso3: "USA", lat: 37.09, lon: -95.71, name: "United States" }
+      - { iso3: "VEN", lat: 6.42, lon: -66.59, name: "Venezuela" }
+      # ── Europe ───────────────────────────────────────────────────────
+      - { iso3: "ALB", lat: 41.15, lon: 20.17, name: "Albania" }
+      - { iso3: "BIH", lat: 43.92, lon: 17.68, name: "Bosnia and Herzegovina" }
+      - { iso3: "GRC", lat: 39.07, lon: 21.82, name: "Greece" }
+      - { iso3: "ITA", lat: 41.87, lon: 12.57, name: "Italy" }
+      - { iso3: "MDA", lat: 47.41, lon: 28.37, name: "Moldova" }
+      - { iso3: "MKD", lat: 41.51, lon: 21.75, name: "North Macedonia" }
+      - { iso3: "MNE", lat: 42.71, lon: 19.37, name: "Montenegro" }
+      - { iso3: "POL", lat: 51.92, lon: 19.15, name: "Poland" }
+      - { iso3: "ROU", lat: 45.94, lon: 24.97, name: "Romania" }
+      - { iso3: "SRB", lat: 44.02, lon: 21.01, name: "Serbia" }
+      - { iso3: "UKR", lat: 48.38, lon: 31.17, name: "Ukraine" }
+      # ── Oceania ──────────────────────────────────────────────────────
+      - { iso3: "AUS", lat: -25.27, lon: 133.78, name: "Australia" }
+      - { iso3: "FJI", lat: -17.71, lon: 178.07, name: "Fiji" }
+      - { iso3: "NZL", lat: -40.90, lon: 174.89, name: "New Zealand" }
+      - { iso3: "PNG", lat: -6.31, lon: 143.96, name: "Papua New Guinea" }
+      - { iso3: "SLB", lat: -9.65, lon: 160.16, name: "Solomon Islands" }
+      - { iso3: "TON", lat: -21.18, lon: -175.20, name: "Tonga" }
+      - { iso3: "VUT", lat: -15.38, lon: 166.96, name: "Vanuatu" }
+      - { iso3: "WSM", lat: -13.76, lon: -172.10, name: "Samoa" }
+
+# --- Ingestion ---
+transport:
+  type: http_poll
+  # ReliefWeb API v1 disasters endpoint.
+  # The appname is loaded from RESPONDENT_RELIEFWEB_APPNAME env var.
+  # Register for an approved appname at: https://apidoc.reliefweb.int/parameters#appname
+  url: "https://api.reliefweb.int/v1/disasters?appname=${RELIEFWEB_APPNAME}&preset=latest&limit=50&fields%5Binclude%5D%5B%5D=country&fields%5Binclude%5D%5B%5D=date&fields%5Binclude%5D%5B%5D=primary_country&fields%5Binclude%5D%5B%5D=glide&fields%5Binclude%5D%5B%5D=name&fields%5Binclude%5D%5B%5D=status&fields%5Binclude%5D%5B%5D=type"
+  method: GET
+  headers:
+    Accept: "application/json"
+  timeout: "15s"
+  interval: "3600s"  # 1 hour
+  max_response_bytes: 10485760  # 10MB
+  retry:
+    max_attempts: 3
+    backoff: "exponential"
+    initial_delay: "2s"
+    max_delay: "30s"
+
+# --- Response Parsing ---
+# ReliefWeb returns: { "data": [ { "id": 123, "fields": { ... } }, ... ] }
+# records_path extracts the data array; each record is { id, fields, score, href }.
+parser:
+  format: json
+  records_path: "data"
+  max_records: 1000
+
+# --- Record Filtering (CEL) ---
+# Only process records that have primary_country with iso3 and that exist in our lookup table.
+filter: >
+  has(record.fields) && has(record.fields.primary_country)
+  && has(record.fields.primary_country.iso3)
+  && has_lookup("country_centroids", record.fields.primary_country.iso3)
+
+# --- Entity Mapping (CEL) ---
+entity:
+  external_id: >
+    string(record.id)
+  name: >
+    has(record.fields.name) ? record.fields.name : "ReliefWeb Disaster"
+  metadata:
+    disaster_type: >
+      has(record.fields.type) && size(record.fields.type) > 0 && has(record.fields.type[0].name)
+        ? record.fields.type[0].name
+        : ""
+    status: >
+      has(record.fields.status) ? record.fields.status : ""
+    country: >
+      has(record.fields.primary_country) && has(record.fields.primary_country.name)
+        ? record.fields.primary_country.name
+        : ""
+    iso3: >
+      record.fields.primary_country.iso3
+    glide: >
+      has(record.fields.glide) && size(record.fields.glide) > 0
+        ? record.fields.glide[0].code
+        : ""
+
+# --- Observation Mapping (CEL) ---
+observation:
+  # Coordinates come from the country centroids lookup table keyed by ISO3.
+  latitude: >
+    lookup("country_centroids", record.fields.primary_country.iso3, "lat")
+  longitude: >
+    lookup("country_centroids", record.fields.primary_country.iso3, "lon")
+  altitude: "0.0"
+  # date.created is ISO 8601 format (e.g., "2026-03-01T00:00:00+00:00")
+  timestamp: >
+    has(record.fields.date) && has(record.fields.date.created)
+      ? parse_iso8601(record.fields.date.created)
+      : now()
+  velocity: {}
+  metadata:
+    status: >
+      has(record.fields.status) ? record.fields.status : ""
+    disaster_type: >
+      has(record.fields.type) && size(record.fields.type) > 0 && has(record.fields.type[0].name)
+        ? record.fields.type[0].name
+        : ""
+  content_hash: ""
+
+# --- Recording ---
+recording:
+  mode: upsert
+
+# --- Cache ---
+cache:
+  ttl: "7200s"  # 2 hours (survive a couple missed polls)
+
+# --- Display ---
+display:
+  icon:
+    shape: warning
+    rotatable: false
+    interpolation: false
+    scale: 1.0
+  trail:
+    color: "#ff8c00"
+    width: 1.5
+    opacity: 0.8
+  style:
+    color: "#ff8c00"
+    point_size: 6
+  field_renderers:
+    - keys: [disaster_type]
+      label: "DISASTER TYPE"
+      format:
+        type: string
+        transform: upper
+      priority: 0
+    - keys: [status]
+      label: "STATUS"
+      format:
+        type: string
+        transform: upper
+      priority: 1
+    - keys: [country]
+      label: "COUNTRY"
+      format:
+        type: string
+      priority: 2
+    - keys: [glide]
+      label: "GLIDE"
+      format:
+        type: string
+      priority: 3
+
+# --- History ---
+history:
+  max_lookback: "4320h"    # 180 days
+  max_range_span: "168h"   # 7 days per query window

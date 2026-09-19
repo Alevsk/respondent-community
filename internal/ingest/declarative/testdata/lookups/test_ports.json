@@ -1,0 +1,5 @@
+[
+  {"port_number": "250401", "name": "San Ysidro", "lat": 32.5423, "lon": -117.0292},
+  {"port_number": "250601", "name": "Calexico", "lat": 32.6731, "lon": -115.4983},
+  {"port_number": "250301", "name": "Otay Mesa", "lat": 32.5649, "lon": -116.9386}
+]

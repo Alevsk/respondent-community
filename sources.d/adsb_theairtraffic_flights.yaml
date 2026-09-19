@@ -1,0 +1,141 @@
+# sources.d/adsb_theairtraffic_flights.yaml
+# Declarative definition for TheAirTraffic global ADS-B snapshot.
+#
+# Unlike the spatial-crawl sources (adsb.lol/adsb.fi/airplanes.live), this feed
+# returns the ENTIRE globe in a single ~0.5s response, so it needs no hex_grid
+# sweep: one poll populates every region at once. This eliminates the perceived
+# latency of waiting for a 1 req/s spatial crawl to reach a freshly-panned
+# viewport. Same global single-poll shape as open_sky_flights.yaml, with the
+# readsb v2 field mappings shared by the adsb.lol family.
+#
+# Attribution: data courtesy of TheAirTraffic (globe.theairtraffic.com).
+# The endpoint is fronted by Cloudflare and rejects requests without a browser
+# User-Agent + Referer, supplied via the transport.headers block below.
+# Reference: docs/FEEDER_DECLARATIVE_SOURCES.md
+schema_version: 2
+
+name: adsb_theairtraffic_flights
+labels:
+  category: aviation
+  priority: high
+source_type: adsb_theairtraffic_flights
+layer_type: flights_commercial
+display_name: "TheAirTraffic Flights"
+
+enabled: true
+
+filtering: viewport
+
+geo_cache:
+  overfetch_ratio: 3.0
+  alive_ratio_threshold: 0.5
+  gc_batch_size: 500
+
+transport:
+  type: http_poll
+  url: "https://globe.theairtraffic.com/data/aircraft.json"
+  method: GET
+  # Cloudflare edge rejects non-browser clients with 403; a browser UA + Referer
+  # passes the challenge for this static JSON path.
+  headers:
+    User-Agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    Referer: "https://globe.theairtraffic.com/"
+    Accept: "application/json"
+  timeout: "20s"
+  interval: "30s"
+  max_response_bytes: 52428800
+  retry:
+    max_attempts: 2
+    backoff: exponential
+    initial_delay: "1s"
+    max_delay: "10s"
+  # One global request per interval; a gentle ceiling keeps retries from
+  # hammering a free, Cloudflare-fronted provider.
+  rate_limit:
+    requests_per_second: 1
+    burst: 1
+
+parser:
+  format: json
+  records_path: "aircraft"
+  max_records: 20000
+
+filter: >
+  has(record.hex) && has(record.lat) && has(record.lon)
+
+entity:
+  external_id: >
+    record.hex
+  name: >
+    has(record.flight) && string(record.flight).trim() != ""
+      ? string(record.flight).trim()
+      : record.hex
+  metadata:
+    callsign: >
+      has(record.flight) ? string(record.flight).trim() : ""
+    hex: >
+      record.hex
+    type: >
+      has(record.t) ? record.t : ""
+    registration: >
+      has(record.r) ? record.r : ""
+
+observation:
+  latitude: >
+    double(record.lat)
+  longitude: >
+    double(record.lon)
+  altitude: >
+    has(record.alt_baro) && record.alt_baro != "ground"
+      ? coerce_double(record.alt_baro, 0.0) * 0.3048
+      : (has(record.alt_geom) ? coerce_double(record.alt_geom, 0.0) * 0.3048 : 0.0)
+  timestamp: >
+    now()
+  velocity:
+    speed: >
+      has(record.gs) ? string(double(record.gs) * 0.514444) : "0"
+    heading: >
+      has(record.track) ? string(record.track) : "0"
+    climb: >
+      has(record.baro_rate) ? string(double(record.baro_rate) * 0.00508) : "0"
+  metadata: {}
+  content_hash: ""
+
+recording:
+  mode: append
+
+cache:
+  ttl: "2700s"
+
+display:
+  icon:
+    shape: flight
+    rotatable: true
+    interpolation: true
+    scale: 1.0
+  trail:
+    color: "#00ff9d"
+    width: 1.5
+    opacity: 0.7
+  style:
+    color: "#00ff9d"
+    point_size: 6
+  field_renderers:
+    - keys: [callsign]
+      label: "CALLSIGN"
+      format:
+        type: string
+        transform: upper
+      priority: 0
+    - keys: [registration]
+      label: "REGISTRATION"
+      format:
+        type: string
+        transform: upper
+      priority: 1
+    - keys: [type]
+      label: "AIRCRAFT"
+      format:
+        type: string
+        transform: upper
+      priority: 2

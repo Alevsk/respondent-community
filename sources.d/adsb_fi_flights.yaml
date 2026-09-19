@@ -1,0 +1,156 @@
+# sources.d/adsb_fi_flights.yaml
+# Declarative definition for adsb.fi open-data ADS-B (v3 API, readsb v2 format).
+#
+# Drop-in failover sibling of adsb.lol: identical hex_grid spatial crawl, same
+# ~1 req/s ceiling, same readsb field mappings. Disabled by default; enable it
+# (and disable a peer) to fail over to a different operator's network if
+# adsb.lol degrades. adsb.fi v3 exposes only the /api/v3/lat/.../lon/.../dist/...
+# circle form — the /v2/point/{lat}/{lon} path used by airplanes.live 400s here,
+# and the deprecated v2 API returns the legacy "aircraft" key instead of "ac".
+#
+# Attribution: data courtesy of adsb.fi; non-commercial use only.
+# Reference: docs/FEEDER_DECLARATIVE_SOURCES.md
+schema_version: 2
+
+name: adsb_fi_flights
+labels:
+  category: aviation
+  priority: high
+source_type: adsb_fi_flights
+layer_type: flights_commercial
+display_name: "adsb.fi Flights"
+
+enabled: false
+
+filtering: viewport
+backfill:
+  threshold: 10
+
+geo_cache:
+  overfetch_ratio: 3.0
+  alive_ratio_threshold: 0.5
+  gc_batch_size: 500
+
+transport:
+  type: http_poll
+  url: "https://opendata.adsb.fi/api/v3/lat/{lat}/lon/{lon}/dist/250"
+  on_demand_url: "https://opendata.adsb.fi/api/v3/lat/{lat}/lon/{lon}/dist/250"
+  method: GET
+  headers:
+    User-Agent: "respondent-community/1.0"
+    Accept: "application/json"
+  timeout: "15s"
+  interval: "30s"
+  max_response_bytes: 52428800
+  retry:
+    max_attempts: 2
+    backoff: exponential
+    initial_delay: "1s"
+    max_delay: "10s"
+  # adsb.fi open data rate-limits per IP (~1 req/s). Budget is shared per host
+  # across the global crawl AND on-demand viewport fills; on-demand is sent at
+  # high priority so the visible region fills ahead of the background sweep.
+  rate_limit:
+    requests_per_second: 1
+    burst: 1
+
+  spatial:
+    type: hex_grid
+    radius_nm: 250
+    target_refresh: "30m"
+    batch_size: 0                 # auto-calculate
+    lat_min: -50                  # skip Antarctica/Southern Ocean (no air traffic below -50°)
+    lat_max: 72                   # skip deep Arctic (minimal traffic above 72°)
+    viewport_priority: true
+    priority_cap_pct: 50
+
+parser:
+  format: json
+  records_path: "ac"
+  max_records: 10000
+
+filter: >
+  has(record.hex) && has(record.lat) && has(record.lon)
+
+entity:
+  external_id: >
+    record.hex
+  name: >
+    has(record.flight) && string(record.flight).trim() != ""
+      ? string(record.flight).trim()
+      : record.hex
+  metadata:
+    callsign: >
+      has(record.flight) ? string(record.flight).trim() : ""
+    hex: >
+      record.hex
+    type: >
+      has(record.t) ? record.t : ""
+    registration: >
+      has(record.r) ? record.r : ""
+
+observation:
+  latitude: >
+    double(record.lat)
+  longitude: >
+    double(record.lon)
+  altitude: >
+    has(record.alt_baro) && record.alt_baro != "ground"
+      ? coerce_double(record.alt_baro, 0.0) * 0.3048
+      : (has(record.alt_geom) ? coerce_double(record.alt_geom, 0.0) * 0.3048 : 0.0)
+  timestamp: >
+    now()
+  velocity:
+    speed: >
+      has(record.gs) ? string(double(record.gs) * 0.514444) : "0"
+    heading: >
+      has(record.track) ? string(record.track) : "0"
+    climb: >
+      has(record.baro_rate) ? string(double(record.baro_rate) * 0.00508) : "0"
+  metadata: {}
+  content_hash: ""
+
+entity_cache:
+  enabled: true
+  key: "record.hex"
+  ttl: "1800s"   # Must match target_refresh (30m) so entities survive a full sweep
+  accumulate: true
+
+recording:
+  mode: append
+
+cache:
+  ttl: "2700s"
+
+display:
+  icon:
+    shape: flight
+    rotatable: true
+    interpolation: true
+    scale: 1.0
+  trail:
+    color: "#00ff9d"
+    width: 1.5
+    opacity: 0.7
+  style:
+    color: "#00ff9d"
+    point_size: 6
+  field_renderers:
+    - keys: [callsign]
+      label: "CALLSIGN"
+      format:
+        type: string
+        transform: upper
+      priority: 0
+    - keys: [registration]
+      label: "REGISTRATION"
+      format:
+        type: string
+        transform: upper
+      priority: 1
+    - keys: [type]
+      label: "AIRCRAFT"
+      format:
+        type: string
+        transform: upper
+      priority: 2

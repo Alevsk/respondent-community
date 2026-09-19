@@ -1,0 +1,48 @@
+schema_version: 1
+name: earthquake_impact_report
+display_name: "Earthquake Impact Assessment Pipeline"
+enabled: false
+
+trigger:
+  type: event
+  source: usgs_earthquakes
+  filter: |
+    double(entity.metadata.magnitude) >= 5.0
+
+steps:
+  # Step 1: Fetch nearby population data
+  - name: fetch_population
+    type: http_request
+    url: "https://api.example.com/population?lat={{.Entity.lat}}&lon={{.Entity.lon}}&radius=100km"
+
+  # Step 2: AI analysis combining earthquake + population data
+  - name: impact_analysis
+    type: ai
+    prompt: |
+      A M{{.Entity.magnitude}} earthquake occurred at {{.Entity.name}}.
+      Depth: {{.Entity.depth}}km.
+      Nearby population data: {{index .Steps "fetch_population" "Result"}}
+      Assess the humanitarian impact.
+    output_schema:
+      type: object
+      required: [impact_level, estimated_affected, recommendations]
+      properties:
+        impact_level:
+          type: string
+          enum: [minimal, minor, moderate, major, catastrophic]
+        estimated_affected:
+          type: integer
+        recommendations:
+          type: array
+          items:
+            type: string
+        infrastructure_risk:
+          type: string
+    max_tokens: 2000
+    temperature: 0.2
+
+  # Step 3: Route to targets
+  - name: deliver
+    type: target
+    targets:
+      - slack_emergency_channel

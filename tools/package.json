@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "playwright": "^1.61.0",
+    "ws": "^8.20.0"
+  }
+}
