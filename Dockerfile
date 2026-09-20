@@ -37,6 +37,11 @@ RUN --mount=type=cache,target=/go/pkg/mod \
         -o /community ./cmd/community && \
     xx-verify --static /community
 
+# ── Export (for extracting binaries) ─────────────────────────────────────────
+FROM scratch AS export
+COPY --from=builder /community /
+
+
 # ── Runtime ─────────────────────────────────────────────────────────────────
 FROM docker.io/library/alpine:3.20
 RUN apk --no-cache add ca-certificates && \
@@ -61,6 +66,3 @@ LABEL org.opencontainers.image.title="respondent-community" \
       org.opencontainers.image.source="https://github.com/alevsk/respondent-community" \
       org.opencontainers.image.licenses="MIT"
 
-# ── Export (for extracting binaries) ─────────────────────────────────────────
-FROM scratch AS export
-COPY --from=builder /community /
