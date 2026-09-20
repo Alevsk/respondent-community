@@ -35,7 +35,7 @@ jobs:
 
     - name: Run Linters
       run: |
-        mkdir -p frontend/apps/earth/dist && touch frontend/apps/earth/dist/index.html
+        mkdir -p embedfs/frontend/apps/earth/dist && touch embedfs/frontend/apps/earth/dist/index.html
         make all-lint
 
     - name: Run Tests
