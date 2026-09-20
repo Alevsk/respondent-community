@@ -53,13 +53,11 @@ if (CESIUM_ION_TOKEN) {
 function createFallbackBaseLayer(): ImageryLayer | undefined {
   if (CESIUM_ION_TOKEN) return undefined;
   return new ImageryLayer(
-    ArcGisMapServerImageryProvider.fromUrl(
-      'https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer',
-      {
-        credit: new Credit('Powered by Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community', false),
-        enablePickFeatures: false,
-      }
-    ),
+    new UrlTemplateImageryProvider({
+      url: 'https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+      credit: new Credit('Powered by Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community', false),
+      maximumLevel: 16,
+    }),
     {},
   );
 }

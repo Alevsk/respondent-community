@@ -7,11 +7,11 @@
  */
 
 import { useEffect, useRef } from 'react';
-import { type Viewer, type ImageryLayer, ArcGisMapServerImageryProvider, Credit } from 'cesium';
+import { type Viewer, type ImageryLayer, UrlTemplateImageryProvider, Credit } from 'cesium';
 import { useUIStore } from '@/app/store';
 
 /** Labels-only tile URL — transparent background with white text labels. */
-const LABELS_TILE_URL = 'https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer';
+const LABELS_TILE_URL = 'https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}';
 
 /** Target alpha when fully visible. */
 const LABELS_ALPHA = 0.85;
@@ -64,9 +64,10 @@ export const GeoLabelsLayer: React.FC<GeoLabelsLayerProps> = ({ viewerRef, viewe
     if (!viewerReady || !viewer || viewer.isDestroyed()) return;
 
     if (showGeoLabels && !layerRef.current) {
-      const provider = ArcGisMapServerImageryProvider.fromUrl(LABELS_TILE_URL, {
+      const provider = new UrlTemplateImageryProvider({
+        url: LABELS_TILE_URL,
         credit: new Credit('Powered by Esri', false),
-        enablePickFeatures: false,
+        maximumLevel: 16,
       });
       const layer = viewer.imageryLayers.addImageryProvider(provider);
       layer.alpha = 0;
