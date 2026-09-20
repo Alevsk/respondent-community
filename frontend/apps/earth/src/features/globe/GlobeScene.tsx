@@ -45,7 +45,7 @@ if (CESIUM_ION_TOKEN) {
 // Cesium Ion "World Imagery" layer (asset 2 = Bing Maps Aerial) using a
 // baked-in default access token that is frequently revoked — resulting in a
 // cascade of 401s to `api.cesium.com/v1/assets/2/endpoint`. Fall back to
-// Stadia Maps Alidade Smooth Dark tiles so the globe matches the app's dark
+// CARTO Dark Matter tiles so the globe matches the app's dark
 // theme without requiring a Cesium Ion account.
 //
 // IMPORTANT: This must be a factory, not a module-level constant. When React
@@ -55,8 +55,8 @@ function createFallbackBaseLayer(): ImageryLayer | undefined {
   if (CESIUM_ION_TOKEN) return undefined;
   return new ImageryLayer(
     new UrlTemplateImageryProvider({
-      url: 'https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}.png',
-      credit: new Credit('Stadia Maps, OpenMapTiles, OpenStreetMap contributors', false),
+      url: 'https://basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}.png',
+      credit: new Credit('© CARTO, © OpenStreetMap contributors', false),
       maximumLevel: 18,
     }),
     {},

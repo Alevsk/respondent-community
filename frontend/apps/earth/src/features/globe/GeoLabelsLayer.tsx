@@ -2,7 +2,7 @@
  * GeoLabelsLayer — toggleable geographic labels overlay (country/city names).
  *
  * Adds a labels-only tile imagery layer on top of the base imagery when
- * enabled via the Settings panel. Uses Stadia Maps Stamen Toner Labels
+ * enabled via the Settings panel. Uses CARTO Dark Matter Labels
  * (free, no API key required). Fades in/out over FADE_DURATION_MS.
  */
 
@@ -11,7 +11,7 @@ import { type Viewer, type ImageryLayer, UrlTemplateImageryProvider, Credit } fr
 import { useUIStore } from '@/app/store';
 
 /** Labels-only tile URL — transparent background with white text labels. */
-const LABELS_TILE_URL = 'https://tiles.stadiamaps.com/tiles/stamen_toner_labels/{z}/{x}/{y}.png';
+const LABELS_TILE_URL = 'https://basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}.png';
 
 /** Target alpha when fully visible. */
 const LABELS_ALPHA = 0.85;
@@ -66,7 +66,7 @@ export const GeoLabelsLayer: React.FC<GeoLabelsLayerProps> = ({ viewerRef, viewe
     if (showGeoLabels && !layerRef.current) {
       const provider = new UrlTemplateImageryProvider({
         url: LABELS_TILE_URL,
-        credit: new Credit('Stadia Maps, Stamen Design', false),
+        credit: new Credit('© CARTO, © OpenStreetMap contributors', false),
       });
       const layer = viewer.imageryLayers.addImageryProvider(provider);
       layer.alpha = 0;
