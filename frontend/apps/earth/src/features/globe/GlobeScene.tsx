@@ -52,7 +52,6 @@ if (CESIUM_ION_TOKEN) {
 // StrictMode double-invokes effects, the first Viewer.destroy() also destroys
 // the ImageryLayer; a shared instance would be invalid on the second mount.
 function createFallbackBaseLayer(): ImageryLayer | undefined {
-  if (CESIUM_ION_TOKEN) return undefined;
   return new ImageryLayer(
     new UrlTemplateImageryProvider({
       url: 'https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
