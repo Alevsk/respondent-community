@@ -8,6 +8,7 @@ import {
   Math as CesiumMath,
   Ion,
   ImageryLayer,
+  UrlTemplateImageryProvider,
   Credit,
   Rectangle,
 } from 'cesium';
