@@ -8,7 +8,6 @@ import {
   Math as CesiumMath,
   Ion,
   ImageryLayer,
-  UrlTemplateImageryProvider,
   Credit,
   Rectangle,
 } from 'cesium';
@@ -54,11 +53,13 @@ if (CESIUM_ION_TOKEN) {
 function createFallbackBaseLayer(): ImageryLayer | undefined {
   if (CESIUM_ION_TOKEN) return undefined;
   return new ImageryLayer(
-    new UrlTemplateImageryProvider({
-      url: 'https://basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}.png',
-      credit: new Credit('© CARTO, © OpenStreetMap contributors', false),
-      maximumLevel: 18,
-    }),
+    ArcGisMapServerImageryProvider.fromUrl(
+      'https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer',
+      {
+        credit: new Credit('Powered by Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community', false),
+        enablePickFeatures: false,
+      }
+    ),
     {},
   );
 }
