@@ -45,7 +45,9 @@ COPY --from=builder /community /
 # ── Runtime ─────────────────────────────────────────────────────────────────
 FROM docker.io/library/alpine:3.20
 RUN apk --no-cache add ca-certificates && \
-    adduser -D -u 10001 community
+    adduser -D -u 10001 community && \
+    mkdir -p /data && \
+    chown -R 10001:10001 /data
 COPY --from=builder /community /usr/local/bin/community
 
 USER 10001:10001

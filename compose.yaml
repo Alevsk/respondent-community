@@ -29,7 +29,7 @@ services:
       - ./respondent.yaml:/etc/respondent/respondent.yaml:ro
       - ./sources.d:/sources.d:ro
       - ./analysis.d:/analysis.d:ro
-      - ./data:/data
+      - respondent_data:/data
     ports:
       - "127.0.0.1:8090:8090"
       - "127.0.0.1:8092:8092"
@@ -38,3 +38,6 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+volumes:
+  respondent_data:
