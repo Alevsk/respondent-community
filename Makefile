@@ -86,8 +86,11 @@ build: ## Build the community binary (with embedded frontend)
 	fi
 	CGO_ENABLED=1 go build -trimpath -ldflags="$(LDFLAGS)" -o bin/community ./cmd/community
 
+build-binaries: ## Build multi-arch binaries (x86-64, arm64) using Docker and extract to bin/release/
+	$(CONTAINER_RUNTIME) buildx build --platform $(PLATFORMS) --target export --output type=local,dest=bin/release .
+
 docker-build: ## Cross-build the multi-arch image ($(PLATFORMS)) and load it into the local image store
-	$(CONTAINER_RUNTIME) buildx build --platform $(PLATFORMS) -t $(IMAGE):latest --load .
+	$(CONTAINER_RUNTIME) buildx build --platform $(PLATFORMS) -t $(IMAGE):latest  .
 
 docker-push: ## Cross-build the multi-arch image ($(PLATFORMS)) and push the manifest list to the registry
 	$(CONTAINER_RUNTIME) buildx build --platform $(PLATFORMS) -t $(IMAGE):latest --push .

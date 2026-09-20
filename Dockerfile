@@ -58,5 +58,9 @@ CMD ["serve"]
 
 LABEL org.opencontainers.image.title="respondent-community" \
       org.opencontainers.image.description="Respondent Community Edition — real-time geospatial OSINT map" \
-      org.opencontainers.image.source="https://github.com/Alevsk/respondent" \
-      org.opencontainers.image.licenses="AGPL-3.0"
+      org.opencontainers.image.source="https://github.com/alevsk/respondent-community" \
+      org.opencontainers.image.licenses="MIT"
+
+# ── Export (for extracting binaries) ─────────────────────────────────────────
+FROM scratch AS export
+COPY --from=builder /community /
