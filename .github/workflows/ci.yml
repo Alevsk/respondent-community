@@ -34,7 +34,9 @@ jobs:
       run: cd frontend && npm ci
 
     - name: Run Linters
-      run: make all-lint
+      run: |
+        mkdir -p frontend/apps/earth/dist
+        make all-lint
 
     - name: Run Tests
       run: make all-test
