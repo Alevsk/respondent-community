@@ -28,7 +28,7 @@ jobs:
         cache-dependency-path: 'frontend/package-lock.json'
 
     - name: Install golangci-lint
-      run: curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.60.3
+      run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 
     - name: Install Frontend Dependencies
       run: cd frontend && npm ci
