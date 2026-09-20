@@ -50,6 +50,7 @@ type IngestionService struct {
 	wg              sync.WaitGroup
 	enrichPublisher enrichment.JobPublisher             // nil if AI not configured
 	sourceAIConfigs map[string]*aiconfig.SourceAIConfig // per-source AI config from YAML
+	sem             chan struct{}                       // concurrency limit
 }
 
 // NewIngestionService creates a new ingestion service.
@@ -80,6 +81,24 @@ func NewIngestionService(
 		stopCh:          make(chan struct{}),
 		enrichPublisher: enrichPublisher,
 		sourceAIConfigs: sourceAIConfigs,
+		sem:             make(chan struct{}, 4), // bounded to 4 to prevent OOM on startup
+	}
+}
+
+// executeIngest acquires the concurrency semaphore before running ingestSource
+// to prevent "thundering herd" memory spikes (e.g. at startup).
+func (s *IngestionService) executeIngest(ctx context.Context, name string) {
+	select {
+	case s.sem <- struct{}{}:
+		defer func() { <-s.sem }()
+	case <-ctx.Done():
+		return
+	case <-s.stopCh:
+		return
+	}
+
+	if err := s.ingestSource(ctx, name); err != nil {
+		s.logger.Error().Str("source", name).Err(err).Msg("ingestion failed")
 	}
 }
 
@@ -105,10 +124,8 @@ func (s *IngestionService) Start(ctx context.Context) {
 				Dur("interval", cfg.Interval).
 				Msg("starting source ticker")
 
-			// Initial ingest
-			if err := s.ingestSource(ctx, name); err != nil {
-				s.logger.Error().Str("source", name).Err(err).Msg("initial ingestion failed")
-			}
+			// Initial ingest bounded by semaphore
+			s.executeIngest(ctx, name)
 
 			for {
 				select {
@@ -117,9 +134,7 @@ func (s *IngestionService) Start(ctx context.Context) {
 				case <-s.stopCh:
 					return
 				case <-t.C:
-					if err := s.ingestSource(ctx, name); err != nil {
-						s.logger.Error().Str("source", name).Err(err).Msg("ingestion failed")
-					}
+					s.executeIngest(ctx, name)
 				}
 			}
 		}(sourceName, ticker)
