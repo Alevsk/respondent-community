@@ -57,6 +57,7 @@ func newTestIngestionService(t *testing.T, logger zerolog.Logger, body func(ctx 
 		},
 		tickers: make([]*time.Ticker, 0),
 		stopCh:  make(chan struct{}),
+		sem:     make(chan struct{}, 4),
 	}
 }
 
