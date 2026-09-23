@@ -233,15 +233,16 @@ const SnapshotCard: React.FC<SnapshotCardProps> = ({ entityId, layerType, item, 
           />
         ) : (
           <Typography variant="caption" sx={captionSx}>
-            {unavailable
-              ? 'Camera unavailable'
-              : !owns
-                ? 'Paused — another camera is live'
-                : paused
-                  ? 'Paused'
-                  : frame.loading
-                    ? 'Loading…'
-                    : 'Waiting for the first frame'}
+            {idleReason({
+              unavailable,
+              paused,
+              owns,
+              heldByAnother: snapshotOwner !== null && snapshotOwner !== slotKey,
+              layerEnabled,
+              documentVisible: ctx.documentVisible,
+              historical: timeMode !== 'live',
+              loading: frame.loading,
+            })}
           </Typography>
         )}
         {frame.stale && frame.src && (
@@ -280,6 +281,32 @@ const SnapshotCard: React.FC<SnapshotCardProps> = ({ entityId, layerType, item, 
     </Box>
   );
 };
+
+/**
+ * Says why no frame is on screen. The reasons are distinct on purpose: "another
+ * camera is live" is only true when some other panel actually holds the slot,
+ * and telling a user that while their tab is simply in the background would be
+ * a lie they cannot act on.
+ */
+function idleReason(s: {
+  unavailable: boolean;
+  paused: boolean;
+  owns: boolean;
+  heldByAnother: boolean;
+  layerEnabled: boolean;
+  documentVisible: boolean;
+  historical: boolean;
+  loading: boolean;
+}): string {
+  if (s.unavailable) return 'Camera unavailable';
+  if (s.paused) return 'Paused';
+  if (s.heldByAnother) return 'Paused — another camera is live';
+  if (!s.layerEnabled) return 'Paused — this layer is switched off';
+  if (s.historical) return 'Paused — live frames resume in live mode';
+  if (!s.documentVisible) return 'Paused while this tab is in the background';
+  if (!s.owns) return 'Paused';
+  return s.loading ? 'Loading…' : 'Waiting for the first frame';
+}
 
 // ─── Audio ───────────────────────────────────────────────────────────────────
 
