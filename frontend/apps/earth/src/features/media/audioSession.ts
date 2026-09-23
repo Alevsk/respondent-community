@@ -32,6 +32,15 @@ export class AudioSession {
   private generation = 0;
   private detach?: () => void;
   private timeout?: ReturnType<typeof setTimeout>;
+  /**
+   * The listen already reported to the source, as `entityId\0mediaId`.
+   *
+   * Scoped to the listen rather than to one play() call: the endpoint is the
+   * directory's own popularity counter, so a pause/resume of the same station
+   * must not tell them a second listener arrived. Stop ends the listen, and
+   * starting again afterwards is a new one.
+   */
+  private reportedListen: string | null = null;
 
   constructor(
     private createAudio: () => HTMLAudioElement = () => new Audio(),
@@ -61,7 +70,7 @@ export class AudioSession {
     }
     audio.volume = this.store.getState().volume;
     const generation = this.generation;
-    let reported = false;
+    const listen = station.entityId + '\u0000' + station.mediaId;
     const current = () =>
       generation === this.generation && (!audio.currentSrc || audio.currentSrc === url);
     const playing = () => {
@@ -72,8 +81,8 @@ export class AudioSession {
       // re-arming the watchdog and park the player in `loading` for good.
       this.timeout = undefined;
       this.store.setState({ status: 'playing', error: '' });
-      if (!reported) {
-        reported = true;
+      if (this.reportedListen !== listen) {
+        this.reportedListen = listen;
         if (station.playbackAction) {
           // Reporting is best-effort and must never gate or interrupt playback.
           try {
@@ -163,6 +172,7 @@ export class AudioSession {
   stop() {
     this.release();
     this.station = null;
+    this.reportedListen = null;
     this.store.setState({ station: null, status: 'idle', error: '' });
   }
   dispose() {

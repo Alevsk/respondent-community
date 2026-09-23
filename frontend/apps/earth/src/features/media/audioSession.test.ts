@@ -55,10 +55,29 @@ describe('app audio session', () => {
       entityId: station.entityId,
       mediaId: station.mediaId,
     });
+    // Resuming the same station is the same listen. The endpoint is the
+    // directory's popularity counter, so re-reporting on every pause/resume
+    // would inflate a third party's data.
     session.pause();
     session.resume();
     audio.dispatchEvent(new Event('playing'));
+    expect(report).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports again for a different station, and for a fresh listen after Stop', async () => {
+    session.play(station);
+    audio.dispatchEvent(new Event('playing'));
+    expect(report).toHaveBeenCalledTimes(1);
+
+    session.play({ ...station, entityId: 'station:2', mediaId: 'radio' });
+    audio.dispatchEvent(new Event('playing'));
     expect(report).toHaveBeenCalledTimes(2);
+
+    // Stop ends the listen; starting the same station again is a new one.
+    session.stop();
+    session.play(station);
+    audio.dispatchEvent(new Event('playing'));
+    expect(report).toHaveBeenCalledTimes(3);
   });
 
   it('notification failure cannot stop successful audio', async () => {

@@ -10,7 +10,17 @@ import React, { useEffect } from 'react';
 import { useStore } from 'zustand';
 import { Box, IconButton, Slider, Tooltip, Typography } from '@mui/material';
 import { Pause, Play, Radio, X } from 'lucide-react';
-import { alpha, theme, DASHBOARD_TYPOGRAPHY } from '@respondent/core';
+import {
+  alpha,
+  theme,
+  DASHBOARD_TYPOGRAPHY,
+  useResponsive,
+  DESKTOP_BOTTOM_STACK_BASE,
+  MOBILE_NAV_HEIGHT,
+  MOBILE_NAV_GAP,
+  MOBILE_STACK_GAP,
+  MOBILE_PANEL_MARGIN,
+} from '@respondent/core';
 import { useUIStore } from '@/app/store';
 import { useMediaContext } from './MediaProvider';
 
@@ -18,6 +28,8 @@ export const AudioPlayer: React.FC = () => {
   const { audio } = useMediaContext();
   const state = useStore(audio.store);
   const enabledLayers = useUIStore((s) => s.enabledLayers);
+  const watchlistBarHeight = useUIStore((s) => s.watchlistBarHeight);
+  const { isMobile } = useResponsive();
 
   const stationLayer = state.station?.layerId;
   useEffect(() => {
@@ -30,6 +42,13 @@ export const AudioPlayer: React.FC = () => {
   const { station, status, error, volume } = state;
   const playing = status === 'playing' || status === 'loading';
 
+  // The player is a bottom-anchored HUD element, so it stacks with the others
+  // instead of choosing its own offset. Anchoring it at the toolbar's own slot
+  // put it on top of every toolbar button and swallowed their clicks.
+  const stackBase = isMobile ? MOBILE_NAV_HEIGHT + MOBILE_NAV_GAP : DESKTOP_BOTTOM_STACK_BASE;
+  const bottomOffset =
+    watchlistBarHeight > 0 ? stackBase + watchlistBarHeight + MOBILE_STACK_GAP : stackBase;
+
   return (
     <Box
       data-testid="media-audio-player"
@@ -37,14 +56,14 @@ export const AudioPlayer: React.FC = () => {
         position: 'fixed',
         left: '50%',
         transform: 'translateX(-50%)',
-        bottom: 'calc(16px + env(safe-area-inset-bottom, 0px))',
-        zIndex: 1300,
+        bottom: `calc(${bottomOffset}px + var(--sab, 0px))`,
+        zIndex: 1200,
         display: 'flex',
         alignItems: 'center',
         gap: 1,
         px: 1.25,
         py: 0.75,
-        maxWidth: 'min(520px, calc(100vw - 32px))',
+        maxWidth: `min(520px, calc(100vw - ${MOBILE_PANEL_MARGIN * 2}px))`,
         borderRadius: 2,
         border: `1px solid ${alpha(theme.palette.primary.main, 0.25)}`,
         backgroundColor: alpha(theme.palette.background.paper, 0.94),

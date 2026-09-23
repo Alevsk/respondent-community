@@ -23,6 +23,7 @@ import type { ConfigPanelDisplayMode } from '../../shared/ui/ConfigPanel';
 import { useUIStore } from '@/app/store';
 import {
   useResponsive,
+  DESKTOP_BOTTOM_STACK_BASE,
   MOBILE_NAV_HEIGHT,
   MOBILE_NAV_GAP,
   MOBILE_PANEL_MARGIN,
@@ -214,7 +215,7 @@ const WatchlistBar: React.FC = React.memo(() => {
       statusAction={findModeToolbar}
       data-testid="watchlist-bar"
       width={isMobile ? `calc(100vw - ${MOBILE_PANEL_MARGIN * 2}px)` : 480}
-      bottom={isMobile ? mobileBottom : 100}
+      bottom={isMobile ? mobileBottom : DESKTOP_BOTTOM_STACK_BASE}
       left={0}
       right={0}
       sx={{

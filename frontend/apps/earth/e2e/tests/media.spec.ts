@@ -205,6 +205,36 @@ test.describe('Declarative media (deterministic fixtures)', () => {
     await expect.poll(() => traffic.frames(), { timeout: 10_000 }).toBeGreaterThan(paused);
   });
 
+  // The player is bottom-anchored like the toolbar and the watchlist bar. A
+  // player that overlaps the toolbar does not merely look wrong — it sits on
+  // top of every toolbar button and swallows the clicks.
+  test('the audio player never covers the bottom toolbar', async ({ page }) => {
+    await selectEntity(page, ENTITIES[0].id, LAYER_ID);
+    await page.getByRole('button', { name: 'Play Harbour radio' }).first().click();
+    const player = page.getByTestId('media-audio-player');
+    await expect(player).toBeVisible();
+
+    const toolbar = page.getByTestId('bottom-toolbar');
+    await expect(toolbar).toBeVisible();
+
+    const playerBox = (await player.boundingBox())!;
+    const toolbarBox = (await toolbar.boundingBox())!;
+    expect(playerBox.y + playerBox.height).toBeLessThanOrEqual(toolbarBox.y);
+
+    // Every toolbar button must still receive its own clicks.
+    const covered = await page.evaluate(() => {
+      const bar = document.querySelector('[data-testid="bottom-toolbar"]')!;
+      return [...bar.querySelectorAll('button')]
+        .map((b) => {
+          const r = b.getBoundingClientRect();
+          const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+          return hit && bar.contains(hit) ? null : (b.textContent || '').trim();
+        })
+        .filter(Boolean);
+    });
+    expect(covered).toEqual([]);
+  });
+
   test('audio needs a gesture, survives closing the panel, and stops on demand', async ({
     page,
   }) => {

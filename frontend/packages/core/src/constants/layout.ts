@@ -20,3 +20,10 @@ export const MOBILE_STACK_GAP = 8;
 
 /** Horizontal margin (px) for floating mobile panels (watchlist, entity detail). */
 export const MOBILE_PANEL_MARGIN = 8;
+
+/**
+ * Bottom offset (px) of the first stacked element above the desktop
+ * BottomToolbar. The toolbar sits at bottom:16 and is ~64px tall, so anything
+ * anchored below this value lands on top of it and swallows its clicks.
+ */
+export const DESKTOP_BOTTOM_STACK_BASE = 100;
