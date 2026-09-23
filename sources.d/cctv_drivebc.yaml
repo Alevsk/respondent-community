@@ -1,0 +1,171 @@
+# sources.d/cctv_drivebc.yaml
+# DriveBC — British Columbia Ministry of Transportation highway webcams
+# Source: https://www.drivebc.ca/api/webcams/
+# Auth: None required (public open data)
+#
+# Catalog only: JPEGs load in the browser from www.drivebc.ca.
+#
+# The catalog's imageDisplay link carries a rotating ?t= cache token. The
+# canonical /images/<id>.jpg path serves the same frame, so the URL is built
+# from the stable id instead — the media layer does its own cache busting.
+schema_version: 2
+
+name: cctv_drivebc
+labels:
+  category: infrastructure
+  priority: low
+
+# --- Identity ---
+source_type: cctv_drivebc
+layer_type: cctv
+display_name: "DriveBC Webcams"
+layer_display_name: "Traffic Cameras"
+
+filtering: viewport
+
+# --- Ingestion ---
+transport:
+  type: http_poll
+  url: "https://www.drivebc.ca/api/webcams/"
+  method: GET
+  headers:
+    Accept: "application/json"
+    User-Agent: "respondent-community/1.0 (+https://github.com/Alevsk/respondent)"
+  timeout: "30s"
+  interval: "3600s"
+  max_response_bytes: 8388608
+  rate_limit:
+    requests_per_second: 1
+    burst: 2
+  retry:
+    max_attempts: 3
+    backoff: "exponential"
+    initial_delay: "2s"
+    max_delay: "30s"
+
+# --- Response Parsing ---
+parser:
+  format: json
+  max_records: 3000
+
+# --- Record Filtering (CEL) ---
+filter: >
+  has(record.id) && has(record.is_on) && record.is_on == true
+  && has(record.location) && record.location != null
+  && has(record.location.coordinates) && size(record.location.coordinates) >= 2
+
+# --- Entity Mapping (CEL) ---
+entity:
+  external_id: '"drivebc_" + string(record.id)'
+  name: >
+    has(record.name) && string(record.name) != ""
+      ? string(record.name)
+      : "DriveBC Camera " + string(record.id)
+  metadata:
+    snapshot_url: '"https://www.drivebc.ca/images/" + string(record.id) + ".jpg"'
+    attribution: '"DriveBC — Government of British Columbia"'
+    location_name: 'has(record.caption) && string(record.caption) != "" ? string(record.caption) : (has(record.name) ? string(record.name) : "")'
+    road: 'has(record.highway_display) ? string(record.highway_display) : ""'
+    direction: 'has(record.orientation) ? string(record.orientation) : ""'
+    area: 'has(record.region_name) ? string(record.region_name) : ""'
+    camera_status: 'has(record.marked_stale) && record.marked_stale == true ? "STALE" : "ACTIVE"' 
+
+# --- Observation Mapping (CEL) ---
+observation:
+  latitude: 'double(record.location.coordinates[1])'
+  longitude: 'double(record.location.coordinates[0])'
+  altitude: '"0.0"'
+  timestamp: 'now()'
+  metadata: {}
+  content_hash: >
+    string(record.id) + "|"
+    + (has(record.name) ? string(record.name) : "") + "|"
+    + (has(record.highway_display) ? string(record.highway_display) : "") + "|"
+    + string(record.location.coordinates[1]) + "," + string(record.location.coordinates[0])
+
+# --- Recording ---
+recording:
+  mode: dedupe
+
+# --- Cache ---
+cache:
+  ttl: "86400s"
+
+# --- Display ---
+display:
+  icon:
+    shape: camera
+    rotatable: false
+    interpolation: false
+    scale: 1.0
+  trail:
+    color: "#7c4dff"
+    width: 1.0
+    opacity: 0.4
+  style:
+    color: "#7c4dff"
+    point_size: 6
+  media:
+    - id: camera
+      kind: snapshot
+      label: "Camera feed"
+      url_key: snapshot_url
+      attribution_key: attribution
+      allowed_origins:
+        - "https://www.drivebc.ca"
+      snapshot:
+        refresh_interval: "30s"
+        cache_bust_param: "_respondent_frame"
+  # Every source feeding the cctv layer declares this same renderer set, listing
+  # each provider's key variants. A renderer only appears when the entity
+  # carries one of its keys, so each camera shows its own provider's fields.
+  field_renderers:
+    - keys: [location_name, camera_location]
+      label: "LOCATION"
+      format:
+        type: string
+      priority: 0
+    - keys: [road]
+      label: "ROAD"
+      format:
+        type: string
+        transform: upper
+      priority: 1
+    - keys: [direction]
+      label: "DIRECTION"
+      format:
+        type: string
+        transform: upper
+      priority: 2
+    - keys: [area, signal_eng_area, address_quadrant]
+      label: "AREA"
+      format:
+        type: string
+        transform: upper
+      priority: 3
+    - keys: [landmark]
+      label: "LANDMARK"
+      format:
+        type: string
+      priority: 4
+    - keys: [camera_status]
+      label: "STATUS"
+      format:
+        type: string
+        transform: upper
+      priority: 5
+    - keys: [camera_label]
+      label: "CAMERA"
+      format:
+        type: string
+      priority: 6
+    - keys: [council_district]
+      label: "COUNCIL DISTRICT"
+      format:
+        type: string
+      priority: 7
+    - keys: [camera_mfg]
+      label: "MANUFACTURER"
+      format:
+        type: string
+      priority: 8

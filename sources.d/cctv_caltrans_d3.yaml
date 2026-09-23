@@ -1,0 +1,181 @@
+# sources.d/cctv_caltrans_d3.yaml
+# Caltrans District 3 — California Department of Transportation traffic cameras
+# Source: https://cwwp2.dot.ca.gov/data/d3/cctv/cctvStatusD03.json
+# Auth: None required (public open data)
+#
+# Catalog only: the JPEGs are loaded by the browser from cwwp2.dot.ca.gov and
+# never enter SQLite, observations, the WebSocket or a map texture.
+#
+# One file per district because Caltrans publishes one catalog per district and
+# a source declares one URL. The display block is identical across all twelve —
+# a test asserts every source feeding the cctv layer agrees.
+schema_version: 2
+
+name: cctv_caltrans_d3
+labels:
+  category: infrastructure
+  priority: low
+
+# --- Identity ---
+source_type: cctv_caltrans_d3
+layer_type: cctv
+display_name: "Caltrans Cameras (District 3)"
+layer_display_name: "Traffic Cameras"
+
+filtering: viewport
+
+# --- Ingestion ---
+transport:
+  type: http_poll
+  url: "https://cwwp2.dot.ca.gov/data/d3/cctv/cctvStatusD03.json"
+  method: GET
+  headers:
+    Accept: "application/json"
+    User-Agent: "respondent-community/1.0 (+https://github.com/Alevsk/respondent)"
+  timeout: "30s"
+  interval: "3600s"
+  max_response_bytes: 16777216
+  rate_limit:
+    requests_per_second: 1
+    burst: 2
+  retry:
+    max_attempts: 3
+    backoff: "exponential"
+    initial_delay: "2s"
+    max_delay: "30s"
+
+# --- Response Parsing ---
+# { "data": [ { "cctv": { ... } }, ... ] }
+parser:
+  format: json
+  records_path: "data"
+  max_records: 2000
+
+# --- Record Filtering (CEL) ---
+# In-service cameras that publish a current image and a usable position.
+# Coordinates arrive as strings and are empty for some rows, which must be
+# dropped rather than coerced to 0,0.
+filter: >
+  has(record.cctv) && record.cctv != null
+  && has(record.cctv.inService) && string(record.cctv.inService) == "true"
+  && has(record.cctv.imageData.static.currentImageURL)
+  && string(record.cctv.imageData.static.currentImageURL).startsWith("https://cwwp2.dot.ca.gov/")
+  && has(record.cctv.location.latitude) && string(record.cctv.location.latitude) != ""
+  && has(record.cctv.location.longitude) && string(record.cctv.location.longitude) != ""
+
+# --- Entity Mapping (CEL) ---
+entity:
+  # index is unique per district only, so the district qualifies it.
+  external_id: '"caltrans_d3_" + string(record.cctv.index)'
+  name: >
+    has(record.cctv.location.locationName) && string(record.cctv.location.locationName) != ""
+      ? string(record.cctv.location.locationName)
+      : "Caltrans D3 Camera " + string(record.cctv.index)
+  metadata:
+    snapshot_url: 'string(record.cctv.imageData.static.currentImageURL)'
+    attribution: '"Caltrans — California Department of Transportation"'
+    location_name: 'has(record.cctv.location.locationName) ? string(record.cctv.location.locationName) : ""'
+    road: 'has(record.cctv.location.route) ? string(record.cctv.location.route) : ""'
+    direction: 'has(record.cctv.location.direction) ? string(record.cctv.location.direction) : ""'
+    area: 'has(record.cctv.location.county) ? string(record.cctv.location.county) : ""'
+    camera_status: '"IN SERVICE"'
+
+# --- Observation Mapping (CEL) ---
+observation:
+  latitude: 'double(record.cctv.location.latitude)'
+  longitude: 'double(record.cctv.location.longitude)'
+  altitude: '"0.0"'
+  timestamp: 'now()'
+  metadata:
+    nearby_place: 'has(record.cctv.location.nearbyPlace) ? string(record.cctv.location.nearbyPlace) : ""'
+  content_hash: >
+    string(record.cctv.index) + "|" + string(record.cctv.imageData.static.currentImageURL) + "|"
+    + (has(record.cctv.location.locationName) ? string(record.cctv.location.locationName) : "") + "|"
+    + string(record.cctv.location.latitude) + "," + string(record.cctv.location.longitude)
+
+# --- Recording ---
+recording:
+  mode: dedupe
+
+# --- Cache ---
+cache:
+  ttl: "86400s"
+
+# --- Display ---
+display:
+  icon:
+    shape: camera
+    rotatable: false
+    interpolation: false
+    scale: 1.0
+  trail:
+    color: "#7c4dff"
+    width: 1.0
+    opacity: 0.4
+  style:
+    color: "#7c4dff"
+    point_size: 6
+  media:
+    - id: camera
+      kind: snapshot
+      label: "Camera feed"
+      url_key: snapshot_url
+      attribution_key: attribution
+      allowed_origins:
+        - "https://cwwp2.dot.ca.gov"
+      snapshot:
+        refresh_interval: "30s"
+        cache_bust_param: "_respondent_frame"
+  # Every source feeding the cctv layer declares this same renderer set, listing
+  # each provider's key variants. A renderer only appears when the entity
+  # carries one of its keys, so each camera shows its own provider's fields.
+  field_renderers:
+    - keys: [location_name, camera_location]
+      label: "LOCATION"
+      format:
+        type: string
+      priority: 0
+    - keys: [road]
+      label: "ROAD"
+      format:
+        type: string
+        transform: upper
+      priority: 1
+    - keys: [direction]
+      label: "DIRECTION"
+      format:
+        type: string
+        transform: upper
+      priority: 2
+    - keys: [area, signal_eng_area, address_quadrant]
+      label: "AREA"
+      format:
+        type: string
+        transform: upper
+      priority: 3
+    - keys: [landmark]
+      label: "LANDMARK"
+      format:
+        type: string
+      priority: 4
+    - keys: [camera_status]
+      label: "STATUS"
+      format:
+        type: string
+        transform: upper
+      priority: 5
+    - keys: [camera_label]
+      label: "CAMERA"
+      format:
+        type: string
+      priority: 6
+    - keys: [council_district]
+      label: "COUNCIL DISTRICT"
+      format:
+        type: string
+      priority: 7
+    - keys: [camera_mfg]
+      label: "MANUFACTURER"
+      format:
+        type: string
+      priority: 8

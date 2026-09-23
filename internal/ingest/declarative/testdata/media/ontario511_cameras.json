@@ -1,0 +1,126 @@
+[
+ {
+  "Id": 1,
+  "Source": "RWIS (MTO)",
+  "SourceId": "CR-1",
+  "Roadway": "QEW",
+  "Direction": "Unknown",
+  "Latitude": 42.9142736713825,
+  "Longitude": -78.9580061508579,
+  "Location": "QEW West of Thompson Road",
+  "SortOrder": 5,
+  "Views": [
+   {
+    "Id": 1,
+    "Url": "https://511on.ca/map/Cctv/1",
+    "Status": "Enabled",
+    "Description": "Toronto Bound"
+   },
+   {
+    "Id": 2,
+    "Url": "https://511on.ca/map/Cctv/2",
+    "Status": "Enabled",
+    "Description": "Looking Down"
+   },
+   {
+    "Id": 3,
+    "Url": "https://511on.ca/map/Cctv/3",
+    "Status": "Enabled",
+    "Description": "Fort Erie Bound"
+   }
+  ]
+ },
+ {
+  "Id": 2,
+  "Source": "RWIS (MTO)",
+  "SourceId": "CR-22",
+  "Roadway": "QEW",
+  "Direction": "Unknown",
+  "Latitude": 43.047085,
+  "Longitude": -79.122098,
+  "Location": "QEW at Welland River Bridge",
+  "SortOrder": 10,
+  "Views": [
+   {
+    "Id": 4,
+    "Url": "https://511on.ca/map/Cctv/4",
+    "Status": "Enabled",
+    "Description": "Toronto Bound"
+   },
+   {
+    "Id": 5,
+    "Url": "https://511on.ca/map/Cctv/5",
+    "Status": "Enabled",
+    "Description": "Looking Down"
+   },
+   {
+    "Id": 6,
+    "Url": "https://511on.ca/map/Cctv/6",
+    "Status": "Enabled",
+    "Description": "Fort Erie Bound"
+   }
+  ]
+ },
+ {
+  "Id": 90001,
+  "Source": "RWIS (MTO)",
+  "SourceId": "CR-1",
+  "Roadway": "QEW",
+  "Direction": "Unknown",
+  "Latitude": 42.9142736713825,
+  "Longitude": -78.9580061508579,
+  "Location": "QEW West of Thompson Road",
+  "SortOrder": 5,
+  "Views": [
+   {
+    "Id": 1,
+    "Url": "https://511on.ca/map/Cctv/1",
+    "Status": "Disabled",
+    "Description": "Toronto Bound"
+   },
+   {
+    "Id": 2,
+    "Url": "https://511on.ca/map/Cctv/2",
+    "Status": "Disabled",
+    "Description": "Looking Down"
+   },
+   {
+    "Id": 3,
+    "Url": "https://511on.ca/map/Cctv/3",
+    "Status": "Disabled",
+    "Description": "Fort Erie Bound"
+   }
+  ]
+ },
+ {
+  "Id": 90002,
+  "Source": "RWIS (MTO)",
+  "SourceId": "CR-1",
+  "Roadway": "QEW",
+  "Direction": "Unknown",
+  "Latitude": null,
+  "Longitude": null,
+  "Location": "QEW West of Thompson Road",
+  "SortOrder": 5,
+  "Views": [
+   {
+    "Id": 1,
+    "Url": "https://511on.ca/map/Cctv/1",
+    "Status": "Enabled",
+    "Description": "Toronto Bound"
+   },
+   {
+    "Id": 2,
+    "Url": "https://511on.ca/map/Cctv/2",
+    "Status": "Enabled",
+    "Description": "Looking Down"
+   },
+   {
+    "Id": 3,
+    "Url": "https://511on.ca/map/Cctv/3",
+    "Status": "Enabled",
+    "Description": "Fort Erie Bound"
+   }
+  ]
+ }
+]

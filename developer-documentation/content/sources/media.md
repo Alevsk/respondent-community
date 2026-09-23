@@ -15,25 +15,30 @@ For the YAML fields themselves, see
 
 ## What ships today
 
-| Source file | Layer | Media | Catalog poll | Media refresh |
+| Source files | Layer | Media | Catalog poll | Media refresh |
 |---|---|---|---|---|
 | `cctv_austin.yaml` | `cctv` | JPEG snapshot | 1 h | 30 s while viewed |
 | `cctv_calgary.yaml` | `cctv` | JPEG snapshot | 1 h | 30 s while viewed |
+| `cctv_caltrans_d1…d12.yaml` | `cctv` | JPEG snapshot | 1 h | 30 s while viewed |
+| `cctv_tfl_london.yaml` | `cctv` | JPEG snapshot | 1 h | 30 s while viewed |
+| `cctv_drivebc.yaml` | `cctv` | JPEG snapshot | 1 h | 30 s while viewed |
+| `cctv_ontario511.yaml` | `cctv` | JPEG snapshot | 1 h | 30 s while viewed |
 | `radio_browser_stations.yaml` | `radio_stations` | Native MP3 / AAC audio | 6 h | continuous stream |
 
-Both camera providers feed one `cctv` layer, the way fifteen news sources feed
-`news_articles`. Display settings are stored per layer with last-write-wins,
-which suits the icon and the colour because they describe the layer — but
-`allowed_origins` describes the provider a source pulls from, so the registry
-unions those across every source feeding a layer. Without that union the last
-file to load would decide the origins for all of them, and every other city's
-cameras would fail admission in the browser with nothing logged.
+Roughly 7,000 cameras across six providers — Austin, Calgary, Caltrans (twelve
+California districts), Transport for London, DriveBC and Ontario 511 — all
+feeding one `cctv` layer, the way fifteen news sources feed `news_articles`.
 
-The rest of the display block must agree between sources sharing a layer, since
-only the last one registered survives. A test asserts the two camera sources
-declare an identical contract apart from their origins, and their field
-renderers list every key variant so each camera shows its own provider's
-fields.
+Caltrans gets one file per district because it publishes one catalog per
+district and a source declares one URL. Every file's display block is identical;
+a test asserts that every source feeding `cctv` declares the same contract apart
+from its `allowed_origins`, which the registry unions. Without that union the
+last file to load would decide the origins for all of them and every other
+provider's cameras would fail admission in the browser.
+
+Ontario 511 exposes several views per camera. This release shows the first
+enabled one; showing them all needs a record-expansion capability the engine
+does not have yet.
 
 ## Who owns what
 
@@ -81,14 +86,10 @@ confirmed to work in a browser.
 
 | Provider | Why it is not in this release |
 |---|---|
-| Transport for NSW | Catalog fits, but a sampled image URL returned `text/html` with HTTP 200. Catalog availability is not camera availability. |
-| Caltrans | Fits per district. Needs stable identifiers and image verification per provider pack. |
-| TfL JamCams | Fits. Needs image-endpoint verification and provider attribution carried through. |
-| Ontario 511 | Multiple views per camera need an explicit view model or generic record expansion; one view per camera would silently discard the rest. |
-| DriveBC | Fits, attribution preserved; playback still to be verified. |
-| Fintraffic | Stations carry nested presets. Full parity needs child-record expansion that keeps station context. |
+| Transport for NSW | The catalog is healthy (217 cameras) but the image host is not: twelve sampled camera URLs all returned `text/html` — the provider's own "camera image temporarily unavailable" page — with HTTP 200. Catalog availability is not camera availability. |
 | TxDOT | Images are base64 inside a JSON response. Needs a reusable media response decoder, not a provider branch in the player. |
-| Tarktee | Two DATEX/XML feeds needing a refreshable join between location and image records; lookup tables today are inline or local files. |
+| Fintraffic | The station catalog needs a `Digitraffic-User` header and carries nested presets; full parity needs child-record expansion that keeps station context. |
+| Tarktee (Estonia) | Two DATEX/XML feeds needing a refreshable join between location and image records; lookup tables today are inline or local files. |
 | Tallinn, Warendorf, other curated files | Static catalogs that need a first-class local/static source or an intentionally hosted catalog. |
 
 Full-motion HLS video, RTSP conversion, video projection onto terrain and camera

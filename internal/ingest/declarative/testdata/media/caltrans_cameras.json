@@ -1,0 +1,196 @@
+{
+ "data": [
+  {
+   "cctv": {
+    "index": "1",
+    "recordTimestamp": {
+     "recordDate": "2026-01-23",
+     "recordTime": "14:19:48",
+     "recordEpoch": "1769206788"
+    },
+    "location": {
+     "district": "4",
+     "locationName": "TV102 -- I-580 : West of SR-24",
+     "nearbyPlace": "Oakland",
+     "longitude": "-122.27291",
+     "latitude": "37.82539",
+     "elevation": "49",
+     "direction": "West",
+     "county": "Alameda",
+     "route": "I-580",
+     "routeSuffix": "",
+     "postmilePrefix": "",
+     "postmile": "45.44",
+     "alignment": "",
+     "milepost": "61.52"
+    },
+    "inService": "true",
+    "imageData": {
+     "imageDescription": "",
+     "streamingVideoURL": "https://wzmedia.dot.ca.gov/D4/W580_JWO_24_IC.stream/playlist.m3u8",
+     "static": {
+      "currentImageUpdateFrequency": "5",
+      "currentImageURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv102i580westofsr24/tv102i580westofsr24.jpg",
+      "referenceImageUpdateFrequency": "60",
+      "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv102i580westofsr24/previous/tv102i580westofsr24-1.jpg",
+      "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv102i580westofsr24/previous/tv102i580westofsr24-2.jpg",
+      "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv102i580westofsr24/previous/tv102i580westofsr24-3.jpg",
+      "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv102i580westofsr24/previous/tv102i580westofsr24-4.jpg",
+      "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv102i580westofsr24/previous/tv102i580westofsr24-5.jpg",
+      "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv102i580westofsr24/previous/tv102i580westofsr24-6.jpg",
+      "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv102i580westofsr24/previous/tv102i580westofsr24-7.jpg",
+      "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv102i580westofsr24/previous/tv102i580westofsr24-8.jpg",
+      "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv102i580westofsr24/previous/tv102i580westofsr24-9.jpg",
+      "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv102i580westofsr24/previous/tv102i580westofsr24-10.jpg",
+      "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv102i580westofsr24/previous/tv102i580westofsr24-11.jpg",
+      "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv102i580westofsr24/previous/tv102i580westofsr24-12.jpg"
+     }
+    }
+   }
+  },
+  {
+   "cctv": {
+    "index": "3",
+    "recordTimestamp": {
+     "recordDate": "2021-03-22",
+     "recordTime": "12:02:07",
+     "recordEpoch": "1616439727"
+    },
+    "location": {
+     "district": "4",
+     "locationName": "TV224 -- SR-4 : Lone Tree Way",
+     "nearbyPlace": "Antioch",
+     "longitude": "-121.74233",
+     "latitude": "37.96199",
+     "elevation": "118",
+     "direction": "West",
+     "county": "Contra Costa",
+     "route": "SR-4",
+     "routeSuffix": "",
+     "postmilePrefix": "R",
+     "postmile": "32.93",
+     "alignment": "",
+     "milepost": "32.71"
+    },
+    "inService": "true",
+    "imageData": {
+     "imageDescription": "",
+     "streamingVideoURL": "https://wzmedia.dot.ca.gov/D4/W4_at_Lone_Tree_Way.stream/playlist.m3u8",
+     "static": {
+      "currentImageUpdateFrequency": "5",
+      "currentImageURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv224sr4lonetreeway/tv224sr4lonetreeway.jpg",
+      "referenceImageUpdateFrequency": "60",
+      "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv224sr4lonetreeway/previous/tv224sr4lonetreeway-1.jpg",
+      "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv224sr4lonetreeway/previous/tv224sr4lonetreeway-2.jpg",
+      "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv224sr4lonetreeway/previous/tv224sr4lonetreeway-3.jpg",
+      "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv224sr4lonetreeway/previous/tv224sr4lonetreeway-4.jpg",
+      "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv224sr4lonetreeway/previous/tv224sr4lonetreeway-5.jpg",
+      "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv224sr4lonetreeway/previous/tv224sr4lonetreeway-6.jpg",
+      "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv224sr4lonetreeway/previous/tv224sr4lonetreeway-7.jpg",
+      "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv224sr4lonetreeway/previous/tv224sr4lonetreeway-8.jpg",
+      "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv224sr4lonetreeway/previous/tv224sr4lonetreeway-9.jpg",
+      "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv224sr4lonetreeway/previous/tv224sr4lonetreeway-10.jpg",
+      "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv224sr4lonetreeway/previous/tv224sr4lonetreeway-11.jpg",
+      "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv224sr4lonetreeway/previous/tv224sr4lonetreeway-12.jpg"
+     }
+    }
+   }
+  },
+  {
+   "cctv": {
+    "index": "143",
+    "recordTimestamp": {
+     "recordDate": "2026-01-15",
+     "recordTime": "17:18:28",
+     "recordEpoch": "1768526308"
+    },
+    "location": {
+     "district": "4",
+     "locationName": "TV965 -- I-80 : SR-29",
+     "nearbyPlace": "Vallejo",
+     "longitude": "-122.232165",
+     "latitude": "38.076304",
+     "elevation": "91",
+     "direction": "West",
+     "county": "Solano",
+     "route": "I-80",
+     "routeSuffix": "",
+     "postmilePrefix": "",
+     "postmile": "1.14",
+     "alignment": "",
+     "milepost": "28.63"
+    },
+    "inService": "false",
+    "imageData": {
+     "imageDescription": "",
+     "streamingVideoURL": "https://wzmedia.dot.ca.gov/D4/W80_at_JCT_29.stream/playlist.m3u8",
+     "static": {
+      "currentImageUpdateFrequency": "5",
+      "currentImageURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv965i80sr29/tv965i80sr29.jpg",
+      "referenceImageUpdateFrequency": "60",
+      "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv965i80sr29/previous/tv965i80sr29-1.jpg",
+      "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv965i80sr29/previous/tv965i80sr29-2.jpg",
+      "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv965i80sr29/previous/tv965i80sr29-3.jpg",
+      "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv965i80sr29/previous/tv965i80sr29-4.jpg",
+      "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv965i80sr29/previous/tv965i80sr29-5.jpg",
+      "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv965i80sr29/previous/tv965i80sr29-6.jpg",
+      "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv965i80sr29/previous/tv965i80sr29-7.jpg",
+      "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv965i80sr29/previous/tv965i80sr29-8.jpg",
+      "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv965i80sr29/previous/tv965i80sr29-9.jpg",
+      "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv965i80sr29/previous/tv965i80sr29-10.jpg",
+      "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv965i80sr29/previous/tv965i80sr29-11.jpg",
+      "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv965i80sr29/previous/tv965i80sr29-12.jpg"
+     }
+    }
+   }
+  },
+  {
+   "cctv": {
+    "index": "9999",
+    "recordTimestamp": {
+     "recordDate": "2026-01-23",
+     "recordTime": "14:19:48",
+     "recordEpoch": "1769206788"
+    },
+    "location": {
+     "district": "4",
+     "locationName": "TV102 -- I-580 : West of SR-24",
+     "nearbyPlace": "Oakland",
+     "longitude": "",
+     "latitude": "",
+     "elevation": "49",
+     "direction": "West",
+     "county": "Alameda",
+     "route": "I-580",
+     "routeSuffix": "",
+     "postmilePrefix": "",
+     "postmile": "45.44",
+     "alignment": "",
+     "milepost": "61.52"
+    },
+    "inService": "true",
+    "imageData": {
+     "imageDescription": "",
+     "streamingVideoURL": "https://wzmedia.dot.ca.gov/D4/W580_JWO_24_IC.stream/playlist.m3u8",
+     "static": {
+      "currentImageUpdateFrequency": "5",
+      "currentImageURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv102i580westofsr24/tv102i580westofsr24.jpg",
+      "referenceImageUpdateFrequency": "60",
+      "referenceImage1UpdateAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv102i580westofsr24/previous/tv102i580westofsr24-1.jpg",
+      "referenceImage2UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv102i580westofsr24/previous/tv102i580westofsr24-2.jpg",
+      "referenceImage3UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv102i580westofsr24/previous/tv102i580westofsr24-3.jpg",
+      "referenceImage4UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv102i580westofsr24/previous/tv102i580westofsr24-4.jpg",
+      "referenceImage5UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv102i580westofsr24/previous/tv102i580westofsr24-5.jpg",
+      "referenceImage6UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv102i580westofsr24/previous/tv102i580westofsr24-6.jpg",
+      "referenceImage7UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv102i580westofsr24/previous/tv102i580westofsr24-7.jpg",
+      "referenceImage8UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv102i580westofsr24/previous/tv102i580westofsr24-8.jpg",
+      "referenceImage9UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv102i580westofsr24/previous/tv102i580westofsr24-9.jpg",
+      "referenceImage10UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv102i580westofsr24/previous/tv102i580westofsr24-10.jpg",
+      "referenceImage11UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv102i580westofsr24/previous/tv102i580westofsr24-11.jpg",
+      "referenceImage12UpdatesAgoURL": "https://cwwp2.dot.ca.gov/data/d4/cctv/image/tv102i580westofsr24/previous/tv102i580westofsr24-12.jpg"
+     }
+    }
+   }
+  }
+ ]
+}

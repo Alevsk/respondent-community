@@ -387,55 +387,151 @@ func TestShippedSourceURLsSurviveEnvExpansion(t *testing.T) {
 }
 
 // Sources that share a layer share its display configuration: the registry
-// keeps the last one registered, unioning only media origins. So the two camera
-// sources must declare the same contract apart from those origins — otherwise
-// whichever file loads last silently decides the icon, the colour, the refresh
-// interval and which fields the panel shows for BOTH cities.
-func TestCameraSourcesSharingTheCctvLayerDeclareOneContract(t *testing.T) {
-	load := func(file string) *SourceDefinition {
-		cs, err := newTestLoader(t, false).LoadFile(filepath.Join(sourcesDir(t), file))
-		if err != nil {
-			t.Fatalf("load %s: %v", file, err)
+// keeps the last one registered, unioning only media origins. So every source
+// feeding the cctv layer must declare the same contract apart from those
+// origins — otherwise whichever file loads last silently decides the icon, the
+// colour, the refresh interval and which fields the panel shows for all of
+// them. With more than a dozen camera sources this is the only thing standing
+// between the layer and quiet drift.
+func TestEveryCctvSourceDeclaresTheSameContract(t *testing.T) {
+	entries, err := os.ReadDir(sourcesDir(t))
+	if err != nil {
+		t.Fatalf("read sources dir: %v", err)
+	}
+
+	type source struct {
+		file    string
+		display string
+		origins []string
+	}
+	var sources []source
+
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasPrefix(entry.Name(), "cctv_") {
+			continue
 		}
-		return cs.Definition()
-	}
-	austin, calgary := load("cctv_austin.yaml"), load("cctv_calgary.yaml")
+		cs, err := newTestLoader(t, false).LoadFile(filepath.Join(sourcesDir(t), entry.Name()))
+		if err != nil {
+			t.Fatalf("load %s: %v", entry.Name(), err)
+		}
+		def := cs.Definition()
+		if def.LayerType != "cctv" {
+			t.Errorf("%s: layer_type = %q, want cctv", entry.Name(), def.LayerType)
+			continue
+		}
+		if def.LayerDisplayName != "Traffic Cameras" {
+			t.Errorf("%s: layer label = %q, want Traffic Cameras", entry.Name(), def.LayerDisplayName)
+		}
 
-	if austin.LayerType != "cctv" || calgary.LayerType != "cctv" {
-		t.Fatalf("layer types = %q / %q, want both cctv", austin.LayerType, calgary.LayerType)
-	}
-	if austin.LayerDisplayName != calgary.LayerDisplayName {
-		t.Errorf("layer label differs: %q vs %q", austin.LayerDisplayName, calgary.LayerDisplayName)
-	}
-
-	// Everything the browser renders for the layer, compared as JSON so a new
-	// display field is covered without editing this test.
-	strip := func(d *SourceDefinition) string {
-		dc := DisplaySpecToDomain(&d.Display)
+		dc := DisplaySpecToDomain(&def.Display)
+		var origins []string
 		for i := range dc.Media {
-			dc.Media[i].AllowedOrigins = nil // per-provider; the registry unions these
+			if dc.Media[i].ID == "camera" {
+				origins = dc.Media[i].AllowedOrigins
+			}
+			// Per-provider; the registry unions these across sources.
+			dc.Media[i].AllowedOrigins = nil
 		}
 		b, err := json.Marshal(dc)
 		if err != nil {
-			t.Fatalf("marshal display: %v", err)
+			t.Fatalf("marshal display for %s: %v", entry.Name(), err)
 		}
-		return string(b)
-	}
-	if a, c := strip(austin), strip(calgary); a != c {
-		t.Errorf("the two cctv sources declare different display config:\n austin:  %s\n calgary: %s", a, c)
+		sources = append(sources, source{file: entry.Name(), display: string(b), origins: origins})
 	}
 
-	// The origins themselves must differ — that is the whole reason the union
-	// exists, and it is what keeps each city's cameras admissible.
-	originsOf := func(d *SourceDefinition) []string {
-		for _, m := range DisplaySpecToDomain(&d.Display).Media {
-			if m.ID == "camera" {
-				return m.AllowedOrigins
-			}
-		}
-		return nil
+	if len(sources) < 2 {
+		t.Fatalf("found %d cctv sources, expected the camera provider pack", len(sources))
 	}
-	if ao, co := originsOf(austin), originsOf(calgary); len(ao) == 0 || len(co) == 0 || ao[0] == co[0] {
-		t.Errorf("expected distinct provider origins, got %v and %v", ao, co)
+
+	for _, s := range sources[1:] {
+		if s.display != sources[0].display {
+			t.Errorf("%s declares different display config from %s:\n  %s\n  %s",
+				s.file, sources[0].file, s.display, sources[0].display)
+		}
+		if len(s.origins) == 0 {
+			t.Errorf("%s declares no allowed_origins for its camera media", s.file)
+		}
+	}
+
+	// Distinct providers must contribute distinct origins — that union is what
+	// keeps every provider's cameras admissible once they share a layer.
+	distinct := map[string]bool{}
+	for _, s := range sources {
+		for _, o := range s.origins {
+			distinct[o] = true
+		}
+	}
+	if len(distinct) < 4 {
+		t.Errorf("cctv sources contribute only %d distinct origins: %v", len(distinct), distinct)
+	}
+	t.Logf("%d cctv sources share one contract across %d provider origins", len(sources), len(distinct))
+}
+
+// The camera provider pack: each source is run against a captured response
+// from its real catalog, through the real filter and mapping. Validation only
+// proves the YAML parses and the CEL compiles — these prove the expressions
+// pick the right records out of the shape the provider actually sends.
+func TestCameraProviderPackMapsRealCatalogs(t *testing.T) {
+	cases := []struct {
+		source   string
+		fixture  string
+		wantIDs  []string
+		wantHost string
+	}{
+		{"cctv_caltrans_d4.yaml", "caltrans_cameras.json", nil, "cwwp2.dot.ca.gov"},
+		{"cctv_tfl_london.yaml", "tfl_cameras.json", nil, "s3-eu-west-1.amazonaws.com"},
+		{"cctv_drivebc.yaml", "drivebc_cameras.json", nil, "www.drivebc.ca"},
+		{"cctv_ontario511.yaml", "ontario511_cameras.json", nil, "511on.ca"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.source, func(t *testing.T) {
+			entities, observations := mapFixture(t, tc.source, tc.fixture)
+
+			// Each fixture holds two usable cameras plus two the filter must
+			// drop: one the provider marks unavailable, one with no position.
+			if len(entities) != 2 {
+				ids := make([]string, 0, len(entities))
+				for _, e := range entities {
+					ids = append(ids, e.ExternalID)
+				}
+				t.Fatalf("entities = %v, want exactly the 2 usable cameras", ids)
+			}
+
+			for i, e := range entities {
+				url := e.Metadata["snapshot_url"]
+				parsed, err := neturl.Parse(url)
+				if err != nil || parsed.Scheme != "https" || parsed.Host != tc.wantHost {
+					t.Errorf("%s: snapshot_url = %q, want https on %s", e.ExternalID, url, tc.wantHost)
+				}
+				if e.Metadata["attribution"] == "" {
+					t.Errorf("%s: no attribution, so the media panel credits nobody", e.ExternalID)
+				}
+				if strings.TrimSpace(e.Name) == "" {
+					t.Errorf("%s: empty name", e.ExternalID)
+				}
+				obs := observations[i]
+				if obs.Position == nil {
+					t.Fatalf("%s: no position", e.ExternalID)
+				}
+				// A camera with no coordinates is dropped, never placed at 0,0.
+				if obs.Position.Lat == 0 && obs.Position.Lon == 0 {
+					t.Errorf("%s: landed at 0,0", e.ExternalID)
+				}
+				if obs.Position.Lat < -90 || obs.Position.Lat > 90 ||
+					obs.Position.Lon < -180 || obs.Position.Lon > 180 {
+					t.Errorf("%s: position out of range: %+v", e.ExternalID, obs.Position)
+				}
+				if obs.ContentHash == "" {
+					t.Errorf("%s: dedupe mode with an empty content hash", e.ExternalID)
+				}
+			}
+
+			// External ids must be unique and provider-qualified, so two
+			// providers cannot collide inside the shared cctv layer.
+			if entities[0].ExternalID == entities[1].ExternalID {
+				t.Errorf("duplicate external id %q", entities[0].ExternalID)
+			}
+		})
 	}
 }

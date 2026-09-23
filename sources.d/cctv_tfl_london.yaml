@@ -1,0 +1,176 @@
+# sources.d/cctv_tfl_london.yaml
+# Transport for London — JamCams
+# Source: https://api.tfl.gov.uk/Place/Type/JamCam
+# Auth: None required for this endpoint (public TfL Open Data)
+#
+# Catalog only: JPEGs load in the browser from the TfL JamCams S3 bucket.
+#
+# TfL Open Data requires the "Powered by TfL Open Data" credit, which is what
+# the attribution metadata carries into the media panel.
+#
+# Each place carries its image URL inside an additionalProperties key/value
+# list, so the mapping filters that list rather than reading a fixed field.
+schema_version: 2
+
+name: cctv_tfl_london
+labels:
+  category: infrastructure
+  priority: low
+
+# --- Identity ---
+source_type: cctv_tfl_london
+layer_type: cctv
+display_name: "TfL JamCams (London)"
+layer_display_name: "Traffic Cameras"
+
+filtering: viewport
+
+# --- Ingestion ---
+transport:
+  type: http_poll
+  url: "https://api.tfl.gov.uk/Place/Type/JamCam"
+  method: GET
+  headers:
+    Accept: "application/json"
+    User-Agent: "respondent-community/1.0 (+https://github.com/Alevsk/respondent)"
+  timeout: "30s"
+  interval: "3600s"
+  max_response_bytes: 8388608
+  rate_limit:
+    requests_per_second: 1
+    burst: 2
+  retry:
+    max_attempts: 3
+    backoff: "exponential"
+    initial_delay: "2s"
+    max_delay: "30s"
+
+# --- Response Parsing ---
+parser:
+  format: json
+  max_records: 3000
+
+# --- Record Filtering (CEL) ---
+filter: >
+  has(record.id) && has(record.lat) && has(record.lon)
+  && has(record.additionalProperties)
+  && record.additionalProperties.exists(p, p.key == "available" && string(p.value) == "true")
+  && record.additionalProperties.exists(p, p.key == "imageUrl"
+       && string(p.value).startsWith("https://s3-eu-west-1.amazonaws.com/jamcams.tfl.gov.uk/"))
+
+# --- Entity Mapping (CEL) ---
+entity:
+  external_id: 'string(record.id)'
+  name: >
+    has(record.commonName) && string(record.commonName) != ""
+      ? string(record.commonName)
+      : "TfL JamCam " + string(record.id)
+  metadata:
+    snapshot_url: 'record.additionalProperties.filter(p, p.key == "imageUrl")[0].value'
+    attribution: '"Powered by TfL Open Data"'
+    location_name: 'has(record.commonName) ? string(record.commonName) : ""'
+    camera_label: >
+      record.additionalProperties.exists(p, p.key == "view")
+        ? record.additionalProperties.filter(p, p.key == "view")[0].value
+        : ""
+    camera_status: '"AVAILABLE"' 
+
+# --- Observation Mapping (CEL) ---
+observation:
+  latitude: 'double(record.lat)'
+  longitude: 'double(record.lon)'
+  altitude: '"0.0"'
+  timestamp: 'now()'
+  metadata: {}
+  content_hash: >
+    string(record.id) + "|"
+    + record.additionalProperties.filter(p, p.key == "imageUrl")[0].value + "|"
+    + (has(record.commonName) ? string(record.commonName) : "") + "|"
+    + string(record.lat) + "," + string(record.lon)
+
+# --- Recording ---
+recording:
+  mode: dedupe
+
+# --- Cache ---
+cache:
+  ttl: "86400s"
+
+# --- Display ---
+display:
+  icon:
+    shape: camera
+    rotatable: false
+    interpolation: false
+    scale: 1.0
+  trail:
+    color: "#7c4dff"
+    width: 1.0
+    opacity: 0.4
+  style:
+    color: "#7c4dff"
+    point_size: 6
+  media:
+    - id: camera
+      kind: snapshot
+      label: "Camera feed"
+      url_key: snapshot_url
+      attribution_key: attribution
+      allowed_origins:
+        - "https://s3-eu-west-1.amazonaws.com"
+      snapshot:
+        refresh_interval: "30s"
+        cache_bust_param: "_respondent_frame"
+  # Every source feeding the cctv layer declares this same renderer set, listing
+  # each provider's key variants. A renderer only appears when the entity
+  # carries one of its keys, so each camera shows its own provider's fields.
+  field_renderers:
+    - keys: [location_name, camera_location]
+      label: "LOCATION"
+      format:
+        type: string
+      priority: 0
+    - keys: [road]
+      label: "ROAD"
+      format:
+        type: string
+        transform: upper
+      priority: 1
+    - keys: [direction]
+      label: "DIRECTION"
+      format:
+        type: string
+        transform: upper
+      priority: 2
+    - keys: [area, signal_eng_area, address_quadrant]
+      label: "AREA"
+      format:
+        type: string
+        transform: upper
+      priority: 3
+    - keys: [landmark]
+      label: "LANDMARK"
+      format:
+        type: string
+      priority: 4
+    - keys: [camera_status]
+      label: "STATUS"
+      format:
+        type: string
+        transform: upper
+      priority: 5
+    - keys: [camera_label]
+      label: "CAMERA"
+      format:
+        type: string
+      priority: 6
+    - keys: [council_district]
+      label: "COUNCIL DISTRICT"
+      format:
+        type: string
+      priority: 7
+    - keys: [camera_mfg]
+      label: "MANUFACTURER"
+      format:
+        type: string
+      priority: 8

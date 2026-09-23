@@ -140,51 +140,56 @@ display:
       snapshot:
         refresh_interval: "30s"
         cache_bust_param: "_respondent_frame"
-  # Both camera sources feed this layer, so the renderer set is shared and each
-  # entry lists every key variant. A renderer only appears when the entity
-  # actually carries one of its keys, so an Austin camera shows Austin's fields
-  # and a Calgary camera shows Calgary's.
+  # Every source feeding the cctv layer declares this same renderer set, listing
+  # each provider's key variants. A renderer only appears when the entity
+  # carries one of its keys, so each camera shows its own provider's fields.
   field_renderers:
     - keys: [location_name, camera_location]
       label: "LOCATION"
       format:
         type: string
       priority: 0
+    - keys: [road]
+      label: "ROAD"
+      format:
+        type: string
+        transform: upper
+      priority: 1
+    - keys: [direction]
+      label: "DIRECTION"
+      format:
+        type: string
+        transform: upper
+      priority: 2
+    - keys: [area, signal_eng_area, address_quadrant]
+      label: "AREA"
+      format:
+        type: string
+        transform: upper
+      priority: 3
     - keys: [landmark]
       label: "LANDMARK"
       format:
         type: string
-      priority: 1
+      priority: 4
     - keys: [camera_status]
       label: "STATUS"
       format:
         type: string
         transform: upper
-      priority: 2
+      priority: 5
     - keys: [camera_label]
       label: "CAMERA"
       format:
         type: string
-      priority: 3
-    - keys: [address_quadrant]
-      label: "ADDRESS QUADRANT"
-      format:
-        type: string
-        transform: upper
-      priority: 4
-    - keys: [signal_eng_area]
-      label: "AREA"
-      format:
-        type: string
-        transform: upper
-      priority: 5
+      priority: 6
     - keys: [council_district]
       label: "COUNCIL DISTRICT"
       format:
         type: string
-      priority: 6
+      priority: 7
     - keys: [camera_mfg]
       label: "MANUFACTURER"
       format:
         type: string
-      priority: 7
+      priority: 8
