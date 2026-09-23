@@ -3,7 +3,6 @@ package declarative
 import (
 	"context"
 	"fmt"
-	"math"
 	"math/rand"
 	"time"
 
@@ -120,7 +119,16 @@ func reconnectBackoff(spec *ReconnectSpec, attempt int) time.Duration {
 	var delay time.Duration
 	switch backoff {
 	case "exponential":
-		delay = initialDelay * time.Duration(math.Pow(2, float64(attempt-1)))
+		// Saturate at maxDelay rather than computing the full 2^n. A stream that
+		// keeps failing drives attempt into the hundreds, where initialDelay*2^n
+		// overflows int64 nanoseconds and wraps negative; a negative delay slips
+		// past the clamp below and makes time.After fire immediately, turning
+		// reconnection into a hot loop against the upstream. Comparing against
+		// maxDelay>>n decides the same thing without ever overflowing.
+		delay = maxDelay
+		if n := attempt - 1; n >= 0 && n < 63 && initialDelay <= maxDelay>>uint(n) {
+			delay = initialDelay << uint(n)
+		}
 	case "fixed":
 		delay = initialDelay
 	default:
