@@ -58,14 +58,15 @@ interface CrossSliceAccess {
 /**
  * Creates the entity slice. Uses a generic TStore parameter to access
  * cross-slice state (watchlistEntities) via get().
+ *
+ * `_get` and `_api` are unused here but must stay in the signature so it
+ * matches SliceCreator<EntitySlice, TStore> for callers.
  */
-/* eslint-disable @typescript-eslint/no-unused-vars -- Signature must match SliceCreator<EntitySlice, TStore> for callers */
 export const createEntitySlice = <TStore extends EntitySlice & CrossSliceAccess>(
   set: Parameters<SliceCreator<EntitySlice, TStore>>[0],
   _get: Parameters<SliceCreator<EntitySlice, TStore>>[1],
   _api: Parameters<SliceCreator<EntitySlice, TStore>>[2],
 ): EntitySlice => ({
-  /* eslint-enable @typescript-eslint/no-unused-vars */
   selectedEntityId: null,
   selectedLayerId: null,
   selectedEntities: [],

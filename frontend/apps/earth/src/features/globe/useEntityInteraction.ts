@@ -162,7 +162,6 @@ export function useEntityInteraction(
         viewer.canvas.style.cursor = 'default';
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     viewerRef,
     viewerReady,

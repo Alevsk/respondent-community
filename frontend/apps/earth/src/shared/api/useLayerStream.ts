@@ -551,7 +551,6 @@ export function useLayerStream() {
         wsClient.subscribeLayer(layerId, lv);
       }
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only: re-subscribe existing layers without clearing
   }, []);
 }
 
