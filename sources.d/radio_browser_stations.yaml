@@ -1,0 +1,220 @@
+# sources.d/radio_browser_stations.yaml
+# Radio Browser — community catalog of internet radio stations
+# Source: https://api.radio-browser.info/ (mirrors discovered via DNS SRV)
+# Docs:   https://docs.radio-browser.info/
+# Auth:   None required (public community API)
+# Format: JSON array of station records
+#
+# Catalog only. The audio itself is played by the browser's own <audio> element
+# straight from the station's server — no stream byte passes through Respondent,
+# SQLite, an observation or the WebSocket.
+#
+# Radio Browser asks clients to discover mirrors rather than pin one host, to
+# send a descriptive User-Agent, to key on the stable station UUID, and to
+# report a play when a user actually starts a station. All four are declared
+# here: `transport.discovery` resolves the mirrors, and `media_actions` declares
+# the one-per-play notification the server sends on the user's behalf.
+schema_version: 2
+
+name: radio_browser_stations
+labels:
+  category: communications
+  priority: low
+
+# --- Identity ---
+source_type: radio_browser_stations
+layer_type: radio_stations
+display_name: "Radio Browser Stations"
+layer_display_name: "Internet Radio"
+
+filtering: viewport
+
+# --- Ingestion ---
+transport:
+  type: http_poll
+  # The host below supplies only the path and query. `discovery` replaces the
+  # origin with a resolved mirror before each request; the path, query, headers,
+  # response limit and rate budget below stay authoritative either way.
+  #
+  # `order=stationuuid&reverse=false` gives the deterministic ordering that
+  # offset pagination needs — without it, pages drift between requests.
+  url: "https://api.radio-browser.info/json/stations/search?hidebroken=true&has_geo_info=true&order=stationuuid&reverse=false"
+  method: GET
+  headers:
+    Accept: "application/json"
+    # Radio Browser's guidance asks every client to identify itself.
+    User-Agent: "respondent-community/1.0 (+https://github.com/Alevsk/respondent)"
+  timeout: "30s"
+  interval: "21600s" # 6 hours — a directory of this size changes slowly
+  max_response_bytes: 33554432 # 32MB (1000 rows/page of verbose station JSON)
+  discovery:
+    srv_name: "_api._tcp.radio-browser.info"
+    allowed_suffix: "api.radio-browser.info"
+    port: 443
+    cache_ttl: "1h"
+  # One request per second per host, shared with every other caller of this host.
+  rate_limit:
+    requests_per_second: 1
+    burst: 1
+  retry:
+    max_attempts: 2
+    backoff: "exponential"
+    initial_delay: "2s"
+    max_delay: "15s"
+  pagination:
+    type: offset
+    page_param: "offset"
+    size_param: "limit"
+    size: 1000
+    # 50 pages x 1000 rows caps one refresh at 50k stations. Hitting the
+    # ceiling is logged as truncation rather than reported as a complete
+    # catalog.
+    max_pages: 50
+    stop_when: "size(records) == 0"
+
+# --- Response Parsing ---
+parser:
+  format: json
+  max_records: 50000
+
+# --- Record Filtering (CEL) ---
+# Everything the browser must be able to play natively, and nothing else:
+#   - the directory's own health check passed
+#   - HLS excluded (this release plays native MP3/AAC only)
+#   - HTTPS resolved URL (the app is served over HTTPS; mixed content will not load)
+#   - coordinates actually present — null is dropped, never coerced to 0,0,
+#     while a genuine 0.0 latitude or longitude is kept
+#   - a well-formed station UUID, which is both the identity and the only value
+#     that reaches the playback-notification path
+filter: >
+  has(record.stationuuid) && record.stationuuid != null
+  && string(record.stationuuid).matches("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+  && has(record.lastcheckok) && int(record.lastcheckok) == 1
+  && has(record.hls) && int(record.hls) == 0
+  && has(record.codec) && (string(record.codec).upperAscii() == "MP3"
+       || string(record.codec).upperAscii() == "AAC"
+       || string(record.codec).upperAscii() == "AAC+")
+  && has(record.url_resolved) && record.url_resolved != null
+  && string(record.url_resolved).startsWith("https://")
+  && has(record.geo_lat) && record.geo_lat != null
+  && has(record.geo_long) && record.geo_long != null
+  && double(record.geo_lat) >= -90.0 && double(record.geo_lat) <= 90.0
+  && double(record.geo_long) >= -180.0 && double(record.geo_long) <= 180.0
+  && has(record.name) && string(record.name).trim() != ""
+
+# --- Entity Mapping (CEL) ---
+entity:
+  external_id: 'string(record.stationuuid)'
+  name: 'string(record.name).trim()'
+  metadata:
+    # Consumed by display.media below, not rendered as an ordinary overview row.
+    stream_url: 'string(record.url_resolved)'
+    attribution: '"Radio Browser community directory"'
+    # The only value the declared playback action interpolates.
+    station_uuid: 'string(record.stationuuid)'
+    country_code: 'has(record.countrycode) ? string(record.countrycode) : ""'
+    language: 'has(record.language) ? string(record.language) : ""'
+    tags: 'has(record.tags) ? string(record.tags) : ""'
+    homepage: 'has(record.homepage) ? string(record.homepage) : ""'
+
+# --- Observation Mapping (CEL) ---
+observation:
+  latitude: 'double(record.geo_lat)'
+  longitude: 'double(record.geo_long)'
+  altitude: '"0.0"'
+  timestamp: 'now()'
+  metadata:
+    codec: 'string(record.codec).upperAscii()'
+    bitrate_kbps: 'has(record.bitrate) ? string(record.bitrate) : ""'
+    # When the DIRECTORY last verified the stream — not when we did.
+    provider_last_check: 'has(record.lastchecktime_iso8601) ? string(record.lastchecktime_iso8601) : ""'
+    votes: 'has(record.votes) ? string(record.votes) : ""'
+  # A changed stream URL is a changed station as far as playback is concerned,
+  # so it belongs in the hash alongside name, position and codec/bitrate.
+  content_hash: >
+    string(record.stationuuid) + "|" + string(record.url_resolved) + "|"
+    + string(record.name).trim() + "|" + string(record.codec) + "|"
+    + (has(record.bitrate) ? string(record.bitrate) : "") + "|"
+    + string(record.geo_lat) + "," + string(record.geo_long)
+
+# --- Recording ---
+recording:
+  mode: dedupe
+
+# --- Cache ---
+cache:
+  ttl: "86400s" # 24h
+
+# --- Playback notification ---
+# A named, server-side GET against the same discovered origin. The browser can
+# only name an entity and a media slot; it never supplies a URL, a header or an
+# expression, and this definition never reaches it. The UUID is re-checked here
+# so a malformed catalog value yields an empty path, which the server rejects
+# rather than sending.
+media_actions:
+  - name: report_play
+    method: GET
+    path: >
+      metadata["station_uuid"].matches("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+        ? "/json/url/" + metadata["station_uuid"]
+        : ""
+
+# --- Display ---
+display:
+  icon:
+    shape: radio
+    rotatable: false
+    interpolation: false
+    scale: 1.0
+  trail:
+    color: "#ffa726"
+    width: 1.0
+    opacity: 0.4
+  style:
+    color: "#ffa726"
+    point_size: 6
+  media:
+    - id: radio
+      kind: audio
+      label: "Live stream"
+      url_key: stream_url
+      attribution_key: attribution
+      # No allowed_origins: station hosts are community-supplied and vary per
+      # entity. The shared URL policy (HTTPS, no credentials, no loopback or
+      # private literals) still applies.
+      playback_action: report_play
+      audio: {}
+  field_renderers:
+    - keys: [country_code]
+      label: "COUNTRY"
+      format:
+        type: string
+        transform: upper
+      priority: 0
+    - keys: [language]
+      label: "LANGUAGE"
+      format:
+        type: string
+      priority: 1
+    - keys: [codec]
+      label: "CODEC"
+      format:
+        type: string
+        transform: upper
+      priority: 2
+    - keys: [bitrate_kbps]
+      label: "BITRATE"
+      format:
+        type: integer
+        suffix: " kbps"
+      priority: 3
+    - keys: [tags]
+      label: "TAGS"
+      format:
+        type: string
+      priority: 4
+    - keys: [provider_last_check]
+      label: "PROVIDER LAST CHECK"
+      format:
+        type: string
+      priority: 5

@@ -1,0 +1,19 @@
+[
+  {
+    "stationuuid": "ffc0d701-f43b-4232-8be6-f7ff72add8ef",
+    "name": "\tBlasmusikradio mit Bernd",
+    "url_resolved": "https://stream.laut.fm/blasmusikradio_mit_bernd_v2",
+    "homepage": "https://laut.fm/blasmusikradio_mit_bernd",
+    "tags": "blasmusik,folk,marsch,polka",
+    "countrycode": "DE",
+    "language": "german",
+    "votes": 271,
+    "codec": "MP3",
+    "bitrate": 128,
+    "hls": 0,
+    "lastcheckok": 1,
+    "lastchecktime_iso8601": "2026-09-22T05:21:11Z",
+    "geo_lat": 48.1372,
+    "geo_long": 11.5755
+  }
+]

@@ -96,6 +96,7 @@ Enable `rotatable: true` for directional entities like aircraft and ships. The i
 | Shape | Name | Notes |
 |-------|------|-------|
 | radio | `radio` | Radio signal or communication |
+| camera | `camera` | Fixed CCTV / traffic camera |
 
 ## Infrastructure
 

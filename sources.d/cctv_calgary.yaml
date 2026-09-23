@@ -1,0 +1,156 @@
+# sources.d/cctv_calgary.yaml
+# City of Calgary — Traffic Camera catalog
+# Source: https://data.calgary.ca/resource/k7p9-kppz.json (Socrata)
+# Auth: None required (public open data)
+# Format: JSON array of camera records
+#
+# Catalog only: still images are fetched by the browser from
+# trafficcam.calgary.ca and never enter SQLite, observations, the WebSocket or
+# a map texture.
+#
+# The catalog publishes each image URL over plain HTTP. The host answers on
+# HTTPS with the same path, and the browser will not load mixed content, so the
+# scheme is normalized here for that one verified host. This is a deliberate
+# per-source rewrite, not a general rule: no other source upgrades a URL it was
+# given.
+#
+# `quadrant` describes the street address (Calgary's NE/NW/SE/SW city
+# quadrants), NOT the direction the camera points. It is surfaced as an address
+# field and never as a heading.
+schema_version: 2
+
+name: cctv_calgary
+labels:
+  category: infrastructure
+  priority: low
+
+# --- Identity ---
+# Separate layer from Austin: display settings (media origins included) are
+# stored per layer, last-write-wins.
+source_type: cctv_calgary
+layer_type: cctv_calgary
+display_name: "Calgary Traffic Cameras"
+layer_display_name: "Traffic Cameras (Calgary)"
+
+filtering: viewport
+
+# --- Ingestion ---
+transport:
+  type: http_poll
+  url: "https://data.calgary.ca/resource/k7p9-kppz.json?$limit=2000"
+  method: GET
+  headers:
+    Accept: "application/json"
+    User-Agent: "respondent-community/1.0 (+https://github.com/Alevsk/respondent)"
+  timeout: "30s"
+  interval: "3600s" # hourly
+  max_response_bytes: 8388608 # 8MB
+  rate_limit:
+    requests_per_second: 1
+    burst: 2
+  retry:
+    max_attempts: 3
+    backoff: "exponential"
+    initial_delay: "2s"
+    max_delay: "30s"
+
+# --- Response Parsing ---
+parser:
+  format: json
+  max_records: 5000
+
+# --- Record Filtering (CEL) ---
+# The camera URL is the stable identity, so a row without one is unusable.
+# A row without `point` has no position and is dropped rather than placed at 0,0.
+filter: >
+  has(record.camera_url) && record.camera_url != null
+  && has(record.camera_url.url)
+  && string(record.camera_url.url).startsWith("http://trafficcam.calgary.ca/")
+  && string(record.camera_url.url).endsWith(".jpg")
+  && has(record.point) && record.point != null
+  && has(record.point.coordinates) && size(record.point.coordinates) >= 2
+
+# --- Entity Mapping (CEL) ---
+entity:
+  # "http://trafficcam.calgary.ca/loc86.jpg" -> "calgary_loc86"
+  external_id: >
+    "calgary_" + string(record.camera_url.url)
+      .replace("http://trafficcam.calgary.ca/", "")
+      .replace(".jpg", "")
+  name: >
+    has(record.camera_location) && string(record.camera_location) != ""
+      ? string(record.camera_location)
+      : (has(record.camera_url.description) ? string(record.camera_url.description) : "Calgary Camera")
+  metadata:
+    # The one place the HTTP catalog URL becomes the HTTPS URL the browser uses.
+    snapshot_url: 'string(record.camera_url.url).replace("http://", "https://")'
+    attribution: '"City of Calgary — Open Calgary"'
+    camera_location: 'has(record.camera_location) ? string(record.camera_location) : ""'
+    # Address quadrant, not camera heading.
+    address_quadrant: 'has(record.quadrant) ? string(record.quadrant) : ""'
+    camera_label: 'has(record.camera_url.description) ? string(record.camera_url.description) : ""'
+
+# --- Observation Mapping (CEL) ---
+# Socrata GeoJSON points are [longitude, latitude].
+observation:
+  latitude: 'double(record.point.coordinates[1])'
+  longitude: 'double(record.point.coordinates[0])'
+  altitude: '"0.0"'
+  timestamp: 'now()'
+  metadata: {}
+  content_hash: >
+    string(record.camera_url.url) + "|"
+    + (has(record.camera_location) ? string(record.camera_location) : "") + "|"
+    + (has(record.quadrant) ? string(record.quadrant) : "") + "|"
+    + string(record.point.coordinates[1]) + "," + string(record.point.coordinates[0])
+
+# --- Recording ---
+recording:
+  mode: dedupe
+
+# --- Cache ---
+cache:
+  ttl: "86400s" # 24h
+
+# --- Display ---
+display:
+  icon:
+    shape: camera
+    rotatable: false
+    interpolation: false
+    scale: 1.0
+  trail:
+    color: "#26a69a"
+    width: 1.0
+    opacity: 0.4
+  style:
+    color: "#26a69a"
+    point_size: 6
+  media:
+    - id: camera
+      kind: snapshot
+      label: "Camera feed"
+      url_key: snapshot_url
+      attribution_key: attribution
+      allowed_origins:
+        - "https://trafficcam.calgary.ca"
+      snapshot:
+        refresh_interval: "30s"
+        cache_bust_param: "_respondent_frame"
+  field_renderers:
+    - keys: [camera_location]
+      label: "LOCATION"
+      format:
+        type: string
+      priority: 0
+    - keys: [address_quadrant]
+      label: "ADDRESS QUADRANT"
+      format:
+        type: string
+        transform: upper
+      priority: 1
+    - keys: [camera_label]
+      label: "CAMERA"
+      format:
+        type: string
+      priority: 2

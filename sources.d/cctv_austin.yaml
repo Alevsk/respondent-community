@@ -1,0 +1,176 @@
+# sources.d/cctv_austin.yaml
+# City of Austin (Austin Transportation & Public Works) — Traffic Camera catalog
+# Source: https://data.austintexas.gov/resource/b4k4-adkb.json (Socrata)
+# Auth: None required (public open data)
+# Format: JSON array of camera records
+#
+# This source ingests the camera CATALOG only. The still images themselves are
+# loaded directly by the browser from cctv.austinmobility.io and never pass
+# through Respondent: no frame reaches SQLite, an observation, the WebSocket or
+# a map texture. The catalog is polled hourly; the image inside the entity panel
+# refreshes on its own 30s cadence while a camera is being viewed.
+#
+# These are fixed-position traffic cameras, so entities are stationary and the
+# layer is viewport-filtered.
+schema_version: 2
+
+name: cctv_austin
+labels:
+  category: infrastructure
+  priority: low
+
+# --- Identity ---
+# Each region is its own layer: display settings (including media policy) are
+# stored per layer with last-write-wins, so mixing regions would mean one
+# region's camera origins silently governing another's.
+source_type: cctv_austin
+layer_type: cctv_austin
+display_name: "Austin Traffic Cameras"
+layer_display_name: "Traffic Cameras (Austin)"
+
+filtering: viewport
+
+# --- Ingestion ---
+transport:
+  type: http_poll
+  # $limit raises Socrata's 1000-row default; the catalog holds ~1.1k cameras.
+  url: "https://data.austintexas.gov/resource/b4k4-adkb.json?$limit=2000"
+  method: GET
+  headers:
+    Accept: "application/json"
+    User-Agent: "respondent-community/1.0 (+https://github.com/Alevsk/respondent)"
+  timeout: "30s"
+  interval: "3600s" # hourly — a camera catalog changes on the order of weeks
+  max_response_bytes: 8388608 # 8MB (~1.5MB actual)
+  rate_limit:
+    requests_per_second: 1
+    burst: 2
+  retry:
+    max_attempts: 3
+    backoff: "exponential"
+    initial_delay: "2s"
+    max_delay: "30s"
+
+# --- Response Parsing ---
+# Socrata returns a bare JSON array of resource objects.
+parser:
+  format: json
+  max_records: 5000
+
+# --- Record Filtering (CEL) ---
+# Only cameras that are switched on and have both a position and an image URL.
+# A camera with no `location` is a catalog row without coordinates — it must be
+# dropped, never coerced to 0,0.
+filter: >
+  has(record.camera_status) && record.camera_status == "TURNED_ON"
+  && has(record.camera_id) && string(record.camera_id) != ""
+  && has(record.screenshot_address) && string(record.screenshot_address).startsWith("https://cctv.austinmobility.io/")
+  && has(record.location) && record.location != null
+  && has(record.location.coordinates) && size(record.location.coordinates) >= 2
+
+# --- Entity Mapping (CEL) ---
+entity:
+  external_id: '"austin_" + string(record.camera_id)'
+  name: >
+    has(record.location_name) && string(record.location_name) != ""
+      ? string(record.location_name)
+      : "Austin Camera " + string(record.camera_id)
+  metadata:
+    # snapshot_url is consumed by display.media below; it is never rendered as
+    # an ordinary overview row.
+    snapshot_url: 'string(record.screenshot_address)'
+    attribution: '"City of Austin — Transportation & Public Works"'
+    camera_id: 'string(record.camera_id)'
+    camera_status: 'string(record.camera_status)'
+    location_name: 'has(record.location_name) ? string(record.location_name) : ""'
+    landmark: 'has(record.landmark) ? string(record.landmark) : ""'
+    council_district: 'has(record.council_district) ? string(record.council_district) : ""'
+    signal_eng_area: 'has(record.signal_eng_area) ? string(record.signal_eng_area) : ""'
+    camera_mfg: 'has(record.camera_mfg) ? string(record.camera_mfg) : ""'
+
+# --- Observation Mapping (CEL) ---
+# Socrata GeoJSON points are [longitude, latitude].
+observation:
+  latitude: 'double(record.location.coordinates[1])'
+  longitude: 'double(record.location.coordinates[0])'
+  altitude: '"0.0"'
+  timestamp: 'now()'
+  metadata:
+    catalog_modified: 'has(record.modified_date) ? string(record.modified_date) : ""'
+  # Dedupe on everything that changes what the panel shows or plays: position,
+  # name, image URL and status. An unchanged hourly poll writes no observation.
+  content_hash: >
+    string(record.camera_id) + "|" + string(record.screenshot_address) + "|"
+    + string(record.camera_status) + "|"
+    + (has(record.location_name) ? string(record.location_name) : "") + "|"
+    + string(record.location.coordinates[1]) + "," + string(record.location.coordinates[0])
+
+# --- Recording ---
+recording:
+  mode: dedupe
+
+# --- Cache ---
+cache:
+  ttl: "86400s" # 24h — the catalog is stable; image freshness is independent
+
+# --- Display ---
+display:
+  icon:
+    shape: camera
+    rotatable: false
+    interpolation: false
+    scale: 1.0
+  trail:
+    color: "#7e57c2"
+    width: 1.0
+    opacity: 0.4
+  style:
+    color: "#7e57c2"
+    point_size: 6
+  media:
+    - id: camera
+      kind: snapshot
+      label: "Camera feed"
+      url_key: snapshot_url
+      attribution_key: attribution
+      # Exact origins only. Browser-side checking is not a DNS or redirect
+      # firewall, but it keeps an unexpected catalog value from mounting a
+      # player against an arbitrary host.
+      allowed_origins:
+        - "https://cctv.austinmobility.io"
+      snapshot:
+        refresh_interval: "30s"
+        cache_bust_param: "_respondent_frame"
+  field_renderers:
+    - keys: [location_name]
+      label: "LOCATION"
+      format:
+        type: string
+      priority: 0
+    - keys: [landmark]
+      label: "LANDMARK"
+      format:
+        type: string
+      priority: 1
+    - keys: [camera_status]
+      label: "STATUS"
+      format:
+        type: string
+        transform: upper
+      priority: 2
+    - keys: [council_district]
+      label: "COUNCIL DISTRICT"
+      format:
+        type: string
+      priority: 3
+    - keys: [signal_eng_area]
+      label: "AREA"
+      format:
+        type: string
+        transform: upper
+      priority: 4
+    - keys: [camera_mfg]
+      label: "MANUFACTURER"
+      format:
+        type: string
+      priority: 5

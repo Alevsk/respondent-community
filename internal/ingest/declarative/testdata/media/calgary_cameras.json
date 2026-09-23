@@ -1,0 +1,31 @@
+[
+  {
+    "camera_url": { "url": "http://trafficcam.calgary.ca/loc86.jpg", "description": "Camera 87" },
+    "quadrant": "SE",
+    "camera_location": "Stoney Trail / Deerfoot Trail SE",
+    "point": { "type": "Point", "coordinates": [-113.9766063, 50.9007257] }
+  },
+  {
+    "camera_url": { "url": "http://trafficcam.calgary.ca/loc12.jpg", "description": "Camera 13" },
+    "quadrant": "NW",
+    "camera_location": "NULL ISLAND TEST CAMERA",
+    "point": { "type": "Point", "coordinates": [0, 0] }
+  },
+  {
+    "camera_url": { "url": "http://trafficcam.calgary.ca/loc99.jpg", "description": "Camera 100" },
+    "quadrant": "NE",
+    "camera_location": "CAMERA WITHOUT A POINT"
+  },
+  {
+    "camera_url": null,
+    "quadrant": "SW",
+    "camera_location": "CAMERA WITHOUT A URL",
+    "point": { "type": "Point", "coordinates": [-114.0, 51.0] }
+  },
+  {
+    "camera_url": { "url": "http://cameras.example.net/loc1.jpg", "description": "Off-host" },
+    "quadrant": "SW",
+    "camera_location": "CAMERA ON AN UNDECLARED HOST",
+    "point": { "type": "Point", "coordinates": [-114.1, 51.1] }
+  }
+]

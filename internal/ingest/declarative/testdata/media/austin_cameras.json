@@ -1,0 +1,55 @@
+[
+  {
+    "camera_id": "1",
+    "location_name": "830 BLK W RUNDBERG LN (Little Walnut Creek Library, HEB)",
+    "camera_status": "TURNED_ON",
+    "camera_mfg": "Wisenet",
+    "landmark": "Little Walnut Creek Library, HEB",
+    "signal_eng_area": "NORTHEAST",
+    "council_district": "4",
+    "modified_date": "2023-07-18T20:45:00.000Z",
+    "screenshot_address": "https://cctv.austinmobility.io/image/1.jpg",
+    "location": { "type": "Point", "coordinates": [-97.698158, 30.363686] }
+  },
+  {
+    "camera_id": "2",
+    "location_name": "NULL ISLAND TEST CAMERA",
+    "camera_status": "TURNED_ON",
+    "modified_date": "2024-01-02T00:00:00.000Z",
+    "screenshot_address": "https://cctv.austinmobility.io/image/2.jpg",
+    "location": { "type": "Point", "coordinates": [0, 0] }
+  },
+  {
+    "camera_id": "3",
+    "location_name": "DECOMMISSIONED CAMERA",
+    "camera_status": "TURNED_OFF",
+    "screenshot_address": "https://cctv.austinmobility.io/image/3.jpg",
+    "location": { "type": "Point", "coordinates": [-97.7, 30.3] }
+  },
+  {
+    "camera_id": "4",
+    "location_name": "CAMERA WITHOUT A LOCATION",
+    "camera_status": "TURNED_ON",
+    "screenshot_address": "https://cctv.austinmobility.io/image/4.jpg"
+  },
+  {
+    "camera_id": "5",
+    "location_name": "CAMERA WITH NULL LOCATION",
+    "camera_status": "TURNED_ON",
+    "screenshot_address": "https://cctv.austinmobility.io/image/5.jpg",
+    "location": null
+  },
+  {
+    "camera_id": "6",
+    "location_name": "CAMERA ON AN UNDECLARED HOST",
+    "camera_status": "TURNED_ON",
+    "screenshot_address": "https://cameras.example.net/image/6.jpg",
+    "location": { "type": "Point", "coordinates": [-97.71, 30.31] }
+  },
+  {
+    "camera_id": "7",
+    "location_name": "CAMERA WITH NO IMAGE URL",
+    "camera_status": "TURNED_ON",
+    "location": { "type": "Point", "coordinates": [-97.72, 30.32] }
+  }
+]
