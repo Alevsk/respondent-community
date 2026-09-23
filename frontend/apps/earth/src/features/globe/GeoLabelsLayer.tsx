@@ -11,7 +11,8 @@ import { type Viewer, type ImageryLayer, UrlTemplateImageryProvider, Credit } fr
 import { useUIStore } from '@/app/store';
 
 /** Labels-only tile URL — transparent background with white text labels. */
-const LABELS_TILE_URL = 'https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}';
+const LABELS_TILE_URL =
+  'https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}';
 
 /** Target alpha when fully visible. */
 const LABELS_ALPHA = 0.85;

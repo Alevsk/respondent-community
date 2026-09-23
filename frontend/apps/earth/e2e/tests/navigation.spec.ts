@@ -55,8 +55,7 @@ type CesiumCamera = {
 async function getCameraAltitude(page: import('@playwright/test').Page): Promise<number> {
   return page.evaluate(() => {
     const viewer = (window as unknown as Record<string, unknown>).__cesiumViewer as
-      | { camera: CesiumCamera }
-      | undefined;
+      { camera: CesiumCamera } | undefined;
     if (!viewer) throw new Error('window.__cesiumViewer not exposed');
     return viewer.camera.positionCartographic.height;
   });
@@ -66,8 +65,7 @@ async function getCameraAltitude(page: import('@playwright/test').Page): Promise
 async function getCameraHeading(page: import('@playwright/test').Page): Promise<number> {
   return page.evaluate(() => {
     const viewer = (window as unknown as Record<string, unknown>).__cesiumViewer as
-      | { camera: CesiumCamera }
-      | undefined;
+      { camera: CesiumCamera } | undefined;
     if (!viewer) throw new Error('window.__cesiumViewer not exposed');
     return viewer.camera.heading;
   });
@@ -160,8 +158,7 @@ async function setCameraInstant(
 ): Promise<void> {
   await page.evaluate((o) => {
     const viewer = (window as unknown as Record<string, unknown>).__cesiumViewer as
-      | { camera: CesiumCamera }
-      | undefined;
+      { camera: CesiumCamera } | undefined;
     if (!viewer) throw new Error('window.__cesiumViewer not exposed');
     viewer.camera.flyTo({
       destination: {

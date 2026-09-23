@@ -46,8 +46,7 @@ async function collectBillboardEntityIds(
 ): Promise<Set<string>> {
   const ids = await page.evaluate(() => {
     const viewer = (window as unknown as Record<string, unknown>).__cesiumViewer as
-      | { scene: { primitives: { length: number; get: (i: number) => unknown } } }
-      | undefined;
+      { scene: { primitives: { length: number; get: (i: number) => unknown } } } | undefined;
     if (!viewer) return [];
     const result: string[] = [];
     const prims = viewer.scene.primitives;
@@ -190,8 +189,7 @@ test.describe('Progressive + Persistent Viewport-Based Entity Loading', () => {
     // second viewport with dense ADS-B traffic.
     await page.evaluate(() => {
       const viewer = (window as unknown as Record<string, unknown>).__cesiumViewer as
-        | { camera: { flyTo: (opts: unknown) => void } }
-        | undefined;
+        { camera: { flyTo: (opts: unknown) => void } } | undefined;
       if (!viewer) throw new Error('window.__cesiumViewer not exposed');
       viewer.camera.flyTo({
         destination: {
