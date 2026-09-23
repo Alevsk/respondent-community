@@ -139,3 +139,25 @@ func TestMediaOriginsAreStoredCanonically(t *testing.T) {
 		})
 	}
 }
+
+// A host that a resolver or a browser would treat as an IPv4 address must be
+// screened as one. Shorthand and non-decimal forms all resolve to loopback or
+// to a private network, so accepting them as "just a hostname" would defeat the
+// literal-address screening entirely.
+func TestMediaOriginsRejectShorthandAddressLiterals(t *testing.T) {
+	for name, origin := range map[string]string{
+		"dotted shorthand loopback": "https://127.1",
+		"octal loopback":            "https://0177.0.0.1",
+		"integer loopback":          "https://2130706433",
+		"hex loopback":              "https://0x7f000001",
+		"integer private":           "https://3232235777",
+		"numeric tld":               "https://example.12",
+	} {
+		t.Run(name, func(t *testing.T) {
+			media := strings.Replace(snapshotMediaYAML, "https://camera.example.com", origin, 1)
+			if _, err := loadMediaTestSource(t, validSourceYAML+media); err == nil {
+				t.Errorf("accepted %q as a public host", origin)
+			}
+		})
+	}
+}

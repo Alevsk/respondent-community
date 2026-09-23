@@ -138,3 +138,52 @@ func TestDiscoveredPaginationDoesNotPublishPartialOrMixMirrors(t *testing.T) {
 		t.Fatalf("requests=%v", requests)
 	}
 }
+
+// LookupSRV is an injected seam, so acceptableOrigins cannot assume the targets
+// it is handed are well-formed names. A target that smuggles a path, a port or
+// an address literal past the suffix check would become the request origin.
+func TestDiscoveryRejectsMalformedSRVTargets(t *testing.T) {
+	dns := &fakeSRVResolver{records: []*net.SRV{
+		{Target: "evil.com/x.api.example.com.", Port: 443, Priority: 1},
+		{Target: "api.example.com:8443", Port: 443, Priority: 1},
+		{Target: "bad_label.api.example.com.", Port: 443, Priority: 1},
+		{Target: "-lead.api.example.com.", Port: 443, Priority: 1},
+		{Target: "192.0.2.10", Port: 443, Priority: 1},
+		{Target: "GOOD.api.example.com.", Port: 443, Priority: 2},
+	}}
+	r := newEndpointResolver(&DiscoverySpec{
+		SRVName: "_api._tcp.example.com", AllowedSuffix: "api.example.com",
+		Port: 443, CacheTTL: Duration{time.Hour},
+	}, dns, time.Now)
+
+	origins, err := r.Origins(context.Background())
+	if err != nil {
+		t.Fatalf("Origins: %v", err)
+	}
+	// Only the well-formed name survives, lowercased.
+	if len(origins) != 1 || origins[0] != "https://good.api.example.com" {
+		t.Errorf("origins = %v, want only https://good.api.example.com", origins)
+	}
+}
+
+// allowed_suffix is the boundary every discovered target is judged against, so
+// a suffix that is not itself a public DNS name must fail the source at load.
+func TestDiscoveryRejectsNonPublicAllowedSuffix(t *testing.T) {
+	for name, suffix := range map[string]string{
+		"single label":  "example",
+		"address":       "192.0.2.10",
+		"numeric tld":   "example.12",
+		"internal":      "api.internal",
+		"with path":     "api.example.com/x",
+		"with port":     "api.example.com:443",
+		"bad character": "api_example.com",
+	} {
+		t.Run(name, func(t *testing.T) {
+			discovery := "{srv_name: _api._tcp.example.com, allowed_suffix: " + suffix + ", port: 443, cache_ttl: 1h}"
+			yaml := strings.Replace(validSourceYAML, "  type: http_poll", "  type: http_poll\n  discovery: "+discovery, 1)
+			if _, err := loadMediaTestSource(t, yaml); err == nil {
+				t.Errorf("accepted allowed_suffix %q", suffix)
+			}
+		})
+	}
+}

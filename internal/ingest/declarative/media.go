@@ -2,7 +2,6 @@ package declarative
 
 import (
 	"fmt"
-	"net/netip"
 	"net/url"
 	"regexp"
 	"strings"
@@ -106,21 +105,9 @@ func canonicalMediaOrigin(raw string) (string, bool) {
 		u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
 		return "", false
 	}
-	host := strings.ToLower(strings.TrimSuffix(u.Hostname(), "."))
-	if host == "" || host == "localhost" || !strings.Contains(host, ".") ||
-		strings.HasSuffix(host, ".localhost") || strings.HasSuffix(host, ".local") {
+	host, kind := canonicalHost(u.Hostname())
+	if kind == hostInvalid {
 		return "", false
-	}
-	if ip, err := netip.ParseAddr(host); err == nil {
-		ip = ip.Unmap()
-		if !ip.IsGlobalUnicast() || ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() ||
-			netip.MustParsePrefix("100.64.0.0/10").Contains(ip) {
-			return "", false
-		}
-		host = "[" + ip.String() + "]"
-		if ip.Is4() {
-			host = ip.String()
-		}
 	}
 	// Only a non-default port survives; :443 is implicit in an https origin.
 	if port := u.Port(); port != "" && port != "443" {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"net/netip"
 	"net/url"
 	"regexp"
 	"sort"
@@ -47,7 +46,7 @@ func validateDiscovery(d *DiscoverySpec) error {
 	if !srvNameRE.MatchString(name) {
 		return fmt.Errorf("transport.discovery: srv_name %q must look like _service._tcp.example.com", d.SRVName)
 	}
-	if !validDiscoverySuffix(d.AllowedSuffix) {
+	if _, ok := canonicalDNSHost(d.AllowedSuffix); !ok {
 		return fmt.Errorf("transport.discovery: allowed_suffix %q must be a public DNS suffix", d.AllowedSuffix)
 	}
 	if d.Port != 443 {
@@ -58,23 +57,6 @@ func validateDiscovery(d *DiscoverySpec) error {
 			minDiscoveryCacheTTL, maxDiscoveryCacheTTL, d.CacheTTL.Duration)
 	}
 	return nil
-}
-
-// validDiscoverySuffix rejects loopback, private, link-local and single-label
-// suffixes so a hijacked or misconfigured SRV answer cannot redirect a source
-// at the host running Respondent.
-func validDiscoverySuffix(suffix string) bool {
-	host := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(suffix), "."))
-	if host == "" || !strings.Contains(host, ".") {
-		return false
-	}
-	if strings.HasSuffix(host, ".local") || strings.HasSuffix(host, ".localhost") || strings.HasSuffix(host, ".internal") {
-		return false
-	}
-	if _, err := netip.ParseAddr(host); err == nil {
-		return false
-	}
-	return true
 }
 
 // srvResolver is the injected DNS seam. *net.Resolver satisfies it.
@@ -143,7 +125,10 @@ func (r *endpointResolver) Origins(ctx context.Context) ([]string, error) {
 // acceptableOrigins filters SRV answers down to the declared suffix and port,
 // then orders them by priority (ascending) and weight (descending).
 func (r *endpointResolver) acceptableOrigins(records []*net.SRV) []string {
-	suffix := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(r.spec.AllowedSuffix), "."))
+	suffix, ok := canonicalDNSHost(r.spec.AllowedSuffix)
+	if !ok {
+		return nil
+	}
 
 	type candidate struct {
 		host     string
@@ -156,12 +141,11 @@ func (r *endpointResolver) acceptableOrigins(records []*net.SRV) []string {
 		if rec == nil || int(rec.Port) != r.spec.Port {
 			continue
 		}
-		host := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(rec.Target), "."))
-		if host == "" || host != suffix && !strings.HasSuffix(host, "."+suffix) {
-			continue
-		}
-		// An SRV target must be a name, never an address literal.
-		if _, err := netip.ParseAddr(host); err == nil {
+		// LookupSRV is an injected seam, so a target is untrusted text until the
+		// shared host policy says it is a public DNS name. That also rules out
+		// address literals, embedded paths, ports and illegal label characters.
+		host, ok := canonicalDNSHost(rec.Target)
+		if !ok || (host != suffix && !strings.HasSuffix(host, "."+suffix)) {
 			continue
 		}
 		accepted = append(accepted, candidate{host: host, priority: rec.Priority, weight: rec.Weight})

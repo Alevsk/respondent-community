@@ -58,6 +58,20 @@ describe('media URL policy', () => {
     expect(url.searchParams.getAll('tick')).toEqual(['123']);
   });
 
+  // The loader rejects these spellings when a source declares them as an
+  // allowed origin; the browser must refuse them in a catalog value too. It
+  // gets there differently — the URL parser normalizes a numeric host to its
+  // dotted form first — so the agreement is asserted rather than assumed.
+  it.each([
+    'https://127.1/frame.jpg',
+    'https://0177.0.0.1/frame.jpg',
+    'https://2130706433/frame.jpg',
+    'https://0x7f000001/frame.jpg',
+    'https://3232235777/frame.jpg',
+  ])('rejects shorthand address literal %s', (url) => {
+    expect(validateMediaUrl(url)).toBeNull();
+  });
+
   it('leaves every other query parameter byte-identical', () => {
     // A signed URL's signature covers the exact query bytes. Re-serializing the
     // query would turn %20 into +, give a bare flag an =, and reorder nothing
