@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -185,5 +186,54 @@ func TestDiscoveryRejectsNonPublicAllowedSuffix(t *testing.T) {
 				t.Errorf("accepted allowed_suffix %q", suffix)
 			}
 		})
+	}
+}
+
+// Mirror selection is a read-modify-write across the whole request: pick a
+// candidate, then record what happened to it. If two callers can interleave
+// those halves they both pick the same dead mirror, and a pool of listeners
+// turns into a pile of requests at a host already known to be down.
+func TestDiscoveredMirrorSelectionIsAtomicAcrossCallers(t *testing.T) {
+	var mu sync.Mutex
+	hits := map[string]int{}
+	client := &http.Client{Transport: mediaRoundTripper(func(r *http.Request) (*http.Response, error) {
+		mu.Lock()
+		hits[r.URL.Host]++
+		mu.Unlock()
+		if r.URL.Host == "down.api.example.com" {
+			return nil, fmt.Errorf("offline")
+		}
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("[]"))}, nil
+	})}
+
+	tr := NewHTTPTransport(HTTPTransportConfig{Client: client, Logger: logging.NewNopLogger()})
+	tr.discovery = newEndpointResolver(&DiscoverySpec{
+		SRVName: "_api._tcp.example.com", AllowedSuffix: "api.example.com",
+		Port: 443, CacheTTL: Duration{time.Hour},
+	}, &fakeSRVResolver{records: []*net.SRV{
+		{Target: "down.api.example.com.", Port: 443, Priority: 1},
+		{Target: "up.api.example.com.", Port: 443, Priority: 2},
+	}}, time.Now)
+
+	const callers = 8
+	var wg sync.WaitGroup
+	for i := 0; i < callers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, _, err := tr.Fetch(context.Background(), "GET", "https://api.example.com/catalog"); err != nil {
+				t.Errorf("Fetch: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if hits["down.api.example.com"] != 1 {
+		t.Errorf("dead mirror was tried %d times, want exactly 1 — selection interleaved", hits["down.api.example.com"])
+	}
+	if hits["up.api.example.com"] != callers {
+		t.Errorf("live mirror served %d of %d calls", hits["up.api.example.com"], callers)
 	}
 }

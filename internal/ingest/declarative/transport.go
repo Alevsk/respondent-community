@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 
@@ -54,10 +55,9 @@ type HTTPTransport struct {
 
 	// Optional DNS SRV origin discovery. When set, Fetch rewrites the origin
 	// of every request URL to a discovered mirror, keeping the declared path
-	// and query. mirrorIdx/mirrorPinned are guarded by mu.
-	discovery    *endpointResolver
-	mirrorIdx    int
-	mirrorPinned bool
+	// and query. The selector owns its own synchronisation.
+	discovery *endpointResolver
+	mirrors   mirrorSelector
 }
 
 // HTTPTransportConfig holds configuration for creating an HTTPTransport.
@@ -102,74 +102,49 @@ func (t *HTTPTransport) Fetch(ctx context.Context, method, url string) ([]byte, 
 
 // fetchDiscovered routes one request through the discovered mirror list.
 //
-// Mirror selection is deliberately sticky: once a mirror answers, every later
-// request in the same refresh goes to that same mirror, so a paginated catalog
-// is never stitched together from two directory snapshots. When the pinned
-// mirror fails the error is returned to the caller rather than silently
-// retried elsewhere — the caller decides whether to restart the refresh from
-// page zero on the next mirror.
+// Mirror choice and its outcome belong to mirrorSelector, which keeps them a
+// single atomic decision; this function only renders the URL and reports what
+// the attempt did.
 func (t *HTTPTransport) fetchDiscovered(ctx context.Context, method, rawURL string) ([]byte, int, error) {
 	origins, err := t.discovery.Origins(ctx)
 	if err != nil {
 		return nil, 0, fmt.Errorf("discover origins for source %q: %w", t.sourceName, err)
 	}
 
-	t.mu.RLock()
-	idx, pinned := t.mirrorIdx, t.mirrorPinned
-	t.mu.RUnlock()
-
-	if idx >= len(origins) {
-		return nil, 0, fmt.Errorf("source %q: all %d discovered mirrors exhausted", t.sourceName, len(origins))
+	target, err := url.Parse(rawURL)
+	if err != nil {
+		return nil, 0, fmt.Errorf("source %q: parse source URL: %w", t.sourceName, err)
 	}
 
-	last := len(origins) - 1
-	if pinned {
-		last = idx
-	}
-
-	var lastErr error
-	var lastStatus int
-	for i := idx; i <= last; i++ {
-		pageURL, err := rewriteOrigin(rawURL, origins[i])
+	var body []byte
+	var status int
+	err = t.mirrors.each(ctx, origins, func(origin string) error {
+		pageURL, err := rewriteOrigin(*target, origin)
 		if err != nil {
-			return nil, 0, err
+			return err
 		}
-
-		body, status, err := t.fetchURL(ctx, method, pageURL)
-		if err == nil {
-			t.setMirror(i, true)
-			return body, status, nil
+		b, s, err := t.fetchURL(ctx, method, pageURL)
+		status = s
+		if err != nil {
+			t.logger.Warn("discovered mirror failed",
+				logging.String("source_name", t.sourceName),
+				logging.String("origin", origin),
+				logging.Err("error", err),
+			)
+			return err
 		}
-		if ctx.Err() != nil {
-			return nil, status, err
-		}
-
-		lastErr, lastStatus = err, status
-		// Advance past the failed mirror so the next attempt starts on the
-		// following one instead of re-trying a mirror already known to be down.
-		t.setMirror(i+1, false)
-		t.logger.Warn("discovered mirror failed",
-			logging.String("source_name", t.sourceName),
-			logging.String("origin", origins[i]),
-			logging.Err("error", err),
-		)
+		body = b
+		return nil
+	})
+	if err != nil {
+		return nil, status, fmt.Errorf("source %q: discovered mirror request failed: %w", t.sourceName, err)
 	}
-
-	return nil, lastStatus, fmt.Errorf("source %q: discovered mirror request failed: %w", t.sourceName, lastErr)
-}
-
-// setMirror records which discovered mirror the next request should use.
-func (t *HTTPTransport) setMirror(idx int, pinned bool) {
-	t.mu.Lock()
-	t.mirrorIdx, t.mirrorPinned = idx, pinned
-	t.mu.Unlock()
+	return body, status, nil
 }
 
 // resetMirrors returns mirror selection to the highest-priority origin. The
 // adapter calls it once per refresh cycle, never between pagination attempts.
-func (t *HTTPTransport) resetMirrors() {
-	t.setMirror(0, false)
-}
+func (t *HTTPTransport) resetMirrors() { t.mirrors.reset() }
 
 // hasDiscovery reports whether this transport selects origins dynamically.
 func (t *HTTPTransport) hasDiscovery() bool { return t != nil && t.discovery != nil }

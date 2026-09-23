@@ -12,18 +12,16 @@ import (
 )
 
 type stubReporter struct {
-	reported      bool
-	err           error
-	gotEntity     string
-	gotMedia      string
-	callCount     int
-	lastRespValid bool
+	reported  bool
+	err       error
+	gotEntity string
+	gotMedia  string
+	callCount int
 }
 
 func (s *stubReporter) ReportPlayback(_ context.Context, entityID, mediaID string) (bool, error) {
 	s.callCount++
 	s.gotEntity, s.gotMedia = entityID, mediaID
-	s.lastRespValid = true
 	return s.reported, s.err
 }
 

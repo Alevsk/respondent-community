@@ -2,6 +2,7 @@ package declarative
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/url"
@@ -185,19 +186,77 @@ func splitSRVName(srvName string) (service, proto, name string, err error) {
 	return strings.TrimPrefix(parts[0], "_"), strings.TrimPrefix(parts[1], "_"), parts[2], nil
 }
 
-// rewriteOrigin replaces the scheme and host of rawURL with those of origin,
-// preserving the declared path and query verbatim.
-func rewriteOrigin(rawURL, origin string) (string, error) {
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		return "", fmt.Errorf("parse source URL: %w", err)
-	}
+// rewriteOrigin renders a declared URL against a discovered origin, preserving
+// the path and query verbatim. It takes the parsed URL by value so the caller
+// parses the source URL once per fetch and each mirror gets its own copy.
+func rewriteOrigin(target url.URL, origin string) (string, error) {
 	o, err := url.Parse(origin)
 	if err != nil {
 		return "", fmt.Errorf("parse discovered origin: %w", err)
 	}
-	u.Scheme = o.Scheme
-	u.Host = o.Host
-	u.User = nil
-	return u.String(), nil
+	target.Scheme = o.Scheme
+	target.Host = o.Host
+	target.User = nil
+	return target.String(), nil
+}
+
+// mirrorSelector owns which discovered origin a source is currently using.
+//
+// Selection is a read-modify-write — choose a candidate, then record what
+// happened to it — so the choice and its outcome are one critical section. Two
+// callers interleaving halves of it would both pick a mirror already known to
+// be down. The lock therefore spans the whole attempt sequence, which also
+// enforces the property the refresh semantics depend on: one request at a time
+// per source, so a paginated catalog can never be stitched together from two
+// directory snapshots.
+type mirrorSelector struct {
+	mu     sync.Mutex
+	idx    int
+	pinned bool
+}
+
+// errMirrorsExhausted ends a refresh that has run out of mirrors to try.
+var errMirrorsExhausted = errors.New("all discovered mirrors exhausted")
+
+// reset returns selection to the highest-priority origin. A refresh cycle calls
+// it once at the start, never between pagination attempts — restarting on the
+// preferred mirror mid-refresh would retry a host that just failed.
+func (m *mirrorSelector) reset() {
+	m.mu.Lock()
+	m.idx, m.pinned = 0, false
+	m.mu.Unlock()
+}
+
+// each runs attempt against the origins this selector is willing to use, in
+// order, stopping at the first success.
+//
+// Once an origin answers it is pinned and later requests go only to it. A
+// pinned origin that fails is abandoned rather than silently replaced: the
+// error reaches the caller, who decides whether to discard the partial refresh
+// and start over on the next mirror.
+func (m *mirrorSelector) each(ctx context.Context, origins []string, attempt func(origin string) error) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.idx >= len(origins) {
+		return errMirrorsExhausted
+	}
+
+	last := len(origins) - 1
+	if m.pinned {
+		last = m.idx
+	}
+
+	var err error
+	for i := m.idx; i <= last; i++ {
+		if err = attempt(origins[i]); err == nil {
+			m.idx, m.pinned = i, true
+			return nil
+		}
+		m.idx, m.pinned = i+1, false
+		if ctx.Err() != nil {
+			return err
+		}
+	}
+	return err
 }
