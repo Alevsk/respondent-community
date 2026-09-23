@@ -82,7 +82,7 @@ func marshalOptionalJSON(v any) sql.NullString {
 	}
 	// reflect check handles typed nil pointers passed as interface{}.
 	rv := reflect.ValueOf(v)
-	if rv.Kind() == reflect.Ptr && rv.IsNil() {
+	if rv.Kind() == reflect.Pointer && rv.IsNil() {
 		return sql.NullString{}
 	}
 	b, err := json.Marshal(v)

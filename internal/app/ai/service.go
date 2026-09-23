@@ -506,36 +506,36 @@ func stripCodeFences(s string) string {
 func buildAnalysisPrompt(entity *domain.Entity, observations []*domain.Observation) string {
 	var b strings.Builder
 
-	b.WriteString(fmt.Sprintf("Entity: %s\n", entity.Name))
-	b.WriteString(fmt.Sprintf("Type: %s\n", entity.LayerType))
-	b.WriteString(fmt.Sprintf("External ID: %s\n", entity.ExternalID))
+	fmt.Fprintf(&b, "Entity: %s\n", entity.Name)
+	fmt.Fprintf(&b, "Type: %s\n", entity.LayerType)
+	fmt.Fprintf(&b, "External ID: %s\n", entity.ExternalID)
 
 	if len(entity.Metadata) > 0 {
 		metaJSON, _ := json.Marshal(entity.Metadata)
-		b.WriteString(fmt.Sprintf("Metadata: %s\n", string(metaJSON)))
+		fmt.Fprintf(&b, "Metadata: %s\n", string(metaJSON))
 	}
 
 	if len(entity.AIMetadata) > 0 {
 		aiMetaJSON, _ := json.Marshal(entity.AIMetadata)
-		b.WriteString(fmt.Sprintf("AI Metadata: %s\n", string(aiMetaJSON)))
+		fmt.Fprintf(&b, "AI Metadata: %s\n", string(aiMetaJSON))
 	}
 
-	b.WriteString(fmt.Sprintf("\nObservations (%d):\n", len(observations)))
+	fmt.Fprintf(&b, "\nObservations (%d):\n", len(observations))
 	for i, obs := range observations {
-		b.WriteString(fmt.Sprintf("  [%d] Time: %s", i+1, obs.Timestamp.Format("2006-01-02 15:04:05 MST")))
+		fmt.Fprintf(&b, "  [%d] Time: %s", i+1, obs.Timestamp.Format("2006-01-02 15:04:05 MST"))
 		if obs.Position != nil {
-			b.WriteString(fmt.Sprintf(", Position: (%.4f, %.4f)", obs.Position.Lat, obs.Position.Lon))
+			fmt.Fprintf(&b, ", Position: (%.4f, %.4f)", obs.Position.Lat, obs.Position.Lon)
 		}
 		if obs.AltitudeM != 0 {
-			b.WriteString(fmt.Sprintf(", Altitude: %.0fm", obs.AltitudeM))
+			fmt.Fprintf(&b, ", Altitude: %.0fm", obs.AltitudeM)
 		}
 		if len(obs.Velocity) > 0 {
 			velJSON, _ := json.Marshal(obs.Velocity)
-			b.WriteString(fmt.Sprintf(", Velocity: %s", string(velJSON)))
+			fmt.Fprintf(&b, ", Velocity: %s", string(velJSON))
 		}
 		if len(obs.Metadata) > 0 {
 			metaJSON, _ := json.Marshal(obs.Metadata)
-			b.WriteString(fmt.Sprintf(", Metadata: %s", string(metaJSON)))
+			fmt.Fprintf(&b, ", Metadata: %s", string(metaJSON))
 		}
 		b.WriteString("\n")
 	}

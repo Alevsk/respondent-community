@@ -933,7 +933,7 @@ func TestCSVParser_MaxRecords(t *testing.T) {
 	var sb strings.Builder
 	sb.WriteString("id\n")
 	for i := 0; i < 100; i++ {
-		sb.WriteString(fmt.Sprintf("%d\n", i))
+		fmt.Fprintf(&sb, "%d\n", i)
 	}
 
 	p := &CSVParser{}
@@ -1058,9 +1058,9 @@ func TestTLEParser_MaxRecords(t *testing.T) {
 	// Build 5 TLE entries, limit to 2.
 	var sb strings.Builder
 	for i := 0; i < 5; i++ {
-		sb.WriteString(fmt.Sprintf("SAT %d\n", i))
-		sb.WriteString(fmt.Sprintf("1 %05dU 24001A   24001.50000000  .00000000  00000-0  00000-0 0  9999\n", 10000+i))
-		sb.WriteString(fmt.Sprintf("2 %05d  51.6400 208.9163 0006703 300.2572 209.3837 15.49560532423453\n", 10000+i))
+		fmt.Fprintf(&sb, "SAT %d\n", i)
+		fmt.Fprintf(&sb, "1 %05dU 24001A   24001.50000000  .00000000  00000-0  00000-0 0  9999\n", 10000+i)
+		fmt.Fprintf(&sb, "2 %05d  51.6400 208.9163 0006703 300.2572 209.3837 15.49560532423453\n", 10000+i)
 	}
 
 	p := &TLEParser{}

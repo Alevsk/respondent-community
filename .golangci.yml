@@ -1,20 +1,28 @@
+version: "2"
 linters:
   enable:
-    - govet
-    - errcheck
-    - staticcheck
-    - unused
-    - ineffassign
     - gocritic
-
-linters-settings:
-  goimports:
-    local-prefixes: github.com/Alevsk/respondent
-
-run:
-  timeout: 5m
-
-issues:
-  exclude-dirs:
-    - gen
-    - vendor
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    paths:
+      - gen
+      - vendor
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/Alevsk/respondent
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
