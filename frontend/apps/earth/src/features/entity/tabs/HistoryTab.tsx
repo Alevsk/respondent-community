@@ -27,6 +27,7 @@ import { registerTab, type EntityTabProps } from './tabRegistry';
 import { useEntityTrail, type TrailPoint } from '../hooks/useEntityTrail';
 import { useUIStore } from '@/app/store';
 import { useViewerStore } from '../../globe/store';
+import { switchTestId } from '@/shared/ui/switchTestId';
 import TimelineEventList from './TimelineEventList';
 import ObservationDataView, {
   buildCsvString,
@@ -199,7 +200,7 @@ const TimelineTab: React.FC<EntityTabProps> = ({ entityId, layerType }) => {
                 Trails
               </Typography>
               <Switch
-                data-testid="history-switch-trails"
+                inputProps={switchTestId('history-switch-trails')}
                 size="small"
                 checked={showTrails}
                 onChange={handleToggleTrails}
@@ -214,7 +215,7 @@ const TimelineTab: React.FC<EntityTabProps> = ({ entityId, layerType }) => {
                 Isolate
               </Typography>
               <Switch
-                data-testid="history-switch-isolate"
+                inputProps={switchTestId('history-switch-isolate')}
                 size="small"
                 checked={isolateEntity}
                 onChange={handleToggleIsolate}

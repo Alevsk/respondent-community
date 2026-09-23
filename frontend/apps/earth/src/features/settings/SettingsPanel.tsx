@@ -12,6 +12,7 @@ import ConfigPanel, { type ConfigPanelDisplayMode } from '../../shared/ui/Config
 import FilterOption from '../../shared/ui/FilterOption';
 import { useUIStore, FilterPreset } from '@/app/store';
 import { usePanelPosition } from '../../shared/layout';
+import { switchTestId } from '@/shared/ui/switchTestId';
 
 const FILTER_OPTIONS: {
   id: FilterPreset;
@@ -46,24 +47,6 @@ const FILTER_OPTIONS: {
 ];
 
 const HAS_ION_TOKEN = !!import.meta.env.VITE_CESIUM_ION_TOKEN;
-
-/**
- * Places a test hook on a Switch's inner input.
- *
- * MUI spreads unknown props onto the switch's wrapper span, but `disabled`,
- * `checked` and the checkbox role all live on the input it wraps. A testid on
- * the span therefore addresses an element that reports neither state, so a test
- * asking whether a switch is disabled gets `false` for a disabled switch.
- *
- * The return type is an intersection so the value is describable without a
- * cast: `data-*` attributes are valid DOM attributes that React's
- * InputHTMLAttributes — whose members are all optional — does not declare.
- */
-const switchTestId = (
-  id: string,
-): React.InputHTMLAttributes<HTMLInputElement> & { 'data-testid': string } => ({
-  'data-testid': id,
-});
 
 const SLIDER_MIN = 100;
 const SLIDER_MAX = 10000;

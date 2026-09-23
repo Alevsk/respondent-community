@@ -110,8 +110,8 @@ test.describe('Entity Timeline tab (deterministic, no live feed)', () => {
     const panel = await openTimeline(page);
 
     // Both switches default to checked (HistoryTab seeds showTrails/isolate true).
-    const trails = panel.getByTestId('history-switch-trails').locator('input');
-    const isolate = panel.getByTestId('history-switch-isolate').locator('input');
+    const trails = panel.getByTestId('history-switch-trails');
+    const isolate = panel.getByTestId('history-switch-isolate');
     await expect(trails).toBeChecked();
     await expect(isolate).toBeChecked();
 
