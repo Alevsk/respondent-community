@@ -42,7 +42,11 @@ describe('media URL policy', () => {
       validateMediaUrl('https://media.example.evil.test/a', ['https://media.example']),
     ).toBeNull();
     expect(validateMediaUrl('https://media.example:8443/a', ['https://media.example'])).toBeNull();
-    expect(validateMediaUrl('https://media.example/a', [])).toBeNull();
+    // An omitted `allowed_origins` and an explicit empty list are the same
+    // thing by the time they cross the wire: protojson emits an unset repeated
+    // field as []. Treating [] as "nothing is allowed" would silently disable
+    // every station of a source that deliberately declares no fixed origins.
+    expect(validateMediaUrl('https://media.example/a', [])).toBe('https://media.example/a');
   });
 
   it('adds only an explicitly configured cache parameter and preserves queries', () => {

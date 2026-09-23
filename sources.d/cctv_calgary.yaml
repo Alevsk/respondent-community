@@ -37,7 +37,9 @@ filtering: viewport
 # --- Ingestion ---
 transport:
   type: http_poll
-  url: "https://data.calgary.ca/resource/k7p9-kppz.json?$limit=2000"
+  # %24 is an encoded "$": source URLs pass through ${ENV_VAR} expansion,
+  # which would otherwise swallow a literal "$limit".
+  url: "https://data.calgary.ca/resource/k7p9-kppz.json?%24limit=2000"
   method: GET
   headers:
     Accept: "application/json"

@@ -1,9 +1,11 @@
 package declarative
 
 import (
+	neturl "net/url"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/Alevsk/respondent/internal/domain"
@@ -321,20 +323,64 @@ func TestShippedMediaSourcesDeclareUsableMedia(t *testing.T) {
 			if media.AttributionKey != "" && merged[media.AttributionKey] == "" {
 				t.Errorf("attribution_key %q resolved to an empty value", media.AttributionKey)
 			}
-			if len(url) < len("https://") || url[:len("https://")] != "https://" {
-				t.Errorf("media URL %q is not HTTPS", url)
+			parsed, err := neturl.Parse(url)
+			if err != nil || parsed.Scheme != "https" {
+				t.Errorf("media URL %q is not a valid HTTPS URL", url)
+				return
 			}
 			if len(media.AllowedOrigins) > 0 {
+				// Compare the way the browser does — origin equality, not a
+				// prefix match, which would let "https://host/" pass here and
+				// fail in the client.
+				origin := parsed.Scheme + "://" + parsed.Host
 				allowed := false
-				for _, origin := range media.AllowedOrigins {
-					if len(url) > len(origin) && url[:len(origin)] == origin {
+				for _, declared := range media.AllowedOrigins {
+					if declared == origin {
 						allowed = true
 					}
 				}
 				if !allowed {
-					t.Errorf("media URL %q is outside the declared origins %v", url, media.AllowedOrigins)
+					t.Errorf("media URL origin %q is outside the declared origins %v", origin, media.AllowedOrigins)
 				}
 			}
 		})
+	}
+}
+
+// Source URLs pass through os.Expand so a definition can embed ${ENV_VAR}. That
+// also means a literal "$" in a query string — Socrata's "$limit", for one — is
+// read as an undefined variable and silently deleted, turning "?$limit=2000"
+// into "?=2000" and the request into an HTTP 400. Percent-encode it instead.
+func TestShippedSourceURLsSurviveEnvExpansion(t *testing.T) {
+	entries, err := os.ReadDir(sourcesDir(t))
+	if err != nil {
+		t.Fatalf("read sources dir: %v", err)
+	}
+	// Resolve every reference to the empty string, exactly as an unset variable
+	// would, and require the URL line to come out unchanged.
+	drop := func(string) string { return "" }
+
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".yaml") {
+			continue
+		}
+		body, err := os.ReadFile(filepath.Join(sourcesDir(t), entry.Name()))
+		if err != nil {
+			t.Fatalf("read %s: %v", entry.Name(), err)
+		}
+		for _, line := range strings.Split(string(body), "\n") {
+			trimmed := strings.TrimSpace(line)
+			if !strings.HasPrefix(trimmed, "url:") && !strings.HasPrefix(trimmed, "on_demand_url:") {
+				continue
+			}
+			// ${VAR} references are the supported form and are expected to change.
+			if strings.Contains(trimmed, "${") {
+				continue
+			}
+			if got := os.Expand(trimmed, drop); got != trimmed {
+				t.Errorf("%s: %q becomes %q after env expansion; percent-encode the $ (%%24)",
+					entry.Name(), trimmed, got)
+			}
+		}
 	}
 }

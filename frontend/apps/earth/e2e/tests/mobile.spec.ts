@@ -187,6 +187,9 @@ const MEDIA_CONFIG: StubMediaConfig[] = [
     label: 'Harbour radio',
     urlKey: 'stream_url',
     attributionKey: 'attribution',
+    // The server emits an unset repeated field as [], so the audio stub sends
+    // the shape a source with no declared origins really produces.
+    allowedOrigins: [],
     audio: {},
   },
 ];

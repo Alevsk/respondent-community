@@ -110,3 +110,32 @@ func TestMediaRejectsInvalidDeclarationsInBothPaths(t *testing.T) {
 		})
 	}
 }
+
+// An origin the loader accepts must be byte-identical to the `url.origin` the
+// browser compares against. A spelling that differs only cosmetically — a
+// trailing slash, an explicit :443, uppercase, a trailing dot — would make
+// every media item on the layer silently unavailable with no diagnostic.
+func TestMediaOriginsAreStoredCanonically(t *testing.T) {
+	for name, declared := range map[string]string{
+		"trailing slash":  "https://camera.example.com/",
+		"explicit port":   "https://camera.example.com:443",
+		"uppercase host":  "https://Camera.Example.COM",
+		"trailing dot":    "https://camera.example.com.",
+		"already canonic": "https://camera.example.com",
+	} {
+		t.Run(name, func(t *testing.T) {
+			media := strings.Replace(snapshotMediaYAML, "https://camera.example.com", declared, 1)
+			cs, err := loadMediaTestSource(t, validSourceYAML+media)
+			if err != nil {
+				t.Fatalf("load: %v", err)
+			}
+			dc := DisplaySpecToDomain(&cs.Definition().Display)
+			if len(dc.Media) != 1 || len(dc.Media[0].AllowedOrigins) != 1 {
+				t.Fatalf("media = %+v", dc.Media)
+			}
+			if got := dc.Media[0].AllowedOrigins[0]; got != "https://camera.example.com" {
+				t.Errorf("stored origin = %q, want the canonical https://camera.example.com", got)
+			}
+		})
+	}
+}

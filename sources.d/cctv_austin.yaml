@@ -33,8 +33,11 @@ filtering: viewport
 # --- Ingestion ---
 transport:
   type: http_poll
-  # $limit raises Socrata's 1000-row default; the catalog holds ~1.1k cameras.
-  url: "https://data.austintexas.gov/resource/b4k4-adkb.json?$limit=2000"
+  # Socrata's $limit raises the 1000-row default; the catalog holds ~1.1k
+  # cameras. It is percent-encoded (%24) because source URLs go through
+  # os.Expand for ${ENV_VAR} references, which would otherwise swallow
+  # "$limit" as an undefined variable and send "?=2000".
+  url: "https://data.austintexas.gov/resource/b4k4-adkb.json?%24limit=2000"
   method: GET
   headers:
     Accept: "application/json"

@@ -79,7 +79,7 @@ func validateMedia(media []MediaSpec, entity, observation map[string]string, act
 			return fmt.Errorf("display.media[%s]: undefined playback_action %q", m.ID, m.PlaybackAction)
 		}
 		for _, origin := range m.AllowedOrigins {
-			if !validMediaOrigin(origin) {
+			if _, ok := canonicalMediaOrigin(origin); !ok {
 				return fmt.Errorf("display.media[%s]: invalid HTTPS origin %q", m.ID, origin)
 			}
 		}
@@ -93,26 +93,49 @@ func declaredMetadataKey(key string, entity, observation map[string]string) bool
 	return e || o
 }
 
-func validMediaOrigin(raw string) bool {
-	u, err := url.Parse(raw)
-	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
-		return false
+// canonicalMediaOrigin validates an allowed-origin declaration and returns it
+// in the exact spelling a browser produces for `URL.origin`.
+//
+// Canonicalizing is not cosmetic: the browser compares the media URL's origin
+// against this string literally, so "https://cam.example.com/" or
+// "https://cam.example.com:443" would match nothing and silently make every
+// media item on the layer unavailable, with no diagnostic anywhere.
+func canonicalMediaOrigin(raw string) (string, bool) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil ||
+		u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
+		return "", false
 	}
 	host := strings.ToLower(strings.TrimSuffix(u.Hostname(), "."))
-	if host == "localhost" || !strings.Contains(host, ".") || strings.HasSuffix(host, ".localhost") || strings.HasSuffix(host, ".local") {
-		return false
+	if host == "" || host == "localhost" || !strings.Contains(host, ".") ||
+		strings.HasSuffix(host, ".localhost") || strings.HasSuffix(host, ".local") {
+		return "", false
 	}
 	if ip, err := netip.ParseAddr(host); err == nil {
 		ip = ip.Unmap()
-		if !ip.IsGlobalUnicast() || ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() || netip.MustParsePrefix("100.64.0.0/10").Contains(ip) {
-			return false
+		if !ip.IsGlobalUnicast() || ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() ||
+			netip.MustParsePrefix("100.64.0.0/10").Contains(ip) {
+			return "", false
+		}
+		host = "[" + ip.String() + "]"
+		if ip.Is4() {
+			host = ip.String()
 		}
 	}
-	return true
+	// Only a non-default port survives; :443 is implicit in an https origin.
+	if port := u.Port(); port != "" && port != "443" {
+		host += ":" + port
+	}
+	return "https://" + host, true
 }
 
 func mediaSpecToDomain(m MediaSpec) domain.MediaConfig {
-	d := domain.MediaConfig{ID: m.ID, Kind: m.Kind, Label: m.Label, URLKey: m.URLKey, AttributionKey: m.AttributionKey, AllowedOrigins: append([]string(nil), m.AllowedOrigins...), PlaybackAction: m.PlaybackAction}
+	d := domain.MediaConfig{ID: m.ID, Kind: m.Kind, Label: m.Label, URLKey: m.URLKey, AttributionKey: m.AttributionKey, PlaybackAction: m.PlaybackAction}
+	for _, origin := range m.AllowedOrigins {
+		if canonical, ok := canonicalMediaOrigin(origin); ok {
+			d.AllowedOrigins = append(d.AllowedOrigins, canonical)
+		}
+	}
 	if m.Snapshot != nil {
 		d.Snapshot = &domain.SnapshotMediaConfig{RefreshIntervalSeconds: int32(m.Snapshot.RefreshInterval.Duration / time.Second), CacheBustParam: m.Snapshot.CacheBustParam}
 	}

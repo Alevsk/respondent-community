@@ -227,6 +227,12 @@ transport:
   #   max_pages: 10               # Stop after N pages
   #   cursor_path: "meta.next_cursor"  # Dot-path to extract next cursor from JSON response
 
+  # NOTE ON "$" IN URLs: `url` and `on_demand_url` are passed through
+  # os.Expand so they can embed ${ENV_VAR} references. That also means a
+  # literal "$" followed by letters is read as a variable and DELETED — an
+  # OData or Socrata query like "?$limit=2000" silently becomes "?=2000".
+  # Percent-encode it: "?%24limit=2000".
+
   # --- Endpoint Discovery (optional, http_poll only) ---
   # For APIs served by a rotating pool of community mirrors that ask clients to
   # discover them rather than pin one host. Discovery replaces ONLY the origin

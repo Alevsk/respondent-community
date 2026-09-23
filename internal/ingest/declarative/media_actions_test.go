@@ -3,6 +3,7 @@ package declarative
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -122,6 +123,17 @@ func TestMediaActionRejectsUnsafeResolvedPaths(t *testing.T) {
 		"scheme relative file": "file:///etc/passwd",
 		"fragment":             "/json/url/x#frag",
 		"credentials":          "https://user:pw@evil.example.com/",
+		// Percent-encoded traversal: a single path segment as far as Go is
+		// concerned, so a segment-by-segment comparison never sees it, yet an
+		// upstream that decodes before normalizing walks out of /json/url/.
+		"encoded traversal":    "/json/url/%2e%2e%2f%2e%2e%2fadmin",
+		"mixed case traversal": "/json/%2E%2e/admin",
+		"encoded separator":    "/json/url/a%2Fb",
+		"encoded backslash":    "/json/url/a%5Cb",
+		// The action declares a path, not a query: a metadata value that smuggles
+		// one changes the request the source never asked for.
+		"query injection": "/json/url/x?admin=1",
+		"encoded null":    "/json/url/%00",
 	}
 	for name, value := range rejected {
 		t.Run(name, func(t *testing.T) {
@@ -251,12 +263,66 @@ func TestMediaActionBoundsTimeAndResponseSize(t *testing.T) {
 		t.Errorf("notification took %s, want it bounded well under the handler's 300ms", elapsed)
 	}
 
-	// A notification response is never relayed, so its body is read under a
-	// tight ceiling rather than the source's catalog-sized limit.
-	if mediaActionMaxResponseBytes > 64*1024 {
-		t.Errorf("mediaActionMaxResponseBytes = %d, want a small ceiling", mediaActionMaxResponseBytes)
+}
+
+// countingBody records how much of a response the notification path actually
+// pulls, so the response ceiling is proven to be APPLIED rather than merely
+// declared as a constant.
+type countingBody struct {
+	io.Reader
+	read *int64
+}
+
+func (c countingBody) Read(p []byte) (int, error) {
+	n, err := c.Reader.Read(p)
+	*c.read += int64(n)
+	return n, err
+}
+
+func (countingBody) Close() error { return nil }
+
+func TestMediaActionStopsReadingAtTheResponseCeiling(t *testing.T) {
+	var read int64
+	// A notification response is never relayed, so a chatty (or hostile)
+	// upstream must not be read into memory in full.
+	huge := 4 * 1024 * 1024
+	client := &http.Client{Transport: mediaRoundTripper(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: 200,
+			Header:     make(http.Header),
+			Body:       countingBody{Reader: io.LimitReader(neverEnding{}, int64(huge)), read: &read},
+			Request:    r,
+		}, nil
+	})}
+
+	cs := loadLocalMediaTestSource(t, strings.Replace(validSourceYAML,
+		"https://example.com/api/data", "http://media-action.test/api/data", 1)+audioMediaYAML)
+	reg, err := NewMediaActionRegistry([]*CompiledSource{cs}, client, logging.NewNopLogger())
+	if err != nil {
+		t.Fatalf("NewMediaActionRegistry: %v", err)
+	}
+	action, err := reg.ResolveMediaAction("test_layer", "report_play", map[string]string{"type": "abc"})
+	if err != nil {
+		t.Fatalf("ResolveMediaAction: %v", err)
+	}
+	if err := reg.ExecuteMediaAction(context.Background(), action); err != nil {
+		t.Fatalf("ExecuteMediaAction: %v", err)
+	}
+
+	if read == 0 {
+		t.Fatal("nothing was read; the test is not exercising the response path")
+	}
+	// io.ReadAll over a LimitReader may overshoot by one chunk, never by more.
+	if read > mediaActionMaxResponseBytes+64*1024 {
+		t.Errorf("read %d bytes of a %d byte response; the %d byte ceiling is not applied",
+			read, huge, mediaActionMaxResponseBytes)
 	}
 }
+
+// neverEnding yields zero bytes forever, so only the ceiling stops the read.
+type neverEnding struct{}
+
+func (neverEnding) Read(p []byte) (int, error) { return len(p), nil }
 
 // Compile-time proof that the registry satisfies the domain ports the app
 // service depends on, so the app layer never imports this package.

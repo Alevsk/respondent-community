@@ -37,7 +37,11 @@ enabled: false
 transport:
   type: http_poll
   # OData endpoint; $top controls page size, $orderby gets latest first.
-  url: "https://www.who.int/api/news/diseaseoutbreaknews?$top=50&$orderby=PublicationDate%20desc"
+  # OData's $top/$orderby are percent-encoded (%24): source URLs pass through
+  # os.Expand for ${ENV_VAR} references, which reads a literal "$top" as an
+  # undefined variable and deletes it, sending "?=50&=PublicationDate%20desc"
+  # so neither the limit nor the newest-first ordering ever reached WHO.
+  url: "https://www.who.int/api/news/diseaseoutbreaknews?%24top=50&%24orderby=PublicationDate%20desc"
   method: GET
   headers:
     Accept: "application/json"

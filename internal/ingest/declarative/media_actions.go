@@ -227,9 +227,31 @@ func validateActionPath(path string) error {
 	if u.Fragment != "" || strings.Contains(path, "#") {
 		return fmt.Errorf("resolved path %q must not carry a fragment", path)
 	}
-	for _, seg := range strings.Split(u.EscapedPath(), "/") {
-		if seg == ".." || seg == "%2e%2e" || seg == "%2E%2E" {
-			return fmt.Errorf("resolved path %q must not traverse upward", path)
+	// An action declares a path. A query would be something the source never
+	// asked for, smuggled in through a metadata value.
+	if u.RawQuery != "" || u.ForceQuery || strings.Contains(path, "?") {
+		return fmt.Errorf("resolved path %q must not carry a query", path)
+	}
+
+	// Segment checks run on BOTH the escaped and the decoded forms. Go treats
+	// "%2e%2e%2f%2e%2e" as one segment, so splitting the escaped path alone
+	// never sees the traversal an upstream sees after decoding.
+	escaped := strings.ToLower(u.EscapedPath())
+	if strings.Contains(escaped, "%2f") || strings.Contains(escaped, "%5c") {
+		return fmt.Errorf("resolved path %q must not encode a path separator", path)
+	}
+	decoded, err := url.PathUnescape(path)
+	if err != nil {
+		return fmt.Errorf("resolved path %q has invalid percent-encoding: %w", path, err)
+	}
+	if strings.ContainsAny(decoded, "\\ \t\r\n\x00") {
+		return fmt.Errorf("resolved path %q contains an illegal character once decoded", path)
+	}
+	for _, form := range []string{escaped, strings.ToLower(decoded)} {
+		for _, seg := range strings.Split(form, "/") {
+			if seg == ".." || seg == "%2e%2e" {
+				return fmt.Errorf("resolved path %q must not traverse upward", path)
+			}
 		}
 	}
 	return nil

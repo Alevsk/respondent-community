@@ -65,6 +65,10 @@ export class AudioSession {
     const playing = () => {
       if (!current()) return;
       clearTimeout(this.timeout);
+      // Clear the handle too, not just the timer: armTimeout is a no-op while
+      // one is assigned, so leaving it set would stop a later stall from ever
+      // re-arming the watchdog and park the player in `loading` for good.
+      this.timeout = undefined;
       this.store.setState({ status: 'playing', error: '' });
       if (!reported) {
         reported = true;

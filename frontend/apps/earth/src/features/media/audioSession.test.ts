@@ -90,6 +90,25 @@ describe('app audio session', () => {
     expect(session.store.getState().status).toBe('error');
   });
 
+  it('re-arms the stall watchdog after playback has started', () => {
+    vi.useFakeTimers();
+    try {
+      session.play(station);
+      audio.dispatchEvent(new Event('playing'));
+      expect(session.store.getState().status).toBe('playing');
+
+      // A mid-stream stall must not park the player in "loading" forever: the
+      // listener needs an error they can retry from.
+      audio.dispatchEvent(new Event('stalled'));
+      expect(session.store.getState().status).toBe('loading');
+      vi.advanceTimersByTime(25_000);
+      expect(session.store.getState().status).toBe('error');
+      expect(session.store.getState().error).not.toBe('');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('releases src on pause, stop and teardown and never stores the audio element', () => {
     session.play(station);
     session.pause();

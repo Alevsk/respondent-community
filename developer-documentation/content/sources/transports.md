@@ -240,6 +240,14 @@ CEL expression evaluated per page. When it returns true, pagination stops early.
 Dot-path to extract the next cursor value from the JSON response. Only used with `type: cursor`.
 {{< /field >}}
 
+{{< callout type="warning" title="A literal $ in a URL is deleted" >}}
+`url` and `on_demand_url` are expanded with `os.Expand` so they can embed
+`${ENV_VAR}` references. A literal `$` followed by letters is therefore read as
+an undefined variable and removed: `?$limit=2000` is sent as `?=2000`, and an
+OData `$orderby` is dropped entirely. Percent-encode it — `?%24limit=2000` —
+whenever the API's own query syntax uses `$`.
+{{< /callout >}}
+
 ### Endpoint discovery (DNS SRV)
 
 Some public APIs are served by a rotating pool of community mirrors and ask

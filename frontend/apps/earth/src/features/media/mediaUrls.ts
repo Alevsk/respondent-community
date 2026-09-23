@@ -42,7 +42,11 @@ export function validateMediaUrl(value: string, origins?: string[]): string | nu
     ) {
       return null;
     }
-    if (origins && !origins.includes(url.origin)) return null;
+    // An empty list means "no fixed origins declared", not "deny everything":
+    // protojson emits an unset repeated field as [], so the browser cannot tell
+    // the two apart and a source that legitimately omits allowed_origins (a
+    // community radio directory, say) must still play.
+    if (origins?.length && !origins.includes(url.origin)) return null;
     return url.href;
   } catch {
     return null;
