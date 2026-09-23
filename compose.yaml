@@ -22,6 +22,15 @@ services:
     image: alevsk/respondent-community:latest
     command: ["serve", "--config", "/etc/respondent/respondent.yaml"]
     restart: unless-stopped
+    # Without a memory limit the kernel has no container to blame: an ingest
+    # spike drives a HOST-wide OOM sweep that can kill anything on the machine,
+    # which is why an unbounded container takes the whole box down instead of
+    # restarting. With it, the container dies alone and `restart` brings it back.
+    # The binary reads this limit at startup and sizes the Go heap from it.
+    # memswap_limit equal to mem_limit denies swap, so the failure is a fast
+    # restart rather than a thrash that freezes a small host.
+    mem_limit: 900m
+    memswap_limit: 900m
     env_file:
       - path: .env
         required: false

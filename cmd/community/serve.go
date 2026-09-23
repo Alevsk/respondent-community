@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"syscall"
 	"time"
 
@@ -28,6 +29,7 @@ import (
 	"github.com/Alevsk/respondent/internal/ingest"
 	"github.com/Alevsk/respondent/internal/ingest/declarative"
 	"github.com/Alevsk/respondent/internal/logging"
+	"github.com/Alevsk/respondent/internal/memlimit"
 
 	// AI
 	"github.com/Alevsk/respondent/internal/ai/analysis"
@@ -86,6 +88,8 @@ func runServe(ctx context.Context) error {
 
 	logger := newLogger(cfg.Logging.Level)
 	logger.Info().Msg("starting respondent community edition")
+
+	applyMemoryLimit(logger)
 
 	// ── 2. SQLite ──────────────────────────────────────────────────────
 	db, err := sqlitedb.Open(cfg.Database.Path, logger)
@@ -633,4 +637,35 @@ func selectLLMProvider(registry *llm.DefaultRegistry, llmCfg config.LLMConfig) l
 		return nil
 	}
 	return p
+}
+
+// applyMemoryLimit teaches the Go GC how much memory this process may use.
+//
+// Left alone, the runtime sizes the heap against the HOST's RAM and will grow
+// past the container's share before the collector ever feels pressure; the
+// kernel then runs a global OOM sweep and can kill anything on the machine.
+// Deriving the limit here rather than from a GOMEMLIMIT env var keeps it a
+// single path that is correct by default instead of one an operator has to
+// remember on every deployment. An operator who does set GOMEMLIMIT wins.
+func applyMemoryLimit(logger zerolog.Logger) {
+	if _, ok := os.LookupEnv("GOMEMLIMIT"); ok {
+		logger.Info().Str("source", "GOMEMLIMIT").Msg("memory limit set by the environment; leaving it alone")
+		return
+	}
+
+	containerLimit, err := memlimit.Detect("/")
+	if err != nil {
+		logger.Warn().
+			Msg("running without a container memory limit: the Go heap is sized against host RAM, " +
+				"so an ingest spike can drive a host-wide OOM instead of a container restart. " +
+				"Set a memory limit on the container (compose: mem_limit).")
+		return
+	}
+
+	budget := memlimit.Budget(containerLimit)
+	debug.SetMemoryLimit(budget)
+	logger.Info().
+		Str("container_limit", memlimit.Describe(containerLimit)).
+		Str("go_memory_limit", memlimit.Describe(budget)).
+		Msg("derived Go soft memory limit from the container limit")
 }
