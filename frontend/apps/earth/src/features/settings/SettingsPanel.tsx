@@ -47,6 +47,24 @@ const FILTER_OPTIONS: {
 
 const HAS_ION_TOKEN = !!import.meta.env.VITE_CESIUM_ION_TOKEN;
 
+/**
+ * Places a test hook on a Switch's inner input.
+ *
+ * MUI spreads unknown props onto the switch's wrapper span, but `disabled`,
+ * `checked` and the checkbox role all live on the input it wraps. A testid on
+ * the span therefore addresses an element that reports neither state, so a test
+ * asking whether a switch is disabled gets `false` for a disabled switch.
+ *
+ * The return type is an intersection so the value is describable without a
+ * cast: `data-*` attributes are valid DOM attributes that React's
+ * InputHTMLAttributes — whose members are all optional — does not declare.
+ */
+const switchTestId = (
+  id: string,
+): React.InputHTMLAttributes<HTMLInputElement> & { 'data-testid': string } => ({
+  'data-testid': id,
+});
+
 const SLIDER_MIN = 100;
 const SLIDER_MAX = 10000;
 const SLIDER_STEP = 100;
@@ -211,7 +229,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ open, onClose, mobile }) 
             Show Occluded
           </Typography>
           <Switch
-            data-testid="settings-switch-occluded"
+            inputProps={switchTestId('settings-switch-occluded')}
             size="small"
             checked={showOccluded}
             onChange={(_, checked) => setShowOccluded(checked)}
@@ -229,7 +247,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ open, onClose, mobile }) 
             Geo Labels
           </Typography>
           <Switch
-            data-testid="settings-switch-geo-labels"
+            inputProps={switchTestId('settings-switch-geo-labels')}
             size="small"
             checked={showGeoLabels}
             onChange={(_, checked) => setShowGeoLabels(checked)}
@@ -253,7 +271,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ open, onClose, mobile }) 
               3D Buildings
             </Typography>
             <Switch
-              data-testid="settings-switch-3d-buildings"
+              inputProps={switchTestId('settings-switch-3d-buildings')}
               size="small"
               checked={show3DBuildings}
               disabled={!HAS_ION_TOKEN}
@@ -273,7 +291,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ open, onClose, mobile }) 
             Smooth Motion
           </Typography>
           <Switch
-            data-testid="settings-switch-smooth-motion"
+            inputProps={switchTestId('settings-switch-smooth-motion')}
             size="small"
             checked={smoothMotion}
             onChange={(_, checked) => setSmoothMotion(checked)}
@@ -291,7 +309,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ open, onClose, mobile }) 
             Cinematic Drift
           </Typography>
           <Switch
-            data-testid="settings-switch-cinematic-drift"
+            inputProps={switchTestId('settings-switch-cinematic-drift')}
             size="small"
             checked={cinematicDrift}
             onChange={(_, checked) => setCinematicDrift(checked)}
@@ -314,7 +332,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ open, onClose, mobile }) 
               Spatial Aggregation
             </Typography>
             <Switch
-              data-testid="settings-switch-spatial-aggregation"
+              inputProps={switchTestId('settings-switch-spatial-aggregation')}
               size="small"
               checked={spatialAggregation}
               onChange={(_, checked) => setSpatialAggregation(checked)}
