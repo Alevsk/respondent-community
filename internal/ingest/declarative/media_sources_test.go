@@ -482,6 +482,7 @@ func TestCameraProviderPackMapsRealCatalogs(t *testing.T) {
 		{"cctv_tfl_london.yaml", "tfl_cameras.json", nil, "s3-eu-west-1.amazonaws.com"},
 		{"cctv_drivebc.yaml", "drivebc_cameras.json", nil, "www.drivebc.ca"},
 		{"cctv_ontario511.yaml", "ontario511_cameras.json", nil, "511on.ca"},
+		{"cctv_fintraffic.yaml", "fintraffic_cameras.json", nil, "weathercam.digitraffic.fi"},
 	}
 
 	for _, tc := range cases {

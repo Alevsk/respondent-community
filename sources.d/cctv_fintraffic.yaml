@@ -1,0 +1,196 @@
+# sources.d/cctv_fintraffic.yaml
+# Fintraffic — Finnish Transport Infrastructure Agency road weather cameras
+# Source: https://tie.digitraffic.fi/api/weathercam/v1/stations
+# Auth: None, but Digitraffic asks every client to identify itself with a
+#       Digitraffic-User header, which is what the header below is for.
+#
+# Catalog only: JPEGs load in the browser from weathercam.digitraffic.fi.
+#
+# The API refuses uncompressed requests with HTTP 406 ("Use of gzip compression
+# is required"). Go's HTTP transport already advertises gzip and decodes the
+# response transparently, so no Accept-Encoding header is declared here —
+# setting one by hand would switch that transparent decoding off and hand the
+# parser raw gzip bytes.
+#
+# A station carries several presets (camera directions). This release shows the
+# first one that is in collection; the rest need the record-expansion
+# capability the engine does not have yet.
+schema_version: 2
+
+name: cctv_fintraffic
+labels:
+  category: infrastructure
+  priority: low
+
+# --- Identity ---
+source_type: cctv_fintraffic
+layer_type: cctv
+display_name: "Fintraffic Road Cameras"
+layer_display_name: "Traffic Cameras"
+
+filtering: viewport
+
+# --- Ingestion ---
+transport:
+  type: http_poll
+  url: "https://tie.digitraffic.fi/api/weathercam/v1/stations"
+  method: GET
+  headers:
+    Accept: "application/json"
+    User-Agent: "respondent-community/1.0 (+https://github.com/Alevsk/respondent)"
+    Digitraffic-User: "respondent-community"
+  timeout: "30s"
+  interval: "3600s"
+  max_response_bytes: 16777216
+  rate_limit:
+    requests_per_second: 1
+    burst: 2
+  retry:
+    max_attempts: 3
+    backoff: "exponential"
+    initial_delay: "2s"
+    max_delay: "30s"
+
+# --- Response Parsing ---
+# GeoJSON FeatureCollection: { "features": [ { geometry, properties }, ... ] }
+parser:
+  format: json
+  records_path: "features"
+  max_records: 2000
+
+# --- Record Filtering (CEL) ---
+# Stations actively gathering, with a preset in collection and a real position.
+filter: >
+  has(record.properties) && has(record.properties.id)
+  && has(record.properties.collectionStatus)
+  && string(record.properties.collectionStatus) == "GATHERING"
+  && has(record.properties.presets) && size(record.properties.presets) > 0
+  && record.properties.presets.exists(p, has(p.inCollection) && p.inCollection == true && has(p.id))
+  && has(record.geometry) && record.geometry != null
+  && has(record.geometry.coordinates) && size(record.geometry.coordinates) >= 2
+
+# --- Entity Mapping (CEL) ---
+entity:
+  external_id: '"fintraffic_" + string(record.properties.id)'
+  name: >
+    has(record.properties.name) && string(record.properties.name) != ""
+      ? string(record.properties.name).replace("_", " ")
+      : "Fintraffic " + string(record.properties.id)
+  metadata:
+    snapshot_url: >
+      "https://weathercam.digitraffic.fi/"
+      + record.properties.presets.filter(p, has(p.inCollection) && p.inCollection == true)[0].id
+      + ".jpg"
+    attribution: '"Fintraffic / digitraffic.fi, licence CC BY 4.0"'
+    location_name: 'has(record.properties.name) ? string(record.properties.name).replace("_", " ") : ""'
+    # Station names are "<road>_<place>", e.g. "kt51_Inkoo".
+    road: >
+      has(record.properties.name) && string(record.properties.name).indexOf("_") > 0
+        ? string(record.properties.name).substring(0, string(record.properties.name).indexOf("_"))
+        : ""
+    area: >
+      has(record.properties.name) && string(record.properties.name).indexOf("_") > 0
+        ? string(record.properties.name).substring(string(record.properties.name).indexOf("_") + 1)
+        : ""
+    camera_status: 'string(record.properties.collectionStatus)'
+
+# --- Observation Mapping (CEL) ---
+observation:
+  latitude: 'double(record.geometry.coordinates[1])'
+  longitude: 'double(record.geometry.coordinates[0])'
+  altitude: '"0.0"'
+  timestamp: 'now()'
+  metadata:
+    data_updated: 'has(record.properties.dataUpdatedTime) ? string(record.properties.dataUpdatedTime) : ""'
+  content_hash: >
+    string(record.properties.id) + "|"
+    + record.properties.presets.filter(p, has(p.inCollection) && p.inCollection == true)[0].id + "|"
+    + (has(record.properties.name) ? string(record.properties.name) : "") + "|"
+    + string(record.geometry.coordinates[1]) + "," + string(record.geometry.coordinates[0])
+
+# --- Recording ---
+recording:
+  mode: dedupe
+
+# --- Cache ---
+cache:
+  ttl: "86400s"
+
+# --- Display ---
+display:
+  icon:
+    shape: camera
+    rotatable: false
+    interpolation: false
+    scale: 1.0
+  trail:
+    color: "#7c4dff"
+    width: 1.0
+    opacity: 0.4
+  style:
+    color: "#7c4dff"
+    point_size: 6
+  media:
+    - id: camera
+      kind: snapshot
+      label: "Camera feed"
+      url_key: snapshot_url
+      attribution_key: attribution
+      allowed_origins:
+        - "https://weathercam.digitraffic.fi"
+      snapshot:
+        refresh_interval: "30s"
+        cache_bust_param: "_respondent_frame"
+  # Every source feeding the cctv layer declares this same renderer set, listing
+  # each provider's key variants. A renderer only appears when the entity
+  # carries one of its keys, so each camera shows its own provider's fields.
+  field_renderers:
+    - keys: [location_name, camera_location]
+      label: "LOCATION"
+      format:
+        type: string
+      priority: 0
+    - keys: [road]
+      label: "ROAD"
+      format:
+        type: string
+        transform: upper
+      priority: 1
+    - keys: [direction]
+      label: "DIRECTION"
+      format:
+        type: string
+        transform: upper
+      priority: 2
+    - keys: [area, signal_eng_area, address_quadrant]
+      label: "AREA"
+      format:
+        type: string
+        transform: upper
+      priority: 3
+    - keys: [landmark]
+      label: "LANDMARK"
+      format:
+        type: string
+      priority: 4
+    - keys: [camera_status]
+      label: "STATUS"
+      format:
+        type: string
+        transform: upper
+      priority: 5
+    - keys: [camera_label]
+      label: "CAMERA"
+      format:
+        type: string
+      priority: 6
+    - keys: [council_district]
+      label: "COUNCIL DISTRICT"
+      format:
+        type: string
+      priority: 7
+    - keys: [camera_mfg]
+      label: "MANUFACTURER"
+      format:
+        type: string
+      priority: 8

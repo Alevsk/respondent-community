@@ -1,0 +1,137 @@
+{
+ "type": "FeatureCollection",
+ "features": [
+  {
+   "type": "Feature",
+   "id": "C01503",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     23.99616,
+     60.05374,
+     0.0
+    ]
+   },
+   "properties": {
+    "id": "C01503",
+    "name": "kt51_Inkoo",
+    "collectionStatus": "GATHERING",
+    "dataUpdatedTime": "2026-09-23T03:25:35Z",
+    "presets": [
+     {
+      "id": "C0150301",
+      "inCollection": true
+     },
+     {
+      "id": "C0150302",
+      "inCollection": true
+     },
+     {
+      "id": "C0150309",
+      "inCollection": true
+     }
+    ],
+    "state": null
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "C01504",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     24.235601,
+     60.536727,
+     0.0
+    ]
+   },
+   "properties": {
+    "id": "C01504",
+    "name": "vt2_Karkkila_Korpi",
+    "collectionStatus": "GATHERING",
+    "dataUpdatedTime": "2026-09-23T03:26:51Z",
+    "presets": [
+     {
+      "id": "C0150401",
+      "inCollection": true
+     },
+     {
+      "id": "C0150402",
+      "inCollection": true
+     },
+     {
+      "id": "C0150409",
+      "inCollection": true
+     }
+    ],
+    "state": null
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "C01503",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     23.99616,
+     60.05374,
+     0.0
+    ]
+   },
+   "properties": {
+    "id": "C99901",
+    "name": "kt51_Inkoo",
+    "collectionStatus": "REMOVED_PERMANENTLY",
+    "dataUpdatedTime": "2026-09-23T03:25:35Z",
+    "presets": [
+     {
+      "id": "C0150301",
+      "inCollection": true
+     },
+     {
+      "id": "C0150302",
+      "inCollection": true
+     },
+     {
+      "id": "C0150309",
+      "inCollection": true
+     }
+    ],
+    "state": null
+   }
+  },
+  {
+   "type": "Feature",
+   "id": "C01503",
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     23.99616,
+     60.05374,
+     0.0
+    ]
+   },
+   "properties": {
+    "id": "C99902",
+    "name": "kt51_Inkoo",
+    "collectionStatus": "GATHERING",
+    "dataUpdatedTime": "2026-09-23T03:25:35Z",
+    "presets": [
+     {
+      "id": "C0150301",
+      "inCollection": false
+     },
+     {
+      "id": "C0150302",
+      "inCollection": false
+     },
+     {
+      "id": "C0150309",
+      "inCollection": false
+     }
+    ],
+    "state": null
+   }
+  }
+ ]
+}

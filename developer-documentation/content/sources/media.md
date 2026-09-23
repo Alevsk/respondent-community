@@ -23,11 +23,14 @@ For the YAML fields themselves, see
 | `cctv_tfl_london.yaml` | `cctv` | JPEG snapshot | 1 h | 30 s while viewed |
 | `cctv_drivebc.yaml` | `cctv` | JPEG snapshot | 1 h | 30 s while viewed |
 | `cctv_ontario511.yaml` | `cctv` | JPEG snapshot | 1 h | 30 s while viewed |
+| `cctv_fintraffic.yaml` | `cctv` | JPEG snapshot | 1 h | 30 s while viewed |
 | `radio_browser_stations.yaml` | `radio_stations` | Native MP3 / AAC audio | 6 h | continuous stream |
 
-Roughly 7,000 cameras across six providers — Austin, Calgary, Caltrans (twelve
-California districts), Transport for London, DriveBC and Ontario 511 — all
-feeding one `cctv` layer, the way fifteen news sources feed `news_articles`.
+**8,035 cameras** across seven providers — Austin, Calgary, Caltrans (twelve
+California districts), Transport for London, DriveBC, Ontario 511 and
+Fintraffic — all feeding one `cctv` layer, the way fifteen news sources feed
+`news_articles`, and all ingested through the ordinary declarative YAML source
+mechanism with no provider-specific code.
 
 Caltrans gets one file per district because it publishes one catalog per
 district and a source declares one URL. Every file's display block is identical;
@@ -36,9 +39,14 @@ from its `allowed_origins`, which the registry unions. Without that union the
 last file to load would decide the origins for all of them and every other
 provider's cameras would fail admission in the browser.
 
-Ontario 511 exposes several views per camera. This release shows the first
-enabled one; showing them all needs a record-expansion capability the engine
-does not have yet.
+Ontario 511 and Fintraffic expose several views per camera or station. This
+release shows the first enabled one; showing them all needs a record-expansion
+capability the engine does not have yet.
+
+Fintraffic refuses uncompressed requests with HTTP 406. Go's HTTP transport
+already advertises gzip and decodes transparently, so the source declares no
+`Accept-Encoding` header — setting one by hand switches that transparent
+decoding off and hands the parser raw gzip bytes.
 
 ## Who owns what
 
@@ -86,10 +94,9 @@ confirmed to work in a browser.
 
 | Provider | Why it is not in this release |
 |---|---|
-| Transport for NSW | The catalog is healthy (217 cameras) but the image host is not: twelve sampled camera URLs all returned `text/html` — the provider's own "camera image temporarily unavailable" page — with HTTP 200. Catalog availability is not camera availability. |
-| TxDOT | Images are base64 inside a JSON response. Needs a reusable media response decoder, not a provider branch in the player. |
-| Fintraffic | The station catalog needs a `Digitraffic-User` header and carries nested presets; full parity needs child-record expansion that keeps station context. |
-| Tarktee (Estonia) | Two DATEX/XML feeds needing a refreshable join between location and image records; lookup tables today are inline or local files. |
+| Transport for NSW | The catalog is healthy (217 cameras) but the image host is not: twelve sampled camera URLs all returned `text/html` — the provider's own "camera image temporarily unavailable" page — with HTTP 200, over both published URL forms and with a browser User-Agent and Referer. Catalog availability is not camera availability. |
+| TxDOT | The public ITS catalog currently lists no cameras at all: the per-roadway `ctts` arrays came back empty for every district sampled (Austin, Houston, Dallas, San Antonio). Its per-camera endpoint also returns base64 inside JSON rather than an image body, so it would need a media response decoder even once cameras reappear. |
+| Tarktee (Estonia) | Needs a refreshable join between two DATEX/XML feeds — one for locations, one for images — and lookup tables today are inline or local files, not live feeds. The images feed also timed out when probed. |
 | Tallinn, Warendorf, other curated files | Static catalogs that need a first-class local/static source or an intentionally hosted catalog. |
 
 Full-motion HLS video, RTSP conversion, video projection onto terrain and camera
