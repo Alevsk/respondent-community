@@ -53,11 +53,37 @@ export function validateMediaUrl(value: string, origins?: string[]): string | nu
   }
 }
 
+/**
+ * Adds a cache-busting parameter without disturbing the rest of the URL.
+ *
+ * The query is rewritten segment by segment so every parameter we are not
+ * replacing keeps its original bytes. Re-serializing through URLSearchParams
+ * would normalize the whole query — %20 becomes +, a bare flag gains an = —
+ * which silently invalidates a signed URL while looking harmless.
+ */
 export function snapshotUrl(value: string, param?: string, now = Date.now()): string {
   if (!param) return value;
-  const url = new URL(value);
-  url.searchParams.set(param, String(now));
-  return url.href;
+
+  const hashAt = value.indexOf('#');
+  const fragment = hashAt === -1 ? '' : value.slice(hashAt);
+  const addressed = hashAt === -1 ? value : value.slice(0, hashAt);
+  const queryAt = addressed.indexOf('?');
+  const path = queryAt === -1 ? addressed : addressed.slice(0, queryAt);
+  const query = queryAt === -1 ? '' : addressed.slice(queryAt + 1);
+
+  const kept = query.split('&').filter((segment) => segment !== '' && queryKey(segment) !== param);
+  kept.push(`${encodeURIComponent(param)}=${now}`);
+  return `${path}?${kept.join('&')}${fragment}`;
+}
+
+/** The decoded name of one `k=v` query segment. */
+function queryKey(segment: string): string {
+  const raw = segment.split('=', 1)[0];
+  try {
+    return decodeURIComponent(raw.replace(/\+/g, ' '));
+  } catch {
+    return raw;
+  }
 }
 
 export interface ResolvedMedia {

@@ -58,6 +58,27 @@ describe('media URL policy', () => {
     expect(url.searchParams.getAll('tick')).toEqual(['123']);
   });
 
+  it('leaves every other query parameter byte-identical', () => {
+    // A signed URL's signature covers the exact query bytes. Re-serializing the
+    // query would turn %20 into +, give a bare flag an =, and reorder nothing
+    // visibly — all of which break a signature while looking harmless.
+    expect(snapshotUrl('https://media.example/a?q=a%20b&flag&sig=AbC%2F123', 'tick', 9)).toBe(
+      'https://media.example/a?q=a%20b&flag&sig=AbC%2F123&tick=9',
+    );
+  });
+
+  it('keeps the fragment after the appended parameter', () => {
+    expect(snapshotUrl('https://media.example/a?x=1#frag', 'tick', 9)).toBe(
+      'https://media.example/a?x=1&tick=9#frag',
+    );
+  });
+
+  it('adds the parameter to a URL that has no query', () => {
+    expect(snapshotUrl('https://media.example/a', 'tick', 9)).toBe(
+      'https://media.example/a?tick=9',
+    );
+  });
+
   it('resolves only declared media, with observation metadata taking precedence', () => {
     const config: MediaConfig[] = [
       {

@@ -50,9 +50,8 @@ const MediaSection: React.FC<MediaSectionProps> = ({
   active,
 }) => {
   const media = useUIStore((s) => s.layers[layerType]?.displayConfig?.media);
-  const ctx = useMediaContext();
 
-  if (!ctx || !media || media.length === 0) return null;
+  if (!media || media.length === 0) return null;
   const resolved = resolveMedia(media, metadata);
   if (resolved.length === 0) return null;
 
@@ -92,7 +91,7 @@ interface SnapshotCardProps {
 }
 
 const SnapshotCard: React.FC<SnapshotCardProps> = ({ entityId, layerType, item, active }) => {
-  const ctx = useMediaContext()!;
+  const ctx = useMediaContext();
   const slotKey = `${entityId}:${item.config.id}`;
   const options = item.config.kind === 'snapshot' ? item.config.snapshot : undefined;
 
@@ -318,7 +317,7 @@ interface AudioLauncherProps {
 }
 
 const AudioLauncher: React.FC<AudioLauncherProps> = ({ entityId, layerType, entityName, item }) => {
-  const { audio } = useMediaContext()!;
+  const { audio } = useMediaContext();
   const label = item.config.label;
 
   return (

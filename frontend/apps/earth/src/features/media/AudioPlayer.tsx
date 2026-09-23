@@ -15,21 +15,17 @@ import { useUIStore } from '@/app/store';
 import { useMediaContext } from './MediaProvider';
 
 export const AudioPlayer: React.FC = () => {
-  const ctx = useMediaContext();
-  const audio = ctx?.audio;
-  const state = useStore(
-    audio?.store ?? emptyStore,
-    (s) => s as ReturnType<NonNullable<typeof audio>['store']['getState']>,
-  );
+  const { audio } = useMediaContext();
+  const state = useStore(audio.store);
   const enabledLayers = useUIStore((s) => s.enabledLayers);
 
   const stationLayer = state.station?.layerId;
   useEffect(() => {
     // Turning a layer off withdraws its media along with its entities.
-    if (stationLayer && !enabledLayers.includes(stationLayer)) audio?.stop();
+    if (stationLayer && !enabledLayers.includes(stationLayer)) audio.stop();
   }, [stationLayer, enabledLayers, audio]);
 
-  if (!audio || !state.station) return null;
+  if (!state.station) return null;
 
   const { station, status, error, volume } = state;
   const playing = status === 'playing' || status === 'loading';
@@ -124,13 +120,5 @@ export const AudioPlayer: React.FC = () => {
     </Box>
   );
 };
-
-/** Stand-in store so the hook order stays stable without a provider. */
-const emptyStore = {
-  getState: () => ({ station: null, status: 'idle' as const, error: '', volume: 0.8 }),
-  getInitialState: () => ({ station: null, status: 'idle' as const, error: '', volume: 0.8 }),
-  setState: () => {},
-  subscribe: () => () => {},
-} as unknown as NonNullable<ReturnType<typeof useMediaContext>>['audio']['store'];
 
 export default AudioPlayer;

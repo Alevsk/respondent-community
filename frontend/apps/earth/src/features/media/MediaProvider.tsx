@@ -73,7 +73,15 @@ export const MediaProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   return <MediaContext.Provider value={value}>{children}</MediaContext.Provider>;
 };
 
-/** Returns the media context, or null when no provider is mounted. */
-export function useMediaContext(): MediaContextValue | null {
-  return useContext(MediaContext);
+/**
+ * Returns the media context. Media components own timers and a media element,
+ * so there is no meaningful degraded mode without the provider that arbitrates
+ * them — a missing provider is a wiring bug, not a state to render around.
+ */
+export function useMediaContext(): MediaContextValue {
+  const ctx = useContext(MediaContext);
+  if (ctx === null) {
+    throw new Error('useMediaContext must be called inside <MediaProvider>');
+  }
+  return ctx;
 }
