@@ -13,6 +13,17 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+// declaring builds a registry in which every named layer type is declared by a
+// source. GetLayers reports only layers a loaded source declares, so a test
+// that expects a layer back must declare it.
+func declaring(layerTypes ...string) *domain.DynamicSourceRegistry {
+	reg := domain.NewDynamicSourceRegistry()
+	for _, lt := range layerTypes {
+		reg.Register(domain.SourceType(lt), domain.LayerType(lt))
+	}
+	return reg
+}
+
 func TestNewLayerServer(t *testing.T) {
 	eRepo := &testEntityRepo{}
 	oRepo := &testObsRepo{}
@@ -69,7 +80,7 @@ func TestLayerServer_GetLayers(t *testing.T) {
 			}
 			oRepo := &testObsRepo{}
 			cache := &testCacheStorage{totalCount: tt.cacheCount}
-			svc := layer.NewLayerService(eRepo, oRepo, cache, domain.NewDynamicSourceRegistry())
+			svc := layer.NewLayerService(eRepo, oRepo, cache, declaring(tt.layerTypes...))
 			srv := NewLayerServer(svc)
 
 			resp, err := srv.GetLayers(context.Background(), &respondentv1.GetLayersRequest{})

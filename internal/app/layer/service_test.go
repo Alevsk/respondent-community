@@ -365,6 +365,17 @@ func TestNewLayerService(t *testing.T) {
 	}
 }
 
+// declaring builds a registry in which every named layer type is declared by a
+// source, the way a loaded YAML source declares it. GetLayers reports only
+// declared layers, so a test that expects a layer must declare it.
+func declaring(layerTypes ...string) *domain.DynamicSourceRegistry {
+	reg := domain.NewDynamicSourceRegistry()
+	for _, lt := range layerTypes {
+		reg.Register(domain.SourceType(lt), domain.LayerType(lt))
+	}
+	return reg
+}
+
 // ---------------------------------------------------------------------------
 // Tests: GetLayers
 // ---------------------------------------------------------------------------
@@ -386,7 +397,7 @@ func TestGetLayers(t *testing.T) {
 		entityRepo.add(makeEntity("e1", "adsb_lol_flights", "ext1"))
 		entityRepo.add(makeEntity("e2", "usgs_earthquakes", "ext2"))
 
-		svc := NewLayerService(entityRepo, newStubObsRepo(), nil, domain.NewDynamicSourceRegistry())
+		svc := NewLayerService(entityRepo, newStubObsRepo(), nil, declaring("adsb_lol_flights", "usgs_earthquakes"))
 
 		layers, err := svc.GetLayers(context.Background())
 		if err != nil {
@@ -403,7 +414,7 @@ func TestGetLayers(t *testing.T) {
 		entityRepo.add(makeEntity("e2", "adsb_lol_flights", "ext2"))
 		entityRepo.add(makeEntity("e3", "celes_trak_satellites", "ext3"))
 
-		svc := NewLayerService(entityRepo, newStubObsRepo(), nil, domain.NewDynamicSourceRegistry())
+		svc := NewLayerService(entityRepo, newStubObsRepo(), nil, declaring("usgs_earthquakes", "adsb_lol_flights", "celes_trak_satellites"))
 
 		layers, err := svc.GetLayers(context.Background())
 		if err != nil {
@@ -421,7 +432,7 @@ func TestGetLayers(t *testing.T) {
 		entityRepo.add(makeEntity("e1", "adsb_lol_flights", "ext1"))
 		entityRepo.add(makeEntity("e2", "usgs_earthquakes", "ext2"))
 
-		svc := NewLayerService(entityRepo, newStubObsRepo(), nil, domain.NewDynamicSourceRegistry())
+		svc := NewLayerService(entityRepo, newStubObsRepo(), nil, declaring("adsb_lol_flights", "usgs_earthquakes"))
 
 		layers, err := svc.GetLayers(context.Background())
 		if err != nil {
@@ -439,7 +450,7 @@ func TestGetLayers(t *testing.T) {
 		entityRepo := newStubEntityRepo()
 		entityRepo.add(makeEntity("e1", "adsb_lol_flights", "ext1"))
 
-		svc := NewLayerService(entityRepo, newStubObsRepo(), nil, domain.NewDynamicSourceRegistry())
+		svc := NewLayerService(entityRepo, newStubObsRepo(), nil, declaring("adsb_lol_flights"))
 
 		layers, err := svc.GetLayers(context.Background())
 		if err != nil {
@@ -479,7 +490,7 @@ func TestGetLayers(t *testing.T) {
 		entityRepo.add(makeEntity("e3", "adsb_lol_flights", "ext3"))
 		entityRepo.add(makeEntity("e4", "usgs_earthquakes", "ext4"))
 
-		svc := NewLayerService(entityRepo, newStubObsRepo(), nil, domain.NewDynamicSourceRegistry())
+		svc := NewLayerService(entityRepo, newStubObsRepo(), nil, declaring("adsb_lol_flights", "usgs_earthquakes"))
 		layers, err := svc.GetLayers(context.Background())
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -508,7 +519,7 @@ func TestGetLayers(t *testing.T) {
 
 		emptyCache := layertest.NewFakeCacheStorage() // GetLayerCount returns 0
 
-		svc := NewLayerService(entityRepo, newStubObsRepo(), emptyCache, domain.NewDynamicSourceRegistry())
+		svc := NewLayerService(entityRepo, newStubObsRepo(), emptyCache, declaring("adsb_lol_flights"))
 		layers, err := svc.GetLayers(context.Background())
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -526,7 +537,7 @@ func TestGetLayers(t *testing.T) {
 		entityRepo.add(makeEntity("e1", "adsb_lol_flights", "ext1"))
 		entityRepo.countErr = errors.New("count query failed")
 
-		svc := NewLayerService(entityRepo, newStubObsRepo(), nil, domain.NewDynamicSourceRegistry())
+		svc := NewLayerService(entityRepo, newStubObsRepo(), nil, declaring("adsb_lol_flights"))
 		if _, err := svc.GetLayers(context.Background()); !errors.Is(err, entityRepo.countErr) {
 			t.Errorf("expected count error to propagate, got %v", err)
 		}
@@ -538,7 +549,7 @@ func TestGetLayers(t *testing.T) {
 		entityRepo := newStubEntityRepo()
 		entityRepo.add(makeEntity("e1", "adsb_lol_flights", "ext1"))
 
-		svc := NewLayerService(entityRepo, newStubObsRepo(), nil, domain.NewDynamicSourceRegistry())
+		svc := NewLayerService(entityRepo, newStubObsRepo(), nil, declaring("adsb_lol_flights"))
 		layers, err := svc.GetLayers(context.Background())
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -556,7 +567,7 @@ func TestGetLayers(t *testing.T) {
 		entityRepo.add(makeEntity("e1", "adsb_lol_flights", "f1"))
 		entityRepo.add(makeEntity("e2", "disaster_alerts", "da1"))
 
-		svc := NewLayerService(entityRepo, newStubObsRepo(), nil, domain.NewDynamicSourceRegistry())
+		svc := NewLayerService(entityRepo, newStubObsRepo(), nil, declaring("adsb_lol_flights", "disaster_alerts"))
 
 		layers, err := svc.GetLayers(context.Background())
 		if err != nil {
@@ -591,7 +602,7 @@ func TestGetLayers(t *testing.T) {
 		entityRepo := newStubEntityRepo()
 		entityRepo.add(makeEntity("e1", "weather_alerts", "wa1"))
 
-		svc := NewLayerService(entityRepo, newStubObsRepo(), nil, domain.NewDynamicSourceRegistry())
+		svc := NewLayerService(entityRepo, newStubObsRepo(), nil, declaring("weather_alerts"))
 
 		layers, err := svc.GetLayers(context.Background())
 		if err != nil {
@@ -618,7 +629,7 @@ func TestGetLayers(t *testing.T) {
 		entityRepo.add(makeEntity("e2", "usgs_earthquakes", "eq2"))
 		entityRepo.add(makeEntity("e3", "usgs_earthquakes", "eq3"))
 
-		svc := NewLayerService(entityRepo, newStubObsRepo(), nil, domain.NewDynamicSourceRegistry())
+		svc := NewLayerService(entityRepo, newStubObsRepo(), nil, declaring("usgs_earthquakes"))
 
 		layers, err := svc.GetLayers(context.Background())
 		if err != nil {
@@ -635,7 +646,7 @@ func TestGetLayers(t *testing.T) {
 		entityRepo.add(makeEntity("e2", "radiation", "rad1"))
 		entityRepo.add(makeEntity("e3", "weather_alerts", "wa1"))
 
-		svc := NewLayerService(entityRepo, newStubObsRepo(), nil, domain.NewDynamicSourceRegistry())
+		svc := NewLayerService(entityRepo, newStubObsRepo(), nil, declaring("disaster_alerts", "radiation", "weather_alerts"))
 
 		layers, err := svc.GetLayers(context.Background())
 		if err != nil {
@@ -1413,5 +1424,33 @@ func TestGetLayers_DisplayConfigWithEmptyColor(t *testing.T) {
 	}
 	if layers[0].PointSize != 20 {
 		t.Errorf("expected PointSize 20, got %d", layers[0].PointSize)
+	}
+}
+
+// A source that changes its layer_type in YAML (cctv_austin -> cctv) leaves its
+// old rows behind in SQLite forever. Layer existence follows the declarations,
+// so the renamed-away layer must not surface in the panel.
+func TestGetLayersOmitsLayersNoSourceDeclares(t *testing.T) {
+	entityRepo := newStubEntityRepo()
+	entityRepo.add(makeEntity("e1", "cctv", "ext1"))
+	entityRepo.add(makeEntity("e2", "cctv_austin", "ext2"))
+	entityRepo.add(makeEntity("e3", "cctv_calgary", "ext3"))
+
+	reg := domain.NewDynamicSourceRegistry()
+	reg.Register("cctv_austin", "cctv")
+	reg.Register("cctv_calgary", "cctv")
+
+	svc := NewLayerService(entityRepo, newStubObsRepo(), nil, reg)
+	layers, err := svc.GetLayers(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var ids []string
+	for _, l := range layers {
+		ids = append(ids, l.ID)
+	}
+	if len(ids) != 1 || ids[0] != "cctv" {
+		t.Errorf("expected only the declared layer [cctv], got %v", ids)
 	}
 }

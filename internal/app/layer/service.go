@@ -11,6 +11,10 @@ import (
 // service depends on. *domain.DynamicSourceRegistry satisfies it; depending on
 // the interface keeps the service decoupled from the concrete registry (DIP).
 type SourceRegistry interface {
+	// AllLayerTypes returns every layer type currently declared by a loaded
+	// source. It is the authority on which layers exist: rows left behind by a
+	// source that has since changed its layer_type are data without a layer.
+	AllLayerTypes() []domain.LayerType
 	GetLayerStyle(lt domain.LayerType) domain.LayerStyle
 	LookupDisplayConfig(lt domain.LayerType) (*domain.LayerDisplayConfig, bool)
 	LookupLayerDisplayName(lt domain.LayerType) (string, bool)
@@ -44,11 +48,22 @@ func NewLayerService(
 	}
 }
 
-// GetLayers returns all available layers discovered from the database and
+// GetLayers returns every layer a loaded source declares that also holds data,
 // enriched with display/history metadata from the declarative dynamic registry.
+//
+// Declarations decide which layers exist; the database only says which of them
+// have entities. Sourcing existence from the database instead would resurrect
+// every layer_type ever written: renaming a source's layer_type in YAML (or
+// deleting the source) strands its old rows, and those rows would otherwise
+// keep answering "this layer exists" for the life of the database file.
 func (s *LayerService) GetLayers(ctx context.Context) ([]*domain.Layer, error) {
 	var layers []*domain.Layer
 	dynReg := s.dynReg
+
+	declared := make(map[string]struct{})
+	for _, lt := range dynReg.AllLayerTypes() {
+		declared[string(lt)] = struct{}{}
+	}
 
 	// Discover all layer types from the database.
 	dbLayerTypes, err := s.entityRepo.GetDistinctLayerTypes(ctx)
@@ -66,6 +81,9 @@ func (s *LayerService) GetLayers(ctx context.Context) ([]*domain.Layer, error) {
 	}
 
 	for _, lt := range dbLayerTypes {
+		if _, ok := declared[lt]; !ok {
+			continue
+		}
 		count := counts[lt]
 
 		style := dynReg.GetLayerStyle(domain.LayerType(lt))
