@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"slices"
 	"sync"
 	"time"
 )
@@ -68,10 +69,54 @@ func (r *DynamicSourceRegistry) Register(st SourceType, lt LayerType) {
 // RegisterWithDisplay adds a dynamic source type -> layer type mapping along with display config.
 func (r *DynamicSourceRegistry) RegisterWithDisplay(st SourceType, lt LayerType, dc *LayerDisplayConfig) {
 	r.Register(st, lt)
-	if dc != nil {
-		r.mu.Lock()
-		r.displayConfigs[lt] = dc
-		r.mu.Unlock()
+	if dc == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if previous, ok := r.displayConfigs[lt]; ok {
+		mergeMediaOrigins(previous, dc)
+	}
+	r.displayConfigs[lt] = dc
+}
+
+// mergeMediaOrigins folds the origins a previous source declared for a media
+// slot into the incoming configuration.
+//
+// Several sources routinely feed one layer. Display settings are
+// last-write-wins, which suits icon and colour because they describe the layer.
+// `allowed_origins` describes the provider one source pulls from, so keeping
+// only the last registration would make every other source's media fail
+// admission in the browser — a layer of cameras where all but one city shows
+// "unavailable", with nothing logged.
+func mergeMediaOrigins(previous, incoming *LayerDisplayConfig) {
+	prior := make(map[string][]string, len(previous.Media))
+	seen := make(map[string]bool, len(previous.Media))
+	for _, m := range previous.Media {
+		prior[m.ID] = m.AllowedOrigins
+		seen[m.ID] = true
+	}
+
+	for i := range incoming.Media {
+		media := &incoming.Media[i]
+		priorOrigins, had := prior[media.ID]
+		// An entry with no declared origins is deliberately unrestricted, and
+		// the union of "any origin" with a specific list is still "any origin".
+		if len(media.AllowedOrigins) == 0 {
+			continue
+		}
+		if had && len(priorOrigins) == 0 {
+			media.AllowedOrigins = nil
+			continue
+		}
+		for _, origin := range priorOrigins {
+			if !slices.Contains(media.AllowedOrigins, origin) {
+				media.AllowedOrigins = append(media.AllowedOrigins, origin)
+			}
+		}
+		// Stable order so the config a client receives does not depend on the
+		// order sources happened to load in.
+		slices.Sort(media.AllowedOrigins)
 	}
 }
 

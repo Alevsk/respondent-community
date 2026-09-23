@@ -162,16 +162,16 @@ media_actions:
 # --- Display ---
 display:
   icon:
-    shape: radio
+    shape: broadcast
     rotatable: false
     interpolation: false
     scale: 1.0
   trail:
-    color: "#ffa726"
+    color: "#e040fb"
     width: 1.0
     opacity: 0.4
   style:
-    color: "#ffa726"
+    color: "#e040fb"
     point_size: 6
   media:
     - id: radio

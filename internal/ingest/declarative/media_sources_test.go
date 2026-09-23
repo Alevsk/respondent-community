@@ -1,6 +1,7 @@
 package declarative
 
 import (
+	"encoding/json"
 	neturl "net/url"
 	"os"
 	"path/filepath"
@@ -382,5 +383,59 @@ func TestShippedSourceURLsSurviveEnvExpansion(t *testing.T) {
 					entry.Name(), trimmed, got)
 			}
 		}
+	}
+}
+
+// Sources that share a layer share its display configuration: the registry
+// keeps the last one registered, unioning only media origins. So the two camera
+// sources must declare the same contract apart from those origins — otherwise
+// whichever file loads last silently decides the icon, the colour, the refresh
+// interval and which fields the panel shows for BOTH cities.
+func TestCameraSourcesSharingTheCctvLayerDeclareOneContract(t *testing.T) {
+	load := func(file string) *SourceDefinition {
+		cs, err := newTestLoader(t, false).LoadFile(filepath.Join(sourcesDir(t), file))
+		if err != nil {
+			t.Fatalf("load %s: %v", file, err)
+		}
+		return cs.Definition()
+	}
+	austin, calgary := load("cctv_austin.yaml"), load("cctv_calgary.yaml")
+
+	if austin.LayerType != "cctv" || calgary.LayerType != "cctv" {
+		t.Fatalf("layer types = %q / %q, want both cctv", austin.LayerType, calgary.LayerType)
+	}
+	if austin.LayerDisplayName != calgary.LayerDisplayName {
+		t.Errorf("layer label differs: %q vs %q", austin.LayerDisplayName, calgary.LayerDisplayName)
+	}
+
+	// Everything the browser renders for the layer, compared as JSON so a new
+	// display field is covered without editing this test.
+	strip := func(d *SourceDefinition) string {
+		dc := DisplaySpecToDomain(&d.Display)
+		for i := range dc.Media {
+			dc.Media[i].AllowedOrigins = nil // per-provider; the registry unions these
+		}
+		b, err := json.Marshal(dc)
+		if err != nil {
+			t.Fatalf("marshal display: %v", err)
+		}
+		return string(b)
+	}
+	if a, c := strip(austin), strip(calgary); a != c {
+		t.Errorf("the two cctv sources declare different display config:\n austin:  %s\n calgary: %s", a, c)
+	}
+
+	// The origins themselves must differ — that is the whole reason the union
+	// exists, and it is what keeps each city's cameras admissible.
+	originsOf := func(d *SourceDefinition) []string {
+		for _, m := range DisplaySpecToDomain(&d.Display).Media {
+			if m.ID == "camera" {
+				return m.AllowedOrigins
+			}
+		}
+		return nil
+	}
+	if ao, co := originsOf(austin), originsOf(calgary); len(ao) == 0 || len(co) == 0 || ao[0] == co[0] {
+		t.Errorf("expected distinct provider origins, got %v and %v", ao, co)
 	}
 }

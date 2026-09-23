@@ -25,12 +25,13 @@ labels:
   priority: low
 
 # --- Identity ---
-# Separate layer from Austin: display settings (media origins included) are
-# stored per layer, last-write-wins.
+# Shares the `cctv` layer with Austin; see cctv_austin.yaml. The display block
+# below must stay in step with that file — only `allowed_origins` differs, and
+# the registry unions those.
 source_type: cctv_calgary
-layer_type: cctv_calgary
+layer_type: cctv
 display_name: "Calgary Traffic Cameras"
-layer_display_name: "Traffic Cameras (Calgary)"
+layer_display_name: "Traffic Cameras"
 
 filtering: viewport
 
@@ -122,11 +123,11 @@ display:
     interpolation: false
     scale: 1.0
   trail:
-    color: "#26a69a"
+    color: "#7c4dff"
     width: 1.0
     opacity: 0.4
   style:
-    color: "#26a69a"
+    color: "#7c4dff"
     point_size: 6
   media:
     - id: camera
@@ -139,20 +140,51 @@ display:
       snapshot:
         refresh_interval: "30s"
         cache_bust_param: "_respondent_frame"
+  # Both camera sources feed this layer, so the renderer set is shared and each
+  # entry lists every key variant. A renderer only appears when the entity
+  # actually carries one of its keys, so an Austin camera shows Austin's fields
+  # and a Calgary camera shows Calgary's.
   field_renderers:
-    - keys: [camera_location]
+    - keys: [location_name, camera_location]
       label: "LOCATION"
       format:
         type: string
       priority: 0
+    - keys: [landmark]
+      label: "LANDMARK"
+      format:
+        type: string
+      priority: 1
+    - keys: [camera_status]
+      label: "STATUS"
+      format:
+        type: string
+        transform: upper
+      priority: 2
+    - keys: [camera_label]
+      label: "CAMERA"
+      format:
+        type: string
+      priority: 3
     - keys: [address_quadrant]
       label: "ADDRESS QUADRANT"
       format:
         type: string
         transform: upper
-      priority: 1
-    - keys: [camera_label]
-      label: "CAMERA"
+      priority: 4
+    - keys: [signal_eng_area]
+      label: "AREA"
       format:
         type: string
-      priority: 2
+        transform: upper
+      priority: 5
+    - keys: [council_district]
+      label: "COUNCIL DISTRICT"
+      format:
+        type: string
+      priority: 6
+    - keys: [camera_mfg]
+      label: "MANUFACTURER"
+      format:
+        type: string
+      priority: 7

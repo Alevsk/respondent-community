@@ -20,13 +20,14 @@ labels:
   priority: low
 
 # --- Identity ---
-# Each region is its own layer: display settings (including media policy) are
-# stored per layer with last-write-wins, so mixing regions would mean one
-# region's camera origins silently governing another's.
+# Both camera providers feed one `cctv` layer, the way 15 news sources feed
+# news_articles. Their `allowed_origins` are unioned by the dynamic registry,
+# so each provider's cameras stay admissible without one city's origins
+# governing another's.
 source_type: cctv_austin
-layer_type: cctv_austin
+layer_type: cctv
 display_name: "Austin Traffic Cameras"
-layer_display_name: "Traffic Cameras (Austin)"
+layer_display_name: "Traffic Cameras"
 
 filtering: viewport
 
@@ -124,11 +125,11 @@ display:
     interpolation: false
     scale: 1.0
   trail:
-    color: "#7e57c2"
+    color: "#7c4dff"
     width: 1.0
     opacity: 0.4
   style:
-    color: "#7e57c2"
+    color: "#7c4dff"
     point_size: 6
   media:
     - id: camera
@@ -144,8 +145,12 @@ display:
       snapshot:
         refresh_interval: "30s"
         cache_bust_param: "_respondent_frame"
+  # Both camera sources feed this layer, so the renderer set is shared and each
+  # entry lists every key variant. A renderer only appears when the entity
+  # actually carries one of its keys, so an Austin camera shows Austin's fields
+  # and a Calgary camera shows Calgary's.
   field_renderers:
-    - keys: [location_name]
+    - keys: [location_name, camera_location]
       label: "LOCATION"
       format:
         type: string
@@ -161,19 +166,30 @@ display:
         type: string
         transform: upper
       priority: 2
-    - keys: [council_district]
-      label: "COUNCIL DISTRICT"
+    - keys: [camera_label]
+      label: "CAMERA"
       format:
         type: string
       priority: 3
+    - keys: [address_quadrant]
+      label: "ADDRESS QUADRANT"
+      format:
+        type: string
+        transform: upper
+      priority: 4
     - keys: [signal_eng_area]
       label: "AREA"
       format:
         type: string
         transform: upper
-      priority: 4
+      priority: 5
+    - keys: [council_district]
+      label: "COUNCIL DISTRICT"
+      format:
+        type: string
+      priority: 6
     - keys: [camera_mfg]
       label: "MANUFACTURER"
       format:
         type: string
-      priority: 5
+      priority: 7

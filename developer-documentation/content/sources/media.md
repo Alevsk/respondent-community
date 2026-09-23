@@ -17,13 +17,23 @@ For the YAML fields themselves, see
 
 | Source file | Layer | Media | Catalog poll | Media refresh |
 |---|---|---|---|---|
-| `cctv_austin.yaml` | `cctv_austin` | JPEG snapshot | 1 h | 30 s while viewed |
-| `cctv_calgary.yaml` | `cctv_calgary` | JPEG snapshot | 1 h | 30 s while viewed |
+| `cctv_austin.yaml` | `cctv` | JPEG snapshot | 1 h | 30 s while viewed |
+| `cctv_calgary.yaml` | `cctv` | JPEG snapshot | 1 h | 30 s while viewed |
 | `radio_browser_stations.yaml` | `radio_stations` | Native MP3 / AAC audio | 6 h | continuous stream |
 
-Each camera region is its own layer on purpose. Display settings — media origins
-included — are stored per layer with last-write-wins, so merging regions would
-let one region's allowed origins silently govern another's.
+Both camera providers feed one `cctv` layer, the way fifteen news sources feed
+`news_articles`. Display settings are stored per layer with last-write-wins,
+which suits the icon and the colour because they describe the layer — but
+`allowed_origins` describes the provider a source pulls from, so the registry
+unions those across every source feeding a layer. Without that union the last
+file to load would decide the origins for all of them, and every other city's
+cameras would fail admission in the browser with nothing logged.
+
+The rest of the display block must agree between sources sharing a layer, since
+only the last one registered survives. A test asserts the two camera sources
+declare an identical contract apart from their origins, and their field
+renderers list every key variant so each camera shows its own provider's
+fields.
 
 ## Who owns what
 

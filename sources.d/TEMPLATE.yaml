@@ -809,7 +809,7 @@ cache:
 # Frontend rendering configuration. Consumed by GetLayers() gRPC API.
 display:
   icon:
-    # Available shapes (58 total):
+    # Available shapes (59 total):
     #
     # Aviation:     flight, flight-alt-a, flight-alt-b, flight-alt-c, drone, helicopter
     # Space:        diamond, satellite (alias for diamond), iss, rocket, telescope, meteor
@@ -818,7 +818,7 @@ display:
     # Weather:      lightning, cloud, wind, tornado, snowflake, hurricane, flood
     # Hazard:       warning, radiation, nuclear, biohazard, skull, fire, volcano
     # Seismic:      ripple, crack
-    # Radio:        radio
+    # Radio:        radio, broadcast
     # Surveillance: camera
     # Infrastructure: tower, building, bridge, factory, powerplant, crane, warehouse
     # Geometry:     dot, star, hexagon, circle-ring, chevron, triangle, pentagon, cross

@@ -621,3 +621,58 @@ func TestDefaultGeoCacheConfig(t *testing.T) {
 		t.Errorf("DefaultGeoCacheConfig().GCBatchSize = %d, want 500", cfg.GCBatchSize)
 	}
 }
+
+// Several sources routinely feed one layer — 15 news sources share
+// news_articles. Display settings are last-write-wins, which suits icon and
+// colour because they describe the layer. allowed_origins does not: it
+// describes the provider a particular source pulls from, so keeping only the
+// last registration would make every other source's media fail admission in
+// the browser.
+func TestRegisterWithDisplayUnionsMediaOriginsAcrossSources(t *testing.T) {
+	reg := NewDynamicSourceRegistry()
+
+	cameraFor := func(origin string) *LayerDisplayConfig {
+		return &LayerDisplayConfig{Media: []MediaConfig{{
+			ID: "camera", Kind: "snapshot", Label: "Camera feed", URLKey: "snapshot_url",
+			AllowedOrigins: []string{origin},
+		}}}
+	}
+
+	reg.RegisterWithDisplay("cctv_austin", "cctv", cameraFor("https://cctv.austinmobility.io"))
+	reg.RegisterWithDisplay("cctv_calgary", "cctv", cameraFor("https://trafficcam.calgary.ca"))
+
+	dc, ok := reg.LookupDisplayConfig("cctv")
+	if !ok || len(dc.Media) != 1 {
+		t.Fatalf("display config = %+v", dc)
+	}
+	got := dc.Media[0].AllowedOrigins
+	want := []string{"https://cctv.austinmobility.io", "https://trafficcam.calgary.ca"}
+	if len(got) != len(want) {
+		t.Fatalf("origins = %v, want both providers", got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("origins = %v, want %v (sorted for determinism)", got, want)
+		}
+	}
+}
+
+// An entry that declares no origins is deliberately unrestricted. Folding
+// another source's list into it would start restricting it, silently breaking
+// the sources that relied on being open.
+func TestRegisterWithDisplayKeepsUnrestrictedMediaUnrestricted(t *testing.T) {
+	reg := NewDynamicSourceRegistry()
+	open := &LayerDisplayConfig{Media: []MediaConfig{{ID: "radio", Kind: "audio", Label: "Live stream", URLKey: "stream_url"}}}
+	restricted := &LayerDisplayConfig{Media: []MediaConfig{{
+		ID: "radio", Kind: "audio", Label: "Live stream", URLKey: "stream_url",
+		AllowedOrigins: []string{"https://one.example.com"},
+	}}}
+
+	reg.RegisterWithDisplay("a", "radio_stations", open)
+	reg.RegisterWithDisplay("b", "radio_stations", restricted)
+
+	dc, _ := reg.LookupDisplayConfig("radio_stations")
+	if len(dc.Media[0].AllowedOrigins) != 0 {
+		t.Errorf("origins = %v, want unrestricted", dc.Media[0].AllowedOrigins)
+	}
+}

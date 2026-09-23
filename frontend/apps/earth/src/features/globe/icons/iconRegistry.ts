@@ -4,6 +4,7 @@ import { drawEarthquakeIcon } from './earthquakeIcon';
 import { drawDefaultIcon } from './defaultIcon';
 import { drawRadioIcon } from './radioIcon';
 import { drawCameraIcon } from './cameraIcon';
+import { drawBroadcastIcon } from './broadcastIcon';
 import { drawWarningIcon } from './warningIcon';
 import { drawRadiationIcon } from './radiationIcon';
 import { drawFireIcon } from './fireIcon';
@@ -68,6 +69,7 @@ const SHAPE_TO_DRAW_FN: Record<string, IconDrawFn> = {
   ripple: drawEarthquakeIcon,
   radio: drawRadioIcon,
   camera: drawCameraIcon,
+  broadcast: drawBroadcastIcon,
   warning: drawWarningIcon,
   radiation: drawRadiationIcon,
   fire: drawFireIcon,
