@@ -6,7 +6,8 @@
   },
   "tags": [
     {
-      "name": "AIService"
+      "name": "AIService",
+      "description": "AIService provides AI-powered search, analysis, and insight retrieval."
     }
   ],
   "consumes": [

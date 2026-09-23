@@ -82,17 +82,18 @@ type SourceDefinition struct {
 
 	LookupTables []LookupTableSpec `yaml:"lookup_tables,omitempty"`
 
-	Transport     TransportSpec  `yaml:"transport" validate:"required"`
-	Parser        ParserSpec     `yaml:"parser" validate:"required"`
-	Filter        string         `yaml:"filter,omitempty"`
-	Entity        EntityMapping  `yaml:"entity" validate:"required"`
-	Observation   ObsMapping     `yaml:"observation" validate:"required"`
-	Recording     RecordingSpec  `yaml:"recording" validate:"required"`
-	Cache         CacheSpec      `yaml:"cache" validate:"required"`
-	Display       DisplaySpec    `yaml:"display" validate:"required"`
-	History       *HistorySpec   `yaml:"history,omitempty"`
-	Indicator     *IndicatorSpec `yaml:"indicator,omitempty"`
-	FieldMappings []FieldMapping `yaml:"field_mappings,omitempty"`
+	Transport     TransportSpec     `yaml:"transport" validate:"required"`
+	Parser        ParserSpec        `yaml:"parser" validate:"required"`
+	Filter        string            `yaml:"filter,omitempty"`
+	Entity        EntityMapping     `yaml:"entity" validate:"required"`
+	Observation   ObsMapping        `yaml:"observation" validate:"required"`
+	Recording     RecordingSpec     `yaml:"recording" validate:"required"`
+	Cache         CacheSpec         `yaml:"cache" validate:"required"`
+	Display       DisplaySpec       `yaml:"display" validate:"required"`
+	MediaActions  []MediaActionSpec `yaml:"media_actions,omitempty"`
+	History       *HistorySpec      `yaml:"history,omitempty"`
+	Indicator     *IndicatorSpec    `yaml:"indicator,omitempty"`
+	FieldMappings []FieldMapping    `yaml:"field_mappings,omitempty"`
 
 	// AI enrichment configuration (optional).
 	// When present and enabled, AI operations are validated at load time:
@@ -310,6 +311,7 @@ type CacheSpec struct {
 
 // DisplaySpec defines frontend rendering configuration.
 type DisplaySpec struct {
+	Media          []MediaSpec         `yaml:"media,omitempty"`
 	Icon           IconSpec            `yaml:"icon"`
 	Trail          TrailSpec           `yaml:"trail"`
 	Style          StyleSpec           `yaml:"style"`

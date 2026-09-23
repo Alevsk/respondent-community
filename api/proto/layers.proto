@@ -81,7 +81,30 @@ message LayerDisplayConfig {
   StyleConfig style = 3;
   repeated FieldRendererConfig field_renderers = 4;
   ColorByConfig color_by = 5; // optional: derive entity color from a metadata field's value
+  repeated MediaConfig media = 6;
 }
+
+// MediaConfig binds a browser media component to explicitly declared metadata.
+message MediaConfig {
+  string id = 1;
+  string kind = 2;
+  string label = 3;
+  string url_key = 4;
+  string attribution_key = 5;
+  repeated string allowed_origins = 6;
+  string playback_action = 7;
+  oneof options {
+    SnapshotMediaConfig snapshot = 8;
+    AudioMediaConfig audio = 9;
+  }
+}
+
+message SnapshotMediaConfig {
+  int32 refresh_interval_seconds = 1;
+  string cache_bust_param = 2;
+}
+
+message AudioMediaConfig {}
 
 // ColorByConfig derives an entity's render color from the value of a metadata
 // field, e.g. coloring facilities by their "status". This keeps per-value color

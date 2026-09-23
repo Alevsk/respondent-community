@@ -6,7 +6,8 @@
   },
   "tags": [
     {
-      "name": "EntityService"
+      "name": "EntityService",
+      "description": "EntityService provides detail and history lookups for individual entities."
     }
   ],
   "consumes": [

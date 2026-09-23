@@ -1,6 +1,10 @@
 version: v2
 managed:
   enabled: true
+  # The gateway module ships its own Go import path; the go_package_prefix
+  # override below must not rewrite it.
+  disable:
+    - module: buf.build/grpc-ecosystem/grpc-gateway
   override:
     - file_option: go_package_prefix
       value: github.com/Alevsk/respondent/gen/go
@@ -29,5 +33,11 @@ plugins:
   - remote: buf.build/grpc-ecosystem/openapiv2
     out: gen/openapi
     opt: logtostderr=true
+  # Merged schema consumed by the frontend REST client documentation.
+  - remote: buf.build/grpc-ecosystem/openapiv2
+    out: frontend/packages/core/src/api/generated
+    opt:
+      - allow_merge=true
+      - merge_file_name=openapi2-merged
 inputs:
   - directory: api/proto

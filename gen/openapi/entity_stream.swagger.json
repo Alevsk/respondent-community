@@ -6,7 +6,8 @@
   },
   "tags": [
     {
-      "name": "EntityStreamService"
+      "name": "EntityStreamService",
+      "description": "EntityStreamService provides real-time entity streaming\nNote: This is implemented via WebSocket (ws://HOST/v1/ws) for browser compatibility\nThe gRPC server streaming is available for native clients"
     }
   ],
   "consumes": [

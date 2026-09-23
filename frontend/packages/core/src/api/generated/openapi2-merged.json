@@ -4,6 +4,32 @@
     "title": "Respondent API",
     "version": "1.0.0"
   },
+  "tags": [
+    {
+      "name": "EntityService",
+      "description": "EntityService provides detail and history lookups for individual entities."
+    },
+    {
+      "name": "AIService",
+      "description": "AIService provides AI-powered search, analysis, and insight retrieval."
+    },
+    {
+      "name": "EntityStreamService",
+      "description": "EntityStreamService provides real-time entity streaming\nNote: This is implemented via WebSocket (ws://HOST/v1/ws) for browser compatibility\nThe gRPC server streaming is available for native clients"
+    },
+    {
+      "name": "IndicatorService",
+      "description": "IndicatorService provides access to global indicator data."
+    },
+    {
+      "name": "LayerService",
+      "description": "LayerService manages data layer configuration"
+    },
+    {
+      "name": "MediaService",
+      "description": "MediaService runs source-declared playback notifications. It never relays media."
+    }
+  ],
   "host": "localhost:8090",
   "basePath": "/",
   "schemes": [
@@ -15,23 +41,6 @@
   ],
   "produces": [
     "application/json"
-  ],
-  "tags": [
-    {
-      "name": "AIService"
-    },
-    {
-      "name": "EntityService"
-    },
-    {
-      "name": "EntityStreamService"
-    },
-    {
-      "name": "IndicatorService"
-    },
-    {
-      "name": "LayerService"
-    }
   ],
   "paths": {
     "/v1/ai/analysis": {
@@ -592,6 +601,38 @@
           "LayerService"
         ]
       }
+    },
+    "/v1/media/playback": {
+      "post": {
+        "operationId": "MediaService_ReportMediaPlayback",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ReportMediaPlaybackResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1ReportMediaPlaybackRequest"
+            }
+          }
+        ],
+        "tags": [
+          "MediaService"
+        ]
+      }
     }
   },
   "definitions": {
@@ -771,6 +812,71 @@
       "default": "ATTENTION_LEVEL_UNSPECIFIED",
       "description": "AttentionLevel indicates the severity or importance of an AI insight."
     },
+    "v1AudioMediaConfig": {
+      "type": "object"
+    },
+    "v1BatchEntityDetail": {
+      "type": "object",
+      "properties": {
+        "entity": {
+          "$ref": "#/definitions/v1Entity"
+        },
+        "latestObservation": {
+          "$ref": "#/definitions/v1Observation"
+        }
+      },
+      "description": "BatchEntityDetail contains an entity with its latest observation."
+    },
+    "v1ColorByConfig": {
+      "type": "object",
+      "properties": {
+        "field": {
+          "type": "string",
+          "title": "metadata field name whose value selects the color"
+        },
+        "values": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "field value -\u003e hex color"
+        },
+        "defaultColor": {
+          "type": "string",
+          "title": "hex color used when the value is not in the map"
+        }
+      },
+      "description": "ColorByConfig derives an entity's render color from the value of a metadata\nfield, e.g. coloring facilities by their \"status\". This keeps per-value color\nrules declarative (in the source YAML) instead of hardcoded in the client."
+    },
+    "v1Entity": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "externalId": {
+          "type": "string"
+        },
+        "layerType": {
+          "type": "string",
+          "title": "flights_commercial, flights_military, satellites, earthquakes, traffic, cctv"
+        },
+        "name": {
+          "type": "string"
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "aiMetadataJson": {
+          "type": "string",
+          "title": "AI enrichment data as JSON string (nested objects not representable in proto map)"
+        }
+      },
+      "title": "Entity represents a normalized geospatial object"
+    },
     "v1EntitySearchResult": {
       "type": "object",
       "properties": {
@@ -820,6 +926,82 @@
       },
       "description": "ExplainQueryResponse is the response for SQL explanation."
     },
+    "v1FieldFormat": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "$ref": "#/definitions/v1FieldType"
+        },
+        "precision": {
+          "type": "integer",
+          "format": "int32",
+          "title": "For float/integer types"
+        },
+        "prefix": {
+          "type": "string"
+        },
+        "suffix": {
+          "type": "string"
+        },
+        "transform": {
+          "$ref": "#/definitions/v1FieldTransform"
+        }
+      },
+      "description": "FieldFormat describes the formatting rules for a rendered field value."
+    },
+    "v1FieldRendererConfig": {
+      "type": "object",
+      "properties": {
+        "keys": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "label": {
+          "type": "string"
+        },
+        "format": {
+          "$ref": "#/definitions/v1FieldFormat"
+        },
+        "priority": {
+          "type": "integer",
+          "format": "int32"
+        }
+      },
+      "description": "FieldRendererConfig defines how a metadata field is displayed in the UI."
+    },
+    "v1FieldTransform": {
+      "type": "string",
+      "enum": [
+        "FIELD_TRANSFORM_UNSPECIFIED",
+        "FIELD_TRANSFORM_UPPER",
+        "FIELD_TRANSFORM_LOWER"
+      ],
+      "default": "FIELD_TRANSFORM_UNSPECIFIED",
+      "description": "FieldTransform defines text transformation for string fields."
+    },
+    "v1FieldType": {
+      "type": "string",
+      "enum": [
+        "FIELD_TYPE_UNSPECIFIED",
+        "FIELD_TYPE_STRING",
+        "FIELD_TYPE_FLOAT",
+        "FIELD_TYPE_INTEGER",
+        "FIELD_TYPE_RAW"
+      ],
+      "default": "FIELD_TYPE_UNSPECIFIED",
+      "description": "FieldType defines the data type of a rendered field value."
+    },
+    "v1FilteringMode": {
+      "type": "string",
+      "enum": [
+        "FILTERING_MODE_UNSPECIFIED",
+        "FILTERING_MODE_VIEWPORT"
+      ],
+      "default": "FILTERING_MODE_UNSPECIFIED",
+      "description": "FilteringMode defines how a layer delivers data to clients."
+    },
     "v1GeoPoint": {
       "type": "object",
       "properties": {
@@ -834,6 +1016,55 @@
         "altM": {
           "type": "number",
           "format": "double"
+        }
+      }
+    },
+    "v1GetEntitiesBatchRequest": {
+      "type": "object",
+      "properties": {
+        "entityIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "title": "composite IDs: \"layerType:externalId\" (max 50)"
+        }
+      },
+      "description": "GetEntitiesBatchRequest is the request for the GetEntitiesBatch RPC."
+    },
+    "v1GetEntitiesBatchResponse": {
+      "type": "object",
+      "properties": {
+        "entities": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1BatchEntityDetail"
+          }
+        }
+      },
+      "description": "GetEntitiesBatchResponse is the response for the GetEntitiesBatch RPC."
+    },
+    "v1GetEntityDetailResponse": {
+      "type": "object",
+      "properties": {
+        "entity": {
+          "$ref": "#/definitions/v1Entity"
+        },
+        "latestObservation": {
+          "$ref": "#/definitions/v1Observation"
+        }
+      }
+    },
+    "v1GetGlobalIndicatorsResponse": {
+      "type": "object",
+      "properties": {
+        "indicators": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1IndicatorSnapshot"
+          }
         }
       }
     },
@@ -853,6 +1084,46 @@
         }
       },
       "description": "GetInsightsResponse is the response for listing AI insights."
+    },
+    "v1GetLayerSnapshotResponse": {
+      "type": "object",
+      "properties": {
+        "entities": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1Entity"
+          }
+        },
+        "observations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1Observation"
+          }
+        },
+        "totalCount": {
+          "type": "string",
+          "format": "int64",
+          "title": "Total available entities"
+        },
+        "hasMore": {
+          "type": "boolean",
+          "title": "More entities available"
+        }
+      }
+    },
+    "v1GetLayersResponse": {
+      "type": "object",
+      "properties": {
+        "layers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1Layer"
+          }
+        }
+      }
     },
     "v1GetNotificationFilterOptionsResponse": {
       "type": "object",
@@ -878,6 +1149,141 @@
         }
       },
       "description": "GetNotificationFilterOptionsResponse returns available filter options\nfor the frontend notification filter UI."
+    },
+    "v1GetObservationHistoryResponse": {
+      "type": "object",
+      "properties": {
+        "observations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1Observation"
+          }
+        },
+        "hasMore": {
+          "type": "boolean"
+        }
+      }
+    },
+    "v1HistoryConfig": {
+      "type": "object",
+      "properties": {
+        "maxLookbackHours": {
+          "type": "integer",
+          "format": "int32",
+          "title": "Max hours into the past (0 = server default 48h)"
+        },
+        "maxRangeSpanHours": {
+          "type": "integer",
+          "format": "int32",
+          "title": "Max hours per query window (0 = server default 24h)"
+        }
+      },
+      "description": "HistoryConfig defines per-layer time range limits for historical exploration.\nWhen present, the frontend custom range picker uses these limits instead of the server defaults.\nZero values mean \"use server default\"."
+    },
+    "v1IconConfig": {
+      "type": "object",
+      "properties": {
+        "shape": {
+          "type": "string",
+          "title": "Free-form shape name (e.g. \"flight\", \"ship\", \"missile\")"
+        },
+        "rotatable": {
+          "type": "boolean"
+        },
+        "interpolation": {
+          "type": "boolean",
+          "title": "Dead-reckoning motion interpolation"
+        },
+        "scale": {
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "description": "IconConfig defines icon rendering properties for entities on the globe."
+    },
+    "v1IndicatorSnapshot": {
+      "type": "object",
+      "properties": {
+        "layerId": {
+          "type": "string"
+        },
+        "layerName": {
+          "type": "string"
+        },
+        "timestampMs": {
+          "type": "string",
+          "format": "int64"
+        },
+        "values": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1IndicatorValue"
+          }
+        },
+        "summary": {
+          "type": "string",
+          "title": "e.g. \"Quiet\", \"Minor Storm\""
+        },
+        "overallLevel": {
+          "type": "integer",
+          "format": "int32",
+          "title": "max severity across values"
+        }
+      },
+      "description": "IndicatorSnapshot is the current state of a global indicator layer."
+    },
+    "v1IndicatorValue": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string",
+          "title": "e.g. \"kp_index\", \"r_scale\", \"g_scale\""
+        },
+        "value": {
+          "type": "string",
+          "title": "current value as string"
+        },
+        "label": {
+          "type": "string",
+          "title": "human-readable label, e.g. \"Kp Index\""
+        },
+        "unit": {
+          "type": "string",
+          "title": "e.g. \"\", \"km/s\", \"uSv/h\""
+        },
+        "level": {
+          "type": "integer",
+          "format": "int32",
+          "title": "severity 0-5 (0=quiet, 5=extreme)"
+        },
+        "changePct": {
+          "type": "number",
+          "format": "double",
+          "description": "% change (signed), e.g. +8.2 or -0.4",
+          "title": "--- extended display fields ---"
+        },
+        "changeAbs": {
+          "type": "number",
+          "format": "double",
+          "title": "absolute change (signed)"
+        },
+        "format": {
+          "type": "string",
+          "title": "display hint: \"scale\" (default), \"number\", \"currency\", \"percent\""
+        },
+        "precision": {
+          "type": "integer",
+          "format": "int32",
+          "title": "decimal places for display"
+        },
+        "prefix": {
+          "type": "string",
+          "title": "display prefix, e.g. \"$\""
+        }
+      },
+      "description": "IndicatorValue represents a single global indicator reading."
     },
     "v1InsightEntityRef": {
       "type": "object",
@@ -912,6 +1318,133 @@
       },
       "description": "InsightTypeOption describes one available insight type for filtering."
     },
+    "v1Layer": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "title": "Dynamic layer type string (e.g. flights_commercial, satellites)"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "mode": {
+          "$ref": "#/definitions/v1LayerMode"
+        },
+        "density": {
+          "type": "integer",
+          "format": "int32",
+          "title": "0-100"
+        },
+        "source": {
+          "type": "string"
+        },
+        "lastUpdate": {
+          "type": "string",
+          "format": "int64",
+          "title": "Unix timestamp in milliseconds"
+        },
+        "count": {
+          "type": "string",
+          "format": "int64",
+          "title": "Entity count (for high-volume layers)"
+        },
+        "color": {
+          "type": "string",
+          "title": "CSS color string for rendering (e.g., \"#00ff9d\")"
+        },
+        "pointSize": {
+          "type": "integer",
+          "format": "int32",
+          "title": "Point size in pixels for rendering"
+        },
+        "displayConfig": {
+          "$ref": "#/definitions/v1LayerDisplayConfig",
+          "title": "Display configuration from declarative source YAML"
+        },
+        "historyConfig": {
+          "$ref": "#/definitions/v1HistoryConfig",
+          "title": "Per-layer time range limits (nil = server defaults: 48h lookback, 24h span)"
+        },
+        "renderingMode": {
+          "$ref": "#/definitions/v1RenderingMode",
+          "title": "Determines frontend rendering strategy"
+        },
+        "filteringMode": {
+          "$ref": "#/definitions/v1FilteringMode",
+          "title": "When FILTERING_MODE_VIEWPORT, frontend sends camera bounds for progressive loading"
+        }
+      },
+      "title": "Layer represents a configurable data layer"
+    },
+    "v1LayerDisplayConfig": {
+      "type": "object",
+      "properties": {
+        "icon": {
+          "$ref": "#/definitions/v1IconConfig"
+        },
+        "trail": {
+          "$ref": "#/definitions/v1TrailConfig"
+        },
+        "style": {
+          "$ref": "#/definitions/v1StyleConfig"
+        },
+        "fieldRenderers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1FieldRendererConfig"
+          }
+        },
+        "colorBy": {
+          "$ref": "#/definitions/v1ColorByConfig",
+          "title": "optional: derive entity color from a metadata field's value"
+        },
+        "media": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1MediaConfig"
+          }
+        }
+      },
+      "description": "LayerDisplayConfig holds rendering metadata for a layer, populated from declarative source definitions."
+    },
+    "v1LayerMode": {
+      "type": "string",
+      "enum": [
+        "LAYER_MODE_UNSPECIFIED",
+        "LAYER_MODE_SPARSE",
+        "LAYER_MODE_FULL"
+      ],
+      "default": "LAYER_MODE_UNSPECIFIED",
+      "description": "LayerMode defines the density mode for a layer."
+    },
+    "v1LayerToggle": {
+      "type": "object",
+      "properties": {
+        "layerId": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "mode": {
+          "$ref": "#/definitions/v1LayerMode"
+        },
+        "density": {
+          "type": "integer",
+          "format": "int32",
+          "title": "0-100"
+        }
+      }
+    },
     "v1ListAnalysisDefinitionsResponse": {
       "type": "object",
       "properties": {
@@ -924,6 +1457,42 @@
         }
       },
       "description": "ListAnalysisDefinitionsResponse is the response for listing analysis definitions."
+    },
+    "v1MediaConfig": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "urlKey": {
+          "type": "string"
+        },
+        "attributionKey": {
+          "type": "string"
+        },
+        "allowedOrigins": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "playbackAction": {
+          "type": "string"
+        },
+        "snapshot": {
+          "$ref": "#/definitions/v1SnapshotMediaConfig"
+        },
+        "audio": {
+          "$ref": "#/definitions/v1AudioMediaConfig"
+        }
+      },
+      "description": "MediaConfig binds a browser media component to explicitly declared metadata."
     },
     "v1NaturalLanguageSearchRequest": {
       "type": "object",
@@ -1018,95 +1587,31 @@
       },
       "title": "Observation represents a time-series record of an entity"
     },
-    "v1BatchEntityDetail": {
-      "type": "object",
-      "properties": {
-        "entity": {
-          "$ref": "#/definitions/v1Entity"
-        },
-        "latestObservation": {
-          "$ref": "#/definitions/v1Observation"
-        }
-      },
-      "description": "BatchEntityDetail contains an entity with its latest observation."
+    "v1RenderingMode": {
+      "type": "string",
+      "enum": [
+        "RENDERING_MODE_UNSPECIFIED",
+        "RENDERING_MODE_MAP",
+        "RENDERING_MODE_INDICATOR"
+      ],
+      "default": "RENDERING_MODE_UNSPECIFIED",
+      "description": "RenderingMode defines how the frontend renders a layer."
     },
-    "v1Entity": {
+    "v1ReportMediaPlaybackRequest": {
       "type": "object",
       "properties": {
-        "id": {
+        "entityId": {
           "type": "string"
         },
-        "externalId": {
+        "mediaId": {
           "type": "string"
-        },
-        "layerType": {
-          "type": "string",
-          "title": "flights_commercial, flights_military, satellites, earthquakes, traffic, cctv"
-        },
-        "name": {
-          "type": "string"
-        },
-        "metadata": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          }
-        },
-        "aiMetadataJson": {
-          "type": "string",
-          "title": "AI enrichment data as JSON string (nested objects not representable in proto map)"
-        }
-      },
-      "title": "Entity represents a normalized geospatial object"
-    },
-    "v1GetEntitiesBatchRequest": {
-      "type": "object",
-      "properties": {
-        "entityIds": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "title": "composite IDs: \"layerType:externalId\" (max 50)"
-        }
-      },
-      "description": "GetEntitiesBatchRequest is the request for the GetEntitiesBatch RPC."
-    },
-    "v1GetEntitiesBatchResponse": {
-      "type": "object",
-      "properties": {
-        "entities": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "$ref": "#/definitions/v1BatchEntityDetail"
-          }
-        }
-      },
-      "description": "GetEntitiesBatchResponse is the response for the GetEntitiesBatch RPC."
-    },
-    "v1GetEntityDetailResponse": {
-      "type": "object",
-      "properties": {
-        "entity": {
-          "$ref": "#/definitions/v1Entity"
-        },
-        "latestObservation": {
-          "$ref": "#/definitions/v1Observation"
         }
       }
     },
-    "v1GetObservationHistoryResponse": {
+    "v1ReportMediaPlaybackResponse": {
       "type": "object",
       "properties": {
-        "observations": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "$ref": "#/definitions/v1Observation"
-          }
-        },
-        "hasMore": {
+        "reported": {
           "type": "boolean"
         }
       }
@@ -1129,404 +1634,17 @@
       },
       "description": "SearchEntitiesResponse is the response for the SearchEntities RPC."
     },
-    "v1GetGlobalIndicatorsResponse": {
+    "v1SnapshotMediaConfig": {
       "type": "object",
       "properties": {
-        "indicators": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "$ref": "#/definitions/v1IndicatorSnapshot"
-          }
-        }
-      }
-    },
-    "v1IndicatorSnapshot": {
-      "type": "object",
-      "properties": {
-        "layerId": {
-          "type": "string"
-        },
-        "layerName": {
-          "type": "string"
-        },
-        "timestampMs": {
-          "type": "string",
-          "format": "int64"
-        },
-        "values": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "$ref": "#/definitions/v1IndicatorValue"
-          }
-        },
-        "summary": {
-          "type": "string",
-          "title": "e.g. \"Quiet\", \"Minor Storm\""
-        },
-        "overallLevel": {
-          "type": "integer",
-          "format": "int32",
-          "title": "max severity across values"
-        }
-      },
-      "description": "IndicatorSnapshot is the current state of a global indicator layer."
-    },
-    "v1IndicatorValue": {
-      "type": "object",
-      "properties": {
-        "key": {
-          "type": "string",
-          "title": "e.g. \"kp_index\", \"r_scale\", \"g_scale\""
-        },
-        "value": {
-          "type": "string",
-          "title": "current value as string"
-        },
-        "label": {
-          "type": "string",
-          "title": "human-readable label, e.g. \"Kp Index\""
-        },
-        "unit": {
-          "type": "string",
-          "title": "e.g. \"\", \"km/s\", \"uSv/h\""
-        },
-        "level": {
-          "type": "integer",
-          "format": "int32",
-          "title": "severity 0-5 (0=quiet, 5=extreme)"
-        },
-        "changePct": {
-          "type": "number",
-          "format": "double",
-          "description": "% change (signed), e.g. +8.2 or -0.4",
-          "title": "--- extended display fields ---"
-        },
-        "changeAbs": {
-          "type": "number",
-          "format": "double",
-          "title": "absolute change (signed)"
-        },
-        "format": {
-          "type": "string",
-          "title": "display hint: \"scale\" (default), \"number\", \"currency\", \"percent\""
-        },
-        "precision": {
-          "type": "integer",
-          "format": "int32",
-          "title": "decimal places for display"
-        },
-        "prefix": {
-          "type": "string",
-          "title": "display prefix, e.g. \"$\""
-        }
-      },
-      "description": "IndicatorValue represents a single global indicator reading."
-    },
-    "v1ColorByConfig": {
-      "type": "object",
-      "properties": {
-        "field": {
-          "type": "string",
-          "title": "metadata field name whose value selects the color"
-        },
-        "values": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          },
-          "title": "field value -> hex color"
-        },
-        "defaultColor": {
-          "type": "string",
-          "title": "hex color used when the value is not in the map"
-        }
-      },
-      "description": "ColorByConfig derives an entity's render color from the value of a metadata\nfield, e.g. coloring facilities by their \"status\". This keeps per-value color\nrules declarative (in the source YAML) instead of hardcoded in the client."
-    },
-    "v1FieldFormat": {
-      "type": "object",
-      "properties": {
-        "type": {
-          "$ref": "#/definitions/v1FieldType"
-        },
-        "precision": {
-          "type": "integer",
-          "format": "int32",
-          "title": "For float/integer types"
-        },
-        "prefix": {
-          "type": "string"
-        },
-        "suffix": {
-          "type": "string"
-        },
-        "transform": {
-          "$ref": "#/definitions/v1FieldTransform"
-        }
-      },
-      "description": "FieldFormat describes the formatting rules for a rendered field value."
-    },
-    "v1FieldRendererConfig": {
-      "type": "object",
-      "properties": {
-        "keys": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "label": {
-          "type": "string"
-        },
-        "format": {
-          "$ref": "#/definitions/v1FieldFormat"
-        },
-        "priority": {
+        "refreshIntervalSeconds": {
           "type": "integer",
           "format": "int32"
-        }
-      },
-      "description": "FieldRendererConfig defines how a metadata field is displayed in the UI."
-    },
-    "v1FieldTransform": {
-      "type": "string",
-      "enum": [
-        "FIELD_TRANSFORM_UNSPECIFIED",
-        "FIELD_TRANSFORM_UPPER",
-        "FIELD_TRANSFORM_LOWER"
-      ],
-      "default": "FIELD_TRANSFORM_UNSPECIFIED",
-      "description": "FieldTransform defines text transformation for string fields."
-    },
-    "v1FieldType": {
-      "type": "string",
-      "enum": [
-        "FIELD_TYPE_UNSPECIFIED",
-        "FIELD_TYPE_STRING",
-        "FIELD_TYPE_FLOAT",
-        "FIELD_TYPE_INTEGER",
-        "FIELD_TYPE_RAW"
-      ],
-      "default": "FIELD_TYPE_UNSPECIFIED",
-      "description": "FieldType defines the data type of a rendered field value."
-    },
-    "v1FilteringMode": {
-      "type": "string",
-      "enum": [
-        "FILTERING_MODE_UNSPECIFIED",
-        "FILTERING_MODE_VIEWPORT"
-      ],
-      "default": "FILTERING_MODE_UNSPECIFIED",
-      "description": "FilteringMode defines how a layer delivers data to clients."
-    },
-    "v1GetLayerSnapshotResponse": {
-      "type": "object",
-      "properties": {
-        "entities": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "$ref": "#/definitions/v1Entity"
-          }
         },
-        "observations": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "$ref": "#/definitions/v1Observation"
-          }
-        },
-        "totalCount": {
-          "type": "string",
-          "format": "int64",
-          "title": "Total available entities"
-        },
-        "hasMore": {
-          "type": "boolean",
-          "title": "More entities available"
+        "cacheBustParam": {
+          "type": "string"
         }
       }
-    },
-    "v1GetLayersResponse": {
-      "type": "object",
-      "properties": {
-        "layers": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "$ref": "#/definitions/v1Layer"
-          }
-        }
-      }
-    },
-    "v1HistoryConfig": {
-      "type": "object",
-      "properties": {
-        "maxLookbackHours": {
-          "type": "integer",
-          "format": "int32",
-          "title": "Max hours into the past (0 = server default 48h)"
-        },
-        "maxRangeSpanHours": {
-          "type": "integer",
-          "format": "int32",
-          "title": "Max hours per query window (0 = server default 24h)"
-        }
-      },
-      "description": "HistoryConfig defines per-layer time range limits for historical exploration.\nWhen present, the frontend custom range picker uses these limits instead of the server defaults.\nZero values mean \"use server default\"."
-    },
-    "v1IconConfig": {
-      "type": "object",
-      "properties": {
-        "shape": {
-          "type": "string",
-          "title": "Free-form shape name (e.g. \"flight\", \"ship\", \"missile\")"
-        },
-        "rotatable": {
-          "type": "boolean"
-        },
-        "interpolation": {
-          "type": "boolean",
-          "title": "Dead-reckoning motion interpolation"
-        },
-        "scale": {
-          "type": "number",
-          "format": "double"
-        }
-      },
-      "description": "IconConfig defines icon rendering properties for entities on the globe."
-    },
-    "v1Layer": {
-      "type": "object",
-      "properties": {
-        "id": {
-          "type": "string"
-        },
-        "name": {
-          "type": "string"
-        },
-        "type": {
-          "type": "string",
-          "title": "Dynamic layer type string (e.g. flights_commercial, satellites)"
-        },
-        "enabled": {
-          "type": "boolean"
-        },
-        "mode": {
-          "$ref": "#/definitions/v1LayerMode"
-        },
-        "density": {
-          "type": "integer",
-          "format": "int32",
-          "title": "0-100"
-        },
-        "source": {
-          "type": "string"
-        },
-        "lastUpdate": {
-          "type": "string",
-          "format": "int64",
-          "title": "Unix timestamp in milliseconds"
-        },
-        "count": {
-          "type": "string",
-          "format": "int64",
-          "title": "Entity count (for high-volume layers)"
-        },
-        "color": {
-          "type": "string",
-          "title": "CSS color string for rendering (e.g., \"#00ff9d\")"
-        },
-        "pointSize": {
-          "type": "integer",
-          "format": "int32",
-          "title": "Point size in pixels for rendering"
-        },
-        "displayConfig": {
-          "$ref": "#/definitions/v1LayerDisplayConfig",
-          "title": "Display configuration from declarative source YAML"
-        },
-        "historyConfig": {
-          "$ref": "#/definitions/v1HistoryConfig",
-          "title": "Per-layer time range limits (nil = server defaults: 48h lookback, 24h span)"
-        },
-        "renderingMode": {
-          "$ref": "#/definitions/v1RenderingMode",
-          "title": "Determines frontend rendering strategy"
-        },
-        "filteringMode": {
-          "$ref": "#/definitions/v1FilteringMode",
-          "title": "When FILTERING_MODE_VIEWPORT, frontend sends camera bounds for progressive loading"
-        }
-      },
-      "title": "Layer represents a configurable data layer"
-    },
-    "v1LayerDisplayConfig": {
-      "type": "object",
-      "properties": {
-        "icon": {
-          "$ref": "#/definitions/v1IconConfig"
-        },
-        "trail": {
-          "$ref": "#/definitions/v1TrailConfig"
-        },
-        "style": {
-          "$ref": "#/definitions/v1StyleConfig"
-        },
-        "fieldRenderers": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "$ref": "#/definitions/v1FieldRendererConfig"
-          }
-        },
-        "colorBy": {
-          "$ref": "#/definitions/v1ColorByConfig",
-          "title": "optional: derive entity color from a metadata field's value"
-        }
-      },
-      "description": "LayerDisplayConfig holds rendering metadata for a layer, populated from declarative source definitions."
-    },
-    "v1LayerMode": {
-      "type": "string",
-      "enum": [
-        "LAYER_MODE_UNSPECIFIED",
-        "LAYER_MODE_SPARSE",
-        "LAYER_MODE_FULL"
-      ],
-      "default": "LAYER_MODE_UNSPECIFIED",
-      "description": "LayerMode defines the density mode for a layer."
-    },
-    "v1LayerToggle": {
-      "type": "object",
-      "properties": {
-        "layerId": {
-          "type": "string"
-        },
-        "enabled": {
-          "type": "boolean"
-        },
-        "mode": {
-          "$ref": "#/definitions/v1LayerMode"
-        },
-        "density": {
-          "type": "integer",
-          "format": "int32",
-          "title": "0-100"
-        }
-      }
-    },
-    "v1RenderingMode": {
-      "type": "string",
-      "enum": [
-        "RENDERING_MODE_UNSPECIFIED",
-        "RENDERING_MODE_MAP",
-        "RENDERING_MODE_INDICATOR"
-      ],
-      "default": "RENDERING_MODE_UNSPECIFIED",
-      "description": "RenderingMode defines how the frontend renders a layer."
     },
     "v1StyleConfig": {
       "type": "object",

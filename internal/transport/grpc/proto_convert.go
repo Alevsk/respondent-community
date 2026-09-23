@@ -95,6 +95,18 @@ func domainDisplayConfigToProto(dc *domain.LayerDisplayConfig) *respondentv1.Lay
 			DefaultColor: dc.ColorBy.DefaultColor,
 		}
 	}
+	for _, m := range dc.Media {
+		pm := &respondentv1.MediaConfig{Id: m.ID, Kind: m.Kind, Label: m.Label, UrlKey: m.URLKey, AttributionKey: m.AttributionKey, AllowedOrigins: m.AllowedOrigins, PlaybackAction: m.PlaybackAction}
+		switch m.Kind {
+		case "snapshot":
+			if m.Snapshot != nil {
+				pm.Options = &respondentv1.MediaConfig_Snapshot{Snapshot: &respondentv1.SnapshotMediaConfig{RefreshIntervalSeconds: m.Snapshot.RefreshIntervalSeconds, CacheBustParam: m.Snapshot.CacheBustParam}}
+			}
+		case "audio":
+			pm.Options = &respondentv1.MediaConfig_Audio{Audio: &respondentv1.AudioMediaConfig{}}
+		}
+		pdc.Media = append(pdc.Media, pm)
+	}
 	return pdc
 }
 

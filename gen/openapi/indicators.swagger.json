@@ -6,7 +6,8 @@
   },
   "tags": [
     {
-      "name": "IndicatorService"
+      "name": "IndicatorService",
+      "description": "IndicatorService provides access to global indicator data."
     }
   ],
   "consumes": [
