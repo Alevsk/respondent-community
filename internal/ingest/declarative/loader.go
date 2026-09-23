@@ -600,6 +600,19 @@ func (l *Loader) compileCEL(def *SourceDefinition, resolvedHeaders map[string]st
 		}
 	}
 
+	// Compile media_actions path expressions (optional). Each uses a dedicated
+	// environment whose only variable is the entity's merged metadata map.
+	if len(def.MediaActions) > 0 {
+		cs.mediaActions = make(map[string]cel.Program, len(def.MediaActions))
+		for _, a := range def.MediaActions {
+			prg, compileErr := l.compiler.CompileMediaActionPath(strings.TrimSpace(a.Path))
+			if compileErr != nil {
+				return nil, fmt.Errorf("compile media_actions[%s].path: %w", a.Name, compileErr)
+			}
+			cs.mediaActions[a.Name] = prg
+		}
+	}
+
 	// Compile entity cache key (optional, v2)
 	if def.EntityCache != nil && def.EntityCache.Key != "" {
 		cs.entityCacheKey, err = compile(strings.TrimSpace(def.EntityCache.Key))
