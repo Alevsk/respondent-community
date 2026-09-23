@@ -8,18 +8,39 @@ import (
 	"github.com/Alevsk/respondent/internal/domain"
 )
 
+// stubEntities implements only the two EntityRepository methods the media
+// service reaches; the rest panic, so a widened dependency fails loudly.
 type stubEntities struct {
-	detail *domain.EntityDetail
+	domain.EntityRepository
+	entity *domain.Entity
 	err    error
 	gotID  string
 }
 
-func (s *stubEntities) GetEntityDetail(_ context.Context, entityID string) (*domain.EntityDetail, error) {
-	s.gotID = entityID
+func (s *stubEntities) GetByExternalID(_ context.Context, layerType, externalID string) (*domain.Entity, error) {
+	s.gotID = layerType + ":" + externalID
 	if s.err != nil {
 		return nil, s.err
 	}
-	return s.detail, nil
+	return s.entity, nil
+}
+
+func (s *stubEntities) GetByID(_ context.Context, id string) (*domain.Entity, error) {
+	s.gotID = id
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.entity, nil
+}
+
+type stubObservations struct {
+	domain.ObservationRepository
+	latest *domain.Observation
+	err    error
+}
+
+func (s *stubObservations) GetLatest(_ context.Context, _ string) (*domain.Observation, error) {
+	return s.latest, s.err
 }
 
 type stubDisplay struct {
@@ -53,17 +74,15 @@ func (s *stubActions) ExecuteMediaAction(_ context.Context, _ *domain.MediaPlayb
 	return s.executeErr
 }
 
-func radioFixture() (*stubEntities, *stubDisplay) {
-	entities := &stubEntities{detail: &domain.EntityDetail{
-		Entity: &domain.Entity{
-			ID:         "uuid-1",
-			ExternalID: "station-1",
-			LayerType:  "radio_stations",
-			Metadata:   map[string]string{"station_uuid": "from-entity", "codec": "MP3"},
-		},
-		LatestObservation: &domain.Observation{
-			Metadata: map[string]string{"station_uuid": "from-observation"},
-		},
+func radioFixture() (*stubEntities, *stubObservations, *stubDisplay) {
+	entities := &stubEntities{entity: &domain.Entity{
+		ID:         "uuid-1",
+		ExternalID: "station-1",
+		LayerType:  "radio_stations",
+		Metadata:   map[string]string{"station_uuid": "from-entity", "codec": "MP3"},
+	}}
+	observations := &stubObservations{latest: &domain.Observation{
+		Metadata: map[string]string{"station_uuid": "from-observation"},
 	}}
 	display := &stubDisplay{configs: map[domain.LayerType]*domain.LayerDisplayConfig{
 		"radio_stations": {Media: []domain.MediaConfig{
@@ -71,13 +90,13 @@ func radioFixture() (*stubEntities, *stubDisplay) {
 			{ID: "silent", Kind: "audio", Label: "No notification", URLKey: "stream_url"},
 		}},
 	}}
-	return entities, display
+	return entities, observations, display
 }
 
 func TestReportPlaybackNotifiesUsingMergedMetadata(t *testing.T) {
-	entities, display := radioFixture()
+	entities, observations, display := radioFixture()
 	actions := &stubActions{}
-	svc := NewService(entities, display, actions, actions)
+	svc := NewService(entities, observations, display, actions, actions)
 
 	reported, err := svc.ReportPlayback(context.Background(), "radio_stations:station-1", "radio")
 	if err != nil {
@@ -106,10 +125,10 @@ func TestReportPlaybackNotifiesUsingMergedMetadata(t *testing.T) {
 
 func TestReportPlaybackRejectsUnknownEntityOrMedia(t *testing.T) {
 	t.Run("unknown entity", func(t *testing.T) {
-		entities, display := radioFixture()
+		entities, observations, display := radioFixture()
 		entities.err = domain.NewNotFoundError("entity not found", nil)
 		actions := &stubActions{}
-		if _, err := NewService(entities, display, actions, actions).
+		if _, err := NewService(entities, observations, display, actions, actions).
 			ReportPlayback(context.Background(), "radio_stations:nope", "radio"); err == nil {
 			t.Error("reported playback for an entity that does not exist")
 		}
@@ -119,9 +138,9 @@ func TestReportPlaybackRejectsUnknownEntityOrMedia(t *testing.T) {
 	})
 
 	t.Run("unknown media id", func(t *testing.T) {
-		entities, display := radioFixture()
+		entities, observations, display := radioFixture()
 		actions := &stubActions{}
-		if _, err := NewService(entities, display, actions, actions).
+		if _, err := NewService(entities, observations, display, actions, actions).
 			ReportPlayback(context.Background(), "radio_stations:station-1", "not-declared"); err == nil {
 			t.Error("reported playback for a media id the layer never declared")
 		}
@@ -131,19 +150,19 @@ func TestReportPlaybackRejectsUnknownEntityOrMedia(t *testing.T) {
 	})
 
 	t.Run("layer without display config", func(t *testing.T) {
-		entities, display := radioFixture()
-		entities.detail.Entity.LayerType = "unregistered"
+		entities, observations, display := radioFixture()
+		entities.entity.LayerType = "unregistered"
 		actions := &stubActions{}
-		if _, err := NewService(entities, display, actions, actions).
+		if _, err := NewService(entities, observations, display, actions, actions).
 			ReportPlayback(context.Background(), "unregistered:x", "radio"); err == nil {
 			t.Error("reported playback for a layer with no display config")
 		}
 	})
 
 	t.Run("empty ids", func(t *testing.T) {
-		entities, display := radioFixture()
+		entities, observations, display := radioFixture()
 		actions := &stubActions{}
-		svc := NewService(entities, display, actions, actions)
+		svc := NewService(entities, observations, display, actions, actions)
 		if _, err := svc.ReportPlayback(context.Background(), "", "radio"); err == nil {
 			t.Error("accepted an empty entity id")
 		}
@@ -156,9 +175,9 @@ func TestReportPlaybackRejectsUnknownEntityOrMedia(t *testing.T) {
 // A media slot with no declared playback_action is a no-op, not an error: the
 // UI may call this for any media entry and must not be told the entity is bad.
 func TestReportPlaybackIsANoOpWithoutADeclaredAction(t *testing.T) {
-	entities, display := radioFixture()
+	entities, observations, display := radioFixture()
 	actions := &stubActions{}
-	reported, err := NewService(entities, display, actions, actions).
+	reported, err := NewService(entities, observations, display, actions, actions).
 		ReportPlayback(context.Background(), "radio_stations:station-1", "silent")
 	if err != nil {
 		t.Fatalf("ReportPlayback: %v", err)
@@ -179,8 +198,8 @@ func TestReportPlaybackSurfacesUpstreamFailureWithoutError(t *testing.T) {
 		"upstream request failed":   {executeErr: errors.New("connection refused")},
 	} {
 		t.Run(name, func(t *testing.T) {
-			entities, display := radioFixture()
-			reported, err := NewService(entities, display, actions, actions).
+			entities, observations, display := radioFixture()
+			reported, err := NewService(entities, observations, display, actions, actions).
 				ReportPlayback(context.Background(), "radio_stations:station-1", "radio")
 			if err != nil {
 				t.Fatalf("upstream failure became an API error: %v", err)
@@ -195,9 +214,9 @@ func TestReportPlaybackSurfacesUpstreamFailureWithoutError(t *testing.T) {
 // The use case takes an entity id and a media id and returns a boolean. There
 // is no seam for a caller-supplied URL, header or expression.
 func TestReportPlaybackTakesNoCallerSuppliedTarget(t *testing.T) {
-	entities, display := radioFixture()
+	entities, observations, display := radioFixture()
 	actions := &stubActions{}
-	svc := NewService(entities, display, actions, actions)
+	svc := NewService(entities, observations, display, actions, actions)
 
 	// A caller stuffing a URL into either identifier resolves nothing.
 	if _, err := svc.ReportPlayback(context.Background(), "https://evil.example.com/steal", "radio"); err == nil {

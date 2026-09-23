@@ -336,7 +336,8 @@ func runServe(ctx context.Context) error {
 		return fmt.Errorf("build media action registry: %w", err)
 	}
 	mediaService := media.NewService(
-		entityService,
+		entityRepo,
+		obsRepo,
 		dynReg,
 		mediaActions,
 		mediaActions,

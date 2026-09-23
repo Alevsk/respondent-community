@@ -42,16 +42,7 @@ func NewEntityService(
 // or a raw UUID (e.g. from AI insight entity refs). Composite keys are parsed and
 // looked up by (layer_type, external_id); UUIDs are looked up directly by primary key.
 func (s *EntityService) GetEntityDetail(ctx context.Context, entityID string) (*domain.EntityDetail, error) {
-	var entity *domain.Entity
-	var err error
-
-	layerType, externalID := domain.ParseEntityID(entityID)
-	if layerType != "" && externalID != "" {
-		entity, err = s.entities.GetByExternalID(ctx, string(layerType), externalID)
-	} else {
-		// Assume raw UUID — used by AI insight entity refs.
-		entity, err = s.entities.GetByID(ctx, entityID)
-	}
+	entity, err := domain.ResolveEntity(ctx, s.entities, entityID)
 	if err != nil {
 		return nil, err
 	}

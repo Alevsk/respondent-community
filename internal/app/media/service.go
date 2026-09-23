@@ -17,14 +17,10 @@ import (
 	"github.com/Alevsk/respondent/internal/domain"
 )
 
-// EntityDetailLookup resolves a stored entity and its latest observation.
-type EntityDetailLookup interface {
-	GetEntityDetail(ctx context.Context, entityID string) (*domain.EntityDetail, error)
-}
-
-// DisplayConfigLookup resolves a layer's declared display configuration,
-// including its media slots.
-type DisplayConfigLookup interface {
+// SourceRegistry is the read-only view of declarative layer metadata the media
+// service depends on. *domain.DynamicSourceRegistry satisfies it; depending on
+// the interface keeps the service decoupled from the concrete registry (DIP).
+type SourceRegistry interface {
 	LookupDisplayConfig(lt domain.LayerType) (*domain.LayerDisplayConfig, bool)
 }
 
@@ -36,19 +32,24 @@ var mediaIDRE = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
 const maxEntityIDLen = 1024
 
 // Service reports user-initiated playback starts to the owning source.
+// It depends on repository and registry interfaces rather than on other
+// services, so the only thing above it in the dependency graph is the
+// composition root.
 type Service struct {
-	entities EntityDetailLookup
-	display  DisplayConfigLookup
-	resolver domain.MediaActionResolver
-	executor domain.MediaActionExecutor
-	logger   zerolog.Logger
+	entities     domain.EntityRepository
+	observations domain.ObservationRepository
+	registry     SourceRegistry
+	resolver     domain.MediaActionResolver
+	executor     domain.MediaActionExecutor
+	logger       zerolog.Logger
 }
 
 // NewService creates a Service from its ports. The optional logger variadic
 // matches the other app services.
 func NewService(
-	entities EntityDetailLookup,
-	display DisplayConfigLookup,
+	entities domain.EntityRepository,
+	observations domain.ObservationRepository,
+	registry SourceRegistry,
 	resolver domain.MediaActionResolver,
 	executor domain.MediaActionExecutor,
 	logger ...zerolog.Logger,
@@ -57,7 +58,14 @@ func NewService(
 	if len(logger) > 0 {
 		l = logger[0]
 	}
-	return &Service{entities: entities, display: display, resolver: resolver, executor: executor, logger: l}
+	return &Service{
+		entities:     entities,
+		observations: observations,
+		registry:     registry,
+		resolver:     resolver,
+		executor:     executor,
+		logger:       l,
+	}
 }
 
 // ReportPlayback notifies the source that a user started playing the given
@@ -76,16 +84,16 @@ func (s *Service) ReportPlayback(ctx context.Context, entityID, mediaID string) 
 		return false, domain.NewInvalidInputError("invalid media id", nil)
 	}
 
-	detail, err := s.entities.GetEntityDetail(ctx, entityID)
+	entity, err := domain.ResolveEntity(ctx, s.entities, entityID)
 	if err != nil {
 		return false, err
 	}
-	if detail == nil || detail.Entity == nil {
+	if entity == nil {
 		return false, domain.NewNotFoundError("entity not found", nil)
 	}
 
-	layerType := domain.LayerType(detail.Entity.LayerType)
-	display, ok := s.display.LookupDisplayConfig(layerType)
+	layerType := domain.LayerType(entity.LayerType)
+	display, ok := s.registry.LookupDisplayConfig(layerType)
 	if !ok || display == nil {
 		return false, domain.NewNotFoundError("layer declares no media", nil)
 	}
@@ -106,7 +114,16 @@ func (s *Service) ReportPlayback(ctx context.Context, entityID, mediaID string) 
 		return false, nil
 	}
 
-	action, err := s.resolver.ResolveMediaAction(layerType, media.PlaybackAction, mergedMetadata(detail))
+	// The observation is supplementary: a station with no observation yet can
+	// still be reported from its entity metadata alone.
+	latest, err := s.observations.GetLatest(ctx, entity.ID)
+	if err != nil {
+		s.logger.Warn().Err(err).
+			Str("entity_id", entity.ID).
+			Msg("failed to fetch latest observation for playback notification")
+	}
+
+	action, err := s.resolver.ResolveMediaAction(layerType, media.PlaybackAction, mergedMetadata(entity, latest))
 	if err != nil {
 		s.logger.Warn().Err(err).
 			Str("layer_type", string(layerType)).
@@ -128,13 +145,13 @@ func (s *Service) ReportPlayback(ctx context.Context, entityID, mediaID string) 
 
 // mergedMetadata combines entity and latest-observation metadata with the same
 // precedence the entity overview uses: the latest observation wins.
-func mergedMetadata(detail *domain.EntityDetail) map[string]string {
-	merged := make(map[string]string, len(detail.Entity.Metadata))
-	for k, v := range detail.Entity.Metadata {
+func mergedMetadata(entity *domain.Entity, latest *domain.Observation) map[string]string {
+	merged := make(map[string]string, len(entity.Metadata))
+	for k, v := range entity.Metadata {
 		merged[k] = v
 	}
-	if detail.LatestObservation != nil {
-		for k, v := range detail.LatestObservation.Metadata {
+	if latest != nil {
+		for k, v := range latest.Metadata {
 			merged[k] = v
 		}
 	}

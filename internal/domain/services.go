@@ -86,6 +86,11 @@ type IndicatorServicer interface {
 	GetGlobalIndicators(ctx context.Context, layerIDs []string) ([]IndicatorSnapshot, error)
 }
 
+// MediaServicer abstracts the media application service.
+type MediaServicer interface {
+	ReportPlayback(ctx context.Context, entityID, mediaID string) (bool, error)
+}
+
 // AIServicer abstracts the AI application service.
 type AIServicer interface {
 	NaturalLanguageSearch(ctx context.Context, query string, layerType string, limit int) (*NLSearchResponse, error)

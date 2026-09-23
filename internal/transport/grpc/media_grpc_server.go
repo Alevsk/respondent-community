@@ -6,14 +6,8 @@ import (
 	"github.com/rs/zerolog"
 
 	respondentv1 "github.com/Alevsk/respondent/gen/go"
+	"github.com/Alevsk/respondent/internal/domain"
 )
-
-// MediaPlaybackReporter is the use case behind MediaService. It is defined
-// here, at the consumer, so the transport depends on a behaviour rather than
-// on the app package's concrete type.
-type MediaPlaybackReporter interface {
-	ReportPlayback(ctx context.Context, entityID, mediaID string) (bool, error)
-}
 
 // MediaServer implements the MediaService gRPC interface.
 //
@@ -22,13 +16,13 @@ type MediaPlaybackReporter interface {
 // the source definition the server already trusts.
 type MediaServer struct {
 	respondentv1.UnimplementedMediaServiceServer
-	svc    MediaPlaybackReporter
+	svc    domain.MediaServicer
 	logger zerolog.Logger
 }
 
 // NewMediaServer creates a new MediaServer.
 // The optional logger variadic allows callers to inject a zerolog.Logger.
-func NewMediaServer(svc MediaPlaybackReporter, logger ...zerolog.Logger) *MediaServer {
+func NewMediaServer(svc domain.MediaServicer, logger ...zerolog.Logger) *MediaServer {
 	l := zerolog.Nop()
 	if len(logger) > 0 {
 		l = logger[0]
