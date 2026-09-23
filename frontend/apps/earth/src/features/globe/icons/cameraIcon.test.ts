@@ -25,11 +25,13 @@ function createMockContext(): CanvasRenderingContext2D {
 }
 
 describe('drawCameraIcon', () => {
-  it('draws the view cone, mount, body and lens in the requested color', () => {
+  it('draws the view cone, bracket, body and lens in the requested color', () => {
     const ctx = createMockContext();
     drawCameraIcon(ctx, '#00ff9d');
     expect(ctx.fillStyle).toBe('#00ff9d');
-    expect(ctx.fill).toHaveBeenCalledTimes(5);
+    // One fill each: cone, bracket, body, lens. The bracket is a single solid
+    // L so it cannot break into specks at billboard size.
+    expect(ctx.fill).toHaveBeenCalledTimes(4);
   });
 
   it('restores full opacity after the translucent view cone', () => {
