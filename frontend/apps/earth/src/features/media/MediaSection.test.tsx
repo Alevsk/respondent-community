@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, cleanup } from '@testing-library/react';
+import { act, fireEvent, render, screen, cleanup, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EntityDetailResponse, Layer, MediaConfig } from '@respondent/core';
 import { useUIStore } from '@/app/store';
@@ -181,6 +181,57 @@ describe('declarative media panel integration', () => {
     act(() => useUIStore.setState({ enabledLayers: [] }));
     act(() => vi.advanceTimersByTime(60_000));
     expect(images).toHaveLength(4);
+  });
+
+  it('opens the frame full size on click, keeps it refreshing, and closes again', () => {
+    render(<MediaProvider>{overview()}</MediaProvider>);
+    visible();
+    expect(images).toHaveLength(1);
+    act(() => images[0].dispatchEvent(new Event('load')));
+
+    // No dialog until the user asks for one.
+    expect(screen.queryByTestId('media-snapshot-expanded')).not.toBeInTheDocument();
+
+    // Clicking the picture is the pointer affordance the Expand button names.
+    fireEvent.click(screen.getByTestId('media-frame-camera'));
+    const dialog = screen.getByTestId('media-snapshot-expanded');
+    expect(dialog).toBeInTheDocument();
+    // The expanded view shows the frame the running session already loaded —
+    // it must not start a second one.
+    expect(images).toHaveLength(1);
+    expect(within(dialog).getByRole('img')).toHaveAttribute(
+      'src',
+      'https://camera.example.example/latest'.replace('.example.example', '.example'),
+    );
+    expect(within(dialog).getByText('Public station')).toBeInTheDocument();
+
+    // The camera keeps refreshing behind the dialog on its own cadence.
+    act(() => vi.advanceTimersByTime(5_000));
+    expect(images).toHaveLength(2);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close expanded camera' }));
+    act(() => vi.advanceTimersByTime(500));
+    expect(screen.queryByTestId('media-snapshot-expanded')).not.toBeInTheDocument();
+  });
+
+  it('closes the expanded frame on Escape and when its layer is disabled', () => {
+    render(<MediaProvider>{overview()}</MediaProvider>);
+    visible();
+    act(() => images[0].dispatchEvent(new Event('load')));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Expand Harbour view' }));
+    expect(screen.getByTestId('media-snapshot-expanded')).toBeInTheDocument();
+    fireEvent.keyDown(screen.getByTestId('media-snapshot-expanded'), { key: 'Escape' });
+    act(() => vi.advanceTimersByTime(500));
+    expect(screen.queryByTestId('media-snapshot-expanded')).not.toBeInTheDocument();
+
+    // A camera that stops being viewable must not leave a dialog of a frozen
+    // frame on screen.
+    fireEvent.click(screen.getByRole('button', { name: 'Expand Harbour view' }));
+    expect(screen.getByTestId('media-snapshot-expanded')).toBeInTheDocument();
+    act(() => useUIStore.setState({ enabledLayers: [] }));
+    act(() => vi.advanceTimersByTime(500));
+    expect(screen.queryByTestId('media-snapshot-expanded')).not.toBeInTheDocument();
   });
 
   it('keeps audio when entity panel closes, labels it LIVE in history, and releases on layer disable', () => {

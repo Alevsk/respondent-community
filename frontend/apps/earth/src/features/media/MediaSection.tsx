@@ -7,8 +7,8 @@
  */
 
 import React, { useEffect, useRef, useState } from 'react';
-import { Box, Button, IconButton, Tooltip, Typography } from '@mui/material';
-import { Camera, Pause, Play, RefreshCw } from 'lucide-react';
+import { Box, Button, Dialog, IconButton, Tooltip, Typography } from '@mui/material';
+import { Camera, Maximize2, Pause, Play, RefreshCw, X } from 'lucide-react';
 import { alpha, theme, DASHBOARD_TYPOGRAPHY, formatRelativeTime } from '@respondent/core';
 import type { MediaConfig, SnapshotOptions } from '@respondent/core';
 import { useUIStore } from '@/app/store';
@@ -98,6 +98,7 @@ const SnapshotCard: React.FC<SnapshotCardProps> = ({ entityId, layerType, item, 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [onScreen, setOnScreen] = useState(false);
   const [paused, setPaused] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const [frame, setFrame] = useState<{
     src: string;
     at: number | null;
@@ -176,36 +177,60 @@ const SnapshotCard: React.FC<SnapshotCardProps> = ({ entityId, layerType, item, 
   const unavailable = item.url === null;
   const label = item.config.label;
 
+  // A dialog outlives the thing it shows unless something closes it. When the
+  // camera stops being viewable — its layer switched off, the panel collapsed,
+  // the slot handed to another camera — the expanded frame would otherwise sit
+  // there frozen, looking live.
+  const viewable = owns && !unavailable;
+  useEffect(() => {
+    if (!viewable) setExpanded(false);
+  }, [viewable]);
+
   return (
     <Box ref={containerRef} sx={{ mb: 1 }} data-testid={`media-snapshot-${item.config.id}`}>
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
         <Typography variant="caption" sx={{ ...captionSx, color: 'text.primary', fontWeight: 600 }}>
           {label}
         </Typography>
-        {!unavailable &&
-          (owns ? (
-            <Tooltip title={paused ? 'Resume refresh' : 'Pause refresh'} placement="top" arrow>
+        {/* One group, so space-between puts the label at one end and the
+            controls at the other instead of spreading them across the row. */}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.25, flexShrink: 0 }}>
+          {!unavailable && owns && frame.src && (
+            <Tooltip title="Expand" placement="top" arrow>
               <IconButton
                 size="small"
-                aria-label={paused ? `Resume ${label}` : `Pause ${label}`}
-                onClick={() => setPaused((p) => !p)}
+                aria-label={`Expand ${label}`}
+                onClick={() => setExpanded(true)}
               >
-                {paused ? <Play size={12} /> : <Pause size={12} />}
+                <Maximize2 size={12} />
               </IconButton>
             </Tooltip>
-          ) : (
-            <Button
-              size="small"
-              variant="text"
-              startIcon={<RefreshCw size={12} />}
-              onClick={() => {
-                setPaused(false);
-                claimSnapshot(slotKey, true);
-              }}
-            >
-              View camera
-            </Button>
-          ))}
+          )}
+          {!unavailable &&
+            (owns ? (
+              <Tooltip title={paused ? 'Resume refresh' : 'Pause refresh'} placement="top" arrow>
+                <IconButton
+                  size="small"
+                  aria-label={paused ? `Resume ${label}` : `Pause ${label}`}
+                  onClick={() => setPaused((p) => !p)}
+                >
+                  {paused ? <Play size={12} /> : <Pause size={12} />}
+                </IconButton>
+              </Tooltip>
+            ) : (
+              <Button
+                size="small"
+                variant="text"
+                startIcon={<RefreshCw size={12} />}
+                onClick={() => {
+                  setPaused(false);
+                  claimSnapshot(slotKey, true);
+                }}
+              >
+                View camera
+              </Button>
+            ))}
+        </Box>
       </Box>
 
       <Box
@@ -228,7 +253,19 @@ const SnapshotCard: React.FC<SnapshotCardProps> = ({ entityId, layerType, item, 
             src={frame.src}
             alt={label}
             referrerPolicy="no-referrer"
-            sx={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
+            // Clicking the picture is a convenience for pointer users. The
+            // Expand button beside the label is the real control, so there is
+            // exactly one thing a screen reader announces and one thing to tab
+            // to — two controls sharing a name would announce as duplicates.
+            onClick={() => setExpanded(true)}
+            data-testid={`media-frame-${item.config.id}`}
+            sx={{
+              width: '100%',
+              height: '100%',
+              objectFit: 'contain',
+              display: 'block',
+              cursor: 'zoom-in',
+            }}
           />
         ) : (
           <Typography variant="caption" sx={captionSx}>
@@ -277,6 +314,77 @@ const SnapshotCard: React.FC<SnapshotCardProps> = ({ entityId, layerType, item, 
           </Typography>
         )}
       </Box>
+
+      {/* The expanded frame renders the same `frame.src` the running session
+          produces, so it keeps updating on the camera's own cadence without a
+          second session or a second request. MUI's Dialog brings the focus trap
+          and Escape handling with it. */}
+      <Dialog
+        open={expanded}
+        onClose={() => setExpanded(false)}
+        maxWidth="lg"
+        fullWidth
+        aria-label={`${label} expanded`}
+        PaperProps={{ 'data-testid': 'media-snapshot-expanded' }}
+      >
+        <Box sx={{ position: 'relative', backgroundColor: theme.palette.common.black }}>
+          <Box
+            component="img"
+            src={frame.src}
+            alt={label}
+            referrerPolicy="no-referrer"
+            sx={{
+              width: '100%',
+              height: 'auto',
+              maxHeight: '80vh',
+              objectFit: 'contain',
+              display: 'block',
+            }}
+          />
+          <IconButton
+            aria-label="Close expanded camera"
+            // Without this, MUI parks focus on its trap container and a
+            // keyboard user opens the dialog onto nothing actionable.
+            autoFocus
+            onClick={() => setExpanded(false)}
+            sx={{
+              position: 'absolute',
+              top: 8,
+              right: 8,
+              color: 'common.white',
+              backgroundColor: alpha(theme.palette.common.black, 0.55),
+              '&:hover': { backgroundColor: alpha(theme.palette.common.black, 0.75) },
+            }}
+          >
+            <X size={18} />
+          </IconButton>
+        </Box>
+        <Box
+          sx={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            gap: 2,
+            px: 1.5,
+            py: 1,
+            flexWrap: 'wrap',
+          }}
+        >
+          <Typography
+            variant="caption"
+            sx={{ ...captionSx, color: 'text.primary', fontWeight: 600 }}
+          >
+            {label}
+          </Typography>
+          <Typography variant="caption" sx={captionSx}>
+            {item.attribution}
+          </Typography>
+          {frame.at !== null && (
+            <Typography variant="caption" sx={captionSx}>
+              Last loaded {formatRelativeTime(frame.at)}
+            </Typography>
+          )}
+        </Box>
+      </Dialog>
     </Box>
   );
 };
