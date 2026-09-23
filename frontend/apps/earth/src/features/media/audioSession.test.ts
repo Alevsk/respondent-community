@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import { AudioSession, type AudioStation } from './audioSession';
+import type { ReportMediaPlaybackRequest, ReportMediaPlaybackResponse } from '@respondent/core';
 
 const station: AudioStation = {
   entityId: 'station:1',
@@ -15,7 +16,7 @@ describe('app audio session', () => {
   let audio: HTMLAudioElement;
   let session: AudioSession;
   let factory: Mock<() => HTMLAudioElement>;
-  let report: Mock<(body: { entityId: string; mediaId: string }) => Promise<unknown>>;
+  let report: Mock<(body: ReportMediaPlaybackRequest) => Promise<ReportMediaPlaybackResponse>>;
   beforeEach(() => {
     audio = document.createElement('audio');
     audio.play = vi.fn().mockResolvedValue(undefined);

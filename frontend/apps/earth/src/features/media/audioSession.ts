@@ -1,5 +1,6 @@
 import { createStore } from 'zustand/vanilla';
 import { api, endpoints } from '@respondent/core';
+import type { ReportMediaPlaybackRequest, ReportMediaPlaybackResponse } from '@respondent/core';
 import { validateMediaUrl } from './mediaUrls';
 
 export interface AudioStation {
@@ -34,8 +35,9 @@ export class AudioSession {
 
   constructor(
     private createAudio: () => HTMLAudioElement = () => new Audio(),
-    private report: (body: { entityId: string; mediaId: string }) => Promise<unknown> = (body) =>
-      api.post(endpoints.mediaPlayback, body),
+    private report: (body: ReportMediaPlaybackRequest) => Promise<ReportMediaPlaybackResponse> = (
+      body,
+    ) => api.post<ReportMediaPlaybackResponse>(endpoints.mediaPlayback, body),
   ) {}
 
   play(station: AudioStation) {

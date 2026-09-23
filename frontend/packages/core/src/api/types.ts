@@ -83,6 +83,23 @@ export interface LayerToggleRequest {
   density?: number;
 }
 
+// ---------------------------------------------------------------------------
+// Media playback notification (POST /v1/media/playback)
+// Mirrors v1ReportMediaPlaybackRequest / v1ReportMediaPlaybackResponse in the
+// generated OpenAPI spec. The request names a stored entity and one of the
+// media slots its layer declares — there is deliberately no field for a URL.
+// ---------------------------------------------------------------------------
+
+export interface ReportMediaPlaybackRequest {
+  entityId: string;
+  mediaId: string;
+}
+
+export interface ReportMediaPlaybackResponse {
+  /** Whether the source was notified. False is not an error. */
+  reported: boolean;
+}
+
 export interface Scene {
   id: string;
   name: string;
