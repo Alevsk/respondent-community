@@ -1,0 +1,14 @@
+[
+  {
+    "camera_id": "1",
+    "location_name": "830 BLK W RUNDBERG LN (Little Walnut Creek Library, HEB)",
+    "camera_status": "TURNED_ON",
+    "camera_mfg": "Wisenet",
+    "landmark": "Little Walnut Creek Library, HEB",
+    "signal_eng_area": "NORTHEAST",
+    "council_district": "4",
+    "modified_date": "2026-09-22T00:00:00.000Z",
+    "screenshot_address": "https://cctv.austinmobility.io/image/1-relocated.jpg",
+    "location": { "type": "Point", "coordinates": [-97.698158, 30.363686] }
+  }
+]

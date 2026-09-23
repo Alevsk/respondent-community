@@ -17,6 +17,27 @@ export interface FieldRendererConfig {
   priority: number;
 }
 
+interface MediaConfigBase {
+  id: string;
+  label: string;
+  urlKey: string;
+  attributionKey?: string;
+  allowedOrigins?: string[];
+  playbackAction?: string;
+}
+
+export interface SnapshotOptions {
+  refreshIntervalSeconds: number;
+  cacheBustParam?: string;
+}
+
+/** Declarative media capability. URLs are resolved from entity/observation metadata. */
+export type MediaConfig = MediaConfigBase &
+  (
+    | { kind: 'snapshot'; snapshot: SnapshotOptions }
+    | { kind: 'audio'; audio?: Record<string, never> }
+  );
+
 // LayerDisplayConfig holds rendering metadata for a layer.
 // Populated from declarative source YAML and served via the GetLayers API.
 export interface LayerDisplayConfig {
@@ -29,6 +50,7 @@ export interface LayerDisplayConfig {
   trail: { color: string; width: number; opacity: number };
   style: { color: string; pointSize: number };
   fieldRenderers: FieldRendererConfig[];
+  media?: MediaConfig[];
   // Optional: color entities by the value of a metadata field (declarative,
   // replaces per-layer hardcoded color logic in the client).
   colorBy?: { field: string; values: Record<string, string>; defaultColor: string };

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 
@@ -51,6 +52,12 @@ type HTTPTransport struct {
 	maxResponseBytes int64
 	sourceName       string
 	logger           *logging.Logger
+
+	// Optional DNS SRV origin discovery. When set, Fetch rewrites the origin
+	// of every request URL to a discovered mirror, keeping the declared path
+	// and query. The selector owns its own synchronisation.
+	discovery *endpointResolver
+	mirrors   mirrorSelector
 }
 
 // HTTPTransportConfig holds configuration for creating an HTTPTransport.
@@ -62,6 +69,7 @@ type HTTPTransportConfig struct {
 	MaxResponseBytes int64
 	SourceName       string
 	Logger           *logging.Logger
+	Discovery        *endpointResolver
 }
 
 // NewHTTPTransport creates a new HTTP transport from the given configuration.
@@ -74,15 +82,75 @@ func NewHTTPTransport(cfg HTTPTransportConfig) *HTTPTransport {
 		maxResponseBytes: cfg.MaxResponseBytes,
 		sourceName:       cfg.SourceName,
 		logger:           cfg.Logger,
+		discovery:        cfg.Discovery,
 	}
 }
 
 // Fetch performs an HTTP request with retry logic to the given URL.
+// When origin discovery is configured, the request is routed to a discovered
+// mirror; see fetchDiscovered for the mirror selection rules.
 func (t *HTTPTransport) Fetch(ctx context.Context, method, url string) ([]byte, int, error) {
 	// Expand {date:...} rolling-window macros once per fetch (before retries) so a
 	// static source URL can target a relative date range (e.g. GFW events).
 	url = expandDateMacros(url, time.Now())
 
+	if t.discovery != nil {
+		return t.fetchDiscovered(ctx, method, url)
+	}
+	return t.fetchURL(ctx, method, url)
+}
+
+// fetchDiscovered routes one request through the discovered mirror list.
+//
+// Mirror choice and its outcome belong to mirrorSelector, which keeps them a
+// single atomic decision; this function only renders the URL and reports what
+// the attempt did.
+func (t *HTTPTransport) fetchDiscovered(ctx context.Context, method, rawURL string) ([]byte, int, error) {
+	origins, err := t.discovery.Origins(ctx)
+	if err != nil {
+		return nil, 0, fmt.Errorf("discover origins for source %q: %w", t.sourceName, err)
+	}
+
+	target, err := url.Parse(rawURL)
+	if err != nil {
+		return nil, 0, fmt.Errorf("source %q: parse source URL: %w", t.sourceName, err)
+	}
+
+	var body []byte
+	var status int
+	err = t.mirrors.each(ctx, origins, func(origin string) error {
+		pageURL, err := rewriteOrigin(*target, origin)
+		if err != nil {
+			return err
+		}
+		b, s, err := t.fetchURL(ctx, method, pageURL)
+		status = s
+		if err != nil {
+			t.logger.Warn("discovered mirror failed",
+				logging.String("source_name", t.sourceName),
+				logging.String("origin", origin),
+				logging.Err("error", err),
+			)
+			return err
+		}
+		body = b
+		return nil
+	})
+	if err != nil {
+		return nil, status, fmt.Errorf("source %q: discovered mirror request failed: %w", t.sourceName, err)
+	}
+	return body, status, nil
+}
+
+// resetMirrors returns mirror selection to the highest-priority origin. The
+// adapter calls it once per refresh cycle, never between pagination attempts.
+func (t *HTTPTransport) resetMirrors() { t.mirrors.reset() }
+
+// hasDiscovery reports whether this transport selects origins dynamically.
+func (t *HTTPTransport) hasDiscovery() bool { return t != nil && t.discovery != nil }
+
+// fetchURL performs an HTTP request with retry logic to one fully-resolved URL.
+func (t *HTTPTransport) fetchURL(ctx context.Context, method, url string) ([]byte, int, error) {
 	maxAttempts := 1
 	if t.retry != nil && t.retry.MaxAttempts > 0 {
 		maxAttempts = t.retry.MaxAttempts + 1 // MaxAttempts is retries, not total attempts

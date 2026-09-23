@@ -2,8 +2,10 @@ package declarative
 
 import (
 	"fmt"
+	"net"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/Alevsk/respondent/internal/logging"
 )
@@ -44,7 +46,15 @@ func NewTransport(def *SourceDefinition, resolvedHeaders map[string]string, toke
 
 // newHTTPPollTransport creates the existing HTTP polling transport.
 func newHTTPPollTransport(def *SourceDefinition, resolvedHeaders map[string]string, tokenProvider TokenProvider, client *http.Client, logger *logging.Logger) (Transport, error) {
+	// Origin discovery is resolved lazily on first fetch, never at load time,
+	// so a source with an unreachable DNS server still starts.
+	var discovery *endpointResolver
+	if def.Transport.Discovery != nil {
+		discovery = newEndpointResolver(def.Transport.Discovery, net.DefaultResolver, time.Now)
+	}
+
 	return NewHTTPTransport(HTTPTransportConfig{
+		Discovery:        discovery,
 		Client:           client,
 		Headers:          resolvedHeaders,
 		TokenProvider:    tokenProvider,

@@ -1,0 +1,21 @@
+syntax = "proto3";
+package respondent.v1;
+option go_package = "github.com/Alevsk/respondent/gen/go/respondent/v1;respondentv1";
+
+import "google/api/annotations.proto";
+
+message ReportMediaPlaybackRequest {
+  string entity_id = 1;
+  string media_id = 2;
+}
+
+message ReportMediaPlaybackResponse {
+  bool reported = 1;
+}
+
+// MediaService runs source-declared playback notifications. It never relays media.
+service MediaService {
+  rpc ReportMediaPlayback(ReportMediaPlaybackRequest) returns (ReportMediaPlaybackResponse) {
+    option (google.api.http) = { post: "/v1/media/playback" body: "*" };
+  }
+}

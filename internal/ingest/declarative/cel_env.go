@@ -555,6 +555,40 @@ func lookupValueOr(tables map[string]*LookupTable, tableName, key, field string,
 	return types.DefaultTypeAdapter.NativeToValue(val)
 }
 
+// CompileMediaActionPath compiles a media_actions path expression. It uses a
+// dedicated environment exposing only `metadata` (the entity's merged string
+// map), so an action path can never read a record, a header or a secret.
+func (c *CELCompiler) CompileMediaActionPath(expr string) (cel.Program, error) {
+	if len(expr) > maxExpressionSize {
+		return nil, fmt.Errorf("CEL expression exceeds %d byte limit (%d bytes)", maxExpressionSize, len(expr))
+	}
+
+	env, err := cel.NewEnv(
+		cel.Variable("metadata", cel.MapType(cel.StringType, cel.StringType)),
+		ext.Strings(),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("create media action CEL environment: %w", err)
+	}
+
+	ast, issues := env.Compile(expr)
+	if issues != nil && issues.Err() != nil {
+		return nil, fmt.Errorf("CEL compile error (media action path): %w", issues.Err())
+	}
+	if ast.OutputType() != cel.StringType {
+		return nil, fmt.Errorf("media action path must evaluate to a string, got %s", ast.OutputType())
+	}
+
+	prg, err := env.Program(ast,
+		cel.EvalOptions(cel.OptTrackCost),
+		cel.CostLimit(celCostLimit),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("CEL program error (media action path): %w", err)
+	}
+	return prg, nil
+}
+
 // CompileStopWhen compiles a CEL expression for pagination stop_when evaluation.
 // Unlike CompileExpression, this uses a separate environment with `records` (list)
 // variable instead of `record` (map).
@@ -612,8 +646,9 @@ type CompiledSource struct {
 	observationVelocity  map[string]cel.Program
 	observationMeta      map[string]cel.Program
 	contentHash          cel.Program
-	stopWhen             cel.Program // Pagination stop_when expression (uses `records` variable)
-	entityCacheKey       cel.Program // CEL program for entity cache key extraction
+	stopWhen             cel.Program            // Pagination stop_when expression (uses `records` variable)
+	mediaActions         map[string]cel.Program // media_actions path expressions (use `metadata` map)
+	entityCacheKey       cel.Program            // CEL program for entity cache key extraction
 	fieldMappings        []CompiledFieldMapping
 
 	// Lookup tables loaded from YAML or file, indexed by table name.
@@ -716,6 +751,13 @@ func (cs *CompiledSource) ContentHash() cel.Program {
 // StopWhen returns the compiled stop_when CEL program for pagination, or nil if not defined.
 func (cs *CompiledSource) StopWhen() cel.Program {
 	return cs.stopWhen
+}
+
+// MediaActions returns the compiled media_actions path expressions, keyed by
+// action name. Path expressions are compiled at source load so a malformed one
+// fails the source rather than a user's playback notification.
+func (cs *CompiledSource) MediaActions() map[string]cel.Program {
+	return cs.mediaActions
 }
 
 // LookupTables returns the compiled lookup tables indexed by name.

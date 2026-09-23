@@ -227,6 +227,30 @@ transport:
   #   max_pages: 10               # Stop after N pages
   #   cursor_path: "meta.next_cursor"  # Dot-path to extract next cursor from JSON response
 
+  # NOTE ON "$" IN URLs: `url` and `on_demand_url` are passed through
+  # os.Expand so they can embed ${ENV_VAR} references. That also means a
+  # literal "$" followed by letters is read as a variable and DELETED — an
+  # OData or Socrata query like "?$limit=2000" silently becomes "?=2000".
+  # Percent-encode it: "?%24limit=2000".
+
+  # --- Endpoint Discovery (optional, http_poll only) ---
+  # For APIs served by a rotating pool of community mirrors that ask clients to
+  # discover them rather than pin one host. Discovery replaces ONLY the origin
+  # of `url` above; the path, query, headers, response limit, retry policy and
+  # rate budget stay authoritative. Omit this block to keep the fixed URL.
+  #
+  # One refresh uses one mirror: once a mirror answers it is pinned for the rest
+  # of that refresh, so a paginated catalog is never stitched from two directory
+  # snapshots. A mirror that fails partway through discards the pages it already
+  # returned and the refresh restarts at page zero on the next mirror; if none
+  # completes, the previous catalog is kept.
+  #
+  # discovery:
+  #   srv_name: "_api._tcp.example.com"   # Full SRV record name
+  #   allowed_suffix: "api.example.com"   # Targets must equal this or be a subdomain
+  #   port: 443                           # Must be 443 — discovered origins are HTTPS
+  #   cache_ttl: "1h"                     # 1m..24h; an expired list is never served stale
+
   # --- Spatial Crawling (schema_version: 2 only) ---
   # For APIs that require lat/lon parameters (e.g., adsb.lol, SondeHub).
   # The URL must contain {lat} and {lon} placeholders.
@@ -763,11 +787,29 @@ cache:
 #           confidence_field: confidence
 #           min_confidence: 0.8
 
+# --- Playback Notifications (optional) ---
+# Some directories ask clients to report when a user actually starts playing an
+# entry. A media action is a named, server-side GET against this source's own
+# origin (the discovered one, when discovery is configured). Referenced from
+# display.media[].playback_action below.
+#
+# These definitions are server-side only and never reach the browser: a client
+# sends an entity id and a media id, nothing else. The resolved path must be
+# origin-relative — absolute URLs, authorities, traversal, fragments and
+# credentials are rejected before any request is made.
+#
+# media_actions:
+#   - name: report_play            # ^[a-z][a-z0-9_]{0,63}$, unique in this file
+#     method: GET                  # GET is the only accepted method
+#     # CEL producing an origin-relative path. Only variable in scope:
+#     # metadata — the entity's merged map(string, string). Compiled at load.
+#     path: '"/json/url/" + metadata["station_uuid"]'
+
 # --- Display ---
 # Frontend rendering configuration. Consumed by GetLayers() gRPC API.
 display:
   icon:
-    # Available shapes (57 total):
+    # Available shapes (58 total):
     #
     # Aviation:     flight, flight-alt-a, flight-alt-b, flight-alt-c, drone, helicopter
     # Space:        diamond, satellite (alias for diamond), iss, rocket, telescope, meteor
@@ -777,6 +819,7 @@ display:
     # Hazard:       warning, radiation, nuclear, biohazard, skull, fire, volcano
     # Seismic:      ripple, crack
     # Radio:        radio
+    # Surveillance: camera
     # Infrastructure: tower, building, bridge, factory, powerplant, crane, warehouse
     # Geometry:     dot, star, hexagon, circle-ring, chevron, triangle, pentagon, cross
     # Other:        marker, tree
@@ -793,6 +836,42 @@ display:
   style:
     color: "#ffffff"         # Entity color on the globe (#rrggbb)
     point_size: 6            # Base point size (1-32; 8 = standard)
+  # --- Media (optional) ---
+  # Declares that this layer's entities carry playable media. The browser picks
+  # a component from `kind` alone — no provider name, layer prefix or URL suffix
+  # appears in the frontend, so a new provider on a supported protocol is
+  # onboarded here rather than in code.
+  #
+  # Media bytes never enter the pipeline: frames and audio load in the browser
+  # straight from the provider and never reach SQLite, observations, the
+  # WebSocket or a map texture.
+  #
+  # media:
+  #   - id: camera                # ^[a-z][a-z0-9_]{0,63}$, unique in this layer
+  #     kind: snapshot            # snapshot | audio
+  #     label: "Camera feed"      # Shown in the panel and in control labels
+  #     url_key: snapshot_url     # Metadata key holding the URL. MUST be declared
+  #                               # in entity.metadata or observation.metadata.
+  #     attribution_key: attribution   # Optional; also a declared metadata key
+  #     allowed_origins:          # Optional exact HTTPS origins (no path/query).
+  #       - "https://cctv.example.gov"  # Declare these whenever the host is fixed.
+  #     snapshot:                 # Required for kind: snapshot, rejected for audio
+  #       refresh_interval: "30s" # Whole seconds, 5s..1h. Loads never overlap.
+  #       cache_bust_param: "_respondent_frame"  # Opt-in; breaks signed URLs
+  #
+  #   - id: radio
+  #     kind: audio
+  #     label: "Live stream"
+  #     url_key: stream_url
+  #     attribution_key: attribution
+  #     playback_action: report_play   # Audio only; names a media_actions entry
+  #     audio: {}
+  #
+  # Regardless of what is declared, a media URL is admitted only if it is
+  # absolute HTTPS with no credentials or control characters and a public host
+  # (loopback, private, CGNAT, link-local, single-label, .local and .internal
+  # are all rejected). Browser-side checks are not a DNS or redirect firewall.
+
   # Field renderers define how metadata fields appear in the entity detail panel.
   # Renderers are sorted by priority (lower = shown first).
   field_renderers:

@@ -6,7 +6,8 @@
   },
   "tags": [
     {
-      "name": "LayerService"
+      "name": "LayerService",
+      "description": "LayerService manages data layer configuration"
     }
   ],
   "consumes": [
@@ -167,6 +168,9 @@
           }
         }
       }
+    },
+    "v1AudioMediaConfig": {
+      "type": "object"
     },
     "v1ColorByConfig": {
       "type": "object",
@@ -475,6 +479,13 @@
         "colorBy": {
           "$ref": "#/definitions/v1ColorByConfig",
           "title": "optional: derive entity color from a metadata field's value"
+        },
+        "media": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1MediaConfig"
+          }
         }
       },
       "description": "LayerDisplayConfig holds rendering metadata for a layer, populated from declarative source definitions."
@@ -507,6 +518,42 @@
           "title": "0-100"
         }
       }
+    },
+    "v1MediaConfig": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "urlKey": {
+          "type": "string"
+        },
+        "attributionKey": {
+          "type": "string"
+        },
+        "allowedOrigins": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "playbackAction": {
+          "type": "string"
+        },
+        "snapshot": {
+          "$ref": "#/definitions/v1SnapshotMediaConfig"
+        },
+        "audio": {
+          "$ref": "#/definitions/v1AudioMediaConfig"
+        }
+      },
+      "description": "MediaConfig binds a browser media component to explicitly declared metadata."
     },
     "v1Observation": {
       "type": "object",
@@ -564,6 +611,18 @@
       ],
       "default": "RENDERING_MODE_UNSPECIFIED",
       "description": "RenderingMode defines how the frontend renders a layer."
+    },
+    "v1SnapshotMediaConfig": {
+      "type": "object",
+      "properties": {
+        "refreshIntervalSeconds": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "cacheBustParam": {
+          "type": "string"
+        }
+      }
     },
     "v1StyleConfig": {
       "type": "object",

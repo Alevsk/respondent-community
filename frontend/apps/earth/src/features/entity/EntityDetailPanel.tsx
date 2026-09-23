@@ -116,6 +116,8 @@ const EntityDetailPanel: React.FC<EntityDetailPanelProps> = ({ entityId, layerId
       layerType={layerType}
       detail={detail}
       isLoading={isLoading}
+      // A minimized panel keeps its state but must not keep a camera refreshing.
+      mediaActive={displayMode !== 'minimized'}
     />
   ) : null;
 

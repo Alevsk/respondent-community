@@ -14,6 +14,11 @@ export interface EntityTabProps {
   layerType: string;
   detail: EntityDetailResponse | undefined;
   isLoading: boolean;
+  /**
+   * False while the containing panel is minimized. Tabs that own live media
+   * (a refreshing camera) suspend it; every other tab can ignore it.
+   */
+  mediaActive?: boolean;
 }
 
 export interface EntityTab {

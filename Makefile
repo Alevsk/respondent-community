@@ -54,9 +54,9 @@ help: ## Show this help message
 
 proto: ## Generate protobuf code with Buf
 	$(BIN)/buf generate
-	$(BIN)/sqlc generate
+	mv frontend/packages/core/src/api/generated/openapi2-merged.swagger.json frontend/packages/core/src/api/generated/openapi2-merged.json
 
-generate: proto sqlc ## Generate all code (proto + SQL)
+generate: proto ## Generate protobuf and API code
 
 run: run-frontend-build build ## Build frontend, embed, and run the community server
 	set -a; [ -f $(ENV_FILE) ] && . ./$(ENV_FILE); set +a; \

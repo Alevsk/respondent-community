@@ -2,7 +2,23 @@ syntax = "proto3";
 
 package respondent.v1;
 
+import "protoc-gen-openapiv2/options/annotations.proto";
+
 option go_package = "github.com/Alevsk/respondent/gen/go/respondent/v1;respondentv1";
+
+// Document-level metadata for the merged OpenAPI v2 artifact consumed by the
+// frontend REST client. Without it the merged document inherits the first
+// proto file's name as its title.
+option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
+  info: {
+    title: "Respondent API";
+    version: "1.0.0";
+  }
+  host: "localhost:8090";
+  base_path: "/";
+  schemes: HTTP;
+  schemes: HTTPS;
+};
 
 // Common messages and types shared across services
 

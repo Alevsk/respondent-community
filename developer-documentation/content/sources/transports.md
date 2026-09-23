@@ -240,6 +240,110 @@ CEL expression evaluated per page. When it returns true, pagination stops early.
 Dot-path to extract the next cursor value from the JSON response. Only used with `type: cursor`.
 {{< /field >}}
 
+{{< callout type="warning" title="A literal $ in a URL is deleted" >}}
+`url` and `on_demand_url` are expanded with `os.Expand` so they can embed
+`${ENV_VAR}` references. A literal `$` followed by letters is therefore read as
+an undefined variable and removed: `?$limit=2000` is sent as `?=2000`, and an
+OData `$orderby` is dropped entirely. Percent-encode it — `?%24limit=2000` —
+whenever the API's own query syntax uses `$`.
+{{< /callout >}}
+
+### Endpoint discovery (DNS SRV)
+
+Some public APIs are served by a rotating pool of community mirrors and ask
+clients to discover them rather than pin one host. `transport.discovery`
+resolves the pool through DNS SRV and replaces **only the origin** of the
+declared URL; the configured path, query, headers, response limit, retry policy
+and rate budget stay authoritative. Sources without a `discovery` block keep
+their fixed URL and are unaffected.
+
+```yaml
+transport:
+  type: http_poll
+  url: "https://api.radio-browser.info/json/stations/search?hidebroken=true&order=stationuuid"
+  discovery:
+    srv_name: "_api._tcp.radio-browser.info"
+    allowed_suffix: "api.radio-browser.info"
+    port: 443
+    cache_ttl: "1h"
+```
+
+{{< field name="discovery.srv_name" type="string" required="true" >}}
+Full SRV record name, in `_service._tcp.example.com` form.
+{{< /field >}}
+
+{{< field name="discovery.allowed_suffix" type="string" required="true" >}}
+A resolved target is used only if it equals this suffix or is a subdomain of it.
+Must be a public DNS suffix — single-label, `.local`, `.internal` and address
+literals are rejected at source load.
+{{< /field >}}
+
+{{< field name="discovery.port" type="integer" required="true" >}}
+The only SRV port accepted. Must be `443`; discovered origins are always HTTPS.
+{{< /field >}}
+
+{{< field name="discovery.cache_ttl" type="duration" required="true" >}}
+How long a resolved mirror list is reused, between `1m` and `24h`. An expired
+list is never served stale: if the refresh lookup fails, the poll fails and the
+previous catalog is kept.
+{{< /field >}}
+
+Mirrors are ordered by SRV priority then weight. Selection is **sticky within a
+refresh**: once a mirror answers, every remaining page of that refresh goes to
+the same mirror, so one catalog is never stitched together from two directory
+snapshots. If the pinned mirror fails partway through pagination, every page
+already collected is discarded and the refresh restarts at page zero on the next
+mirror (up to three mirrors). If none completes, the error propagates and the
+previous catalog stays in place rather than publishing a truncated or empty one.
+Reaching `pagination.max_pages` without a stop signal is logged as truncation.
+
+### Playback notifications
+
+Some directories ask clients to report when a user actually starts playing an
+entry. `media_actions` declares that call as a named, server-side GET against
+the same (discovered) origin:
+
+```yaml
+media_actions:
+  - name: report_play
+    method: GET
+    path: '"/json/url/" + metadata["station_uuid"]'
+```
+
+{{< field name="media_actions[].name" type="string" required="true" >}}
+Identifier referenced by `display.media[].playback_action`. Matches
+`^[a-z][a-z0-9_]{0,63}$` and must be unique within the source.
+{{< /field >}}
+
+{{< field name="media_actions[].method" type="string" required="true" >}}
+Must be `GET`. No other method is accepted.
+{{< /field >}}
+
+{{< field name="media_actions[].path" type="string" required="true" >}}
+CEL expression producing an origin-relative path. The only variable in scope is
+`metadata`, the entity's merged `map(string, string)`; the expression is
+compiled at source load and must evaluate to a string.
+{{< /field >}}
+
+The browser calls `POST /v1/media/playback` with an entity id and a media id and
+nothing else — no URL, header or expression. The server resolves the stored
+entity, finds the declared slot, evaluates the declared path, and admits the
+result as origin-relative: absolute URLs, protocol-relative and backslash
+authorities, traversal, fragments, credentials and whitespace are all rejected.
+Notifications are capped at four concurrent calls with a small response ceiling,
+and the response body is discarded — the API returns only `{ "reported": bool }`.
+
+A notification is sent once per user-initiated playback start. Catalog polls,
+selection, rendering and automatic reconnects never report a play, and a failed
+notification is reported as `reported: false` without interrupting audio or
+retrying.
+
+{{< callout type="note" title="Action definitions never reach the browser" >}}
+`media_actions` is server-side configuration. It is not part of the layer
+display config the frontend receives, so a client cannot see or influence what
+is called.
+{{< /callout >}}
+
 ### Spatial crawling
 
 For APIs that require geographic coordinates (schema_version 2 only), configure spatial crawling to cover the globe systematically. The URL must contain `{lat}` and `{lon}` placeholders.

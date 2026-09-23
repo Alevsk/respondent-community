@@ -28,6 +28,7 @@ type LayerDisplayConfig struct {
 	Trail          *TrailConfig
 	Style          *StyleConfig
 	FieldRenderers []FieldRendererConfig
+	Media          []MediaConfig
 	ColorBy        *ColorByConfig // nil unless the layer colors entities by a metadata field
 }
 

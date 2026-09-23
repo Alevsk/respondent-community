@@ -105,6 +105,25 @@ export interface MockRouteOptions {
   observations?: Record<string, StubObservation[]>;
   /** Page size used to paginate the stubbed observation history. Defaults to 2. */
   observationsPageSize?: number;
+  /**
+   * Declarative media entries advertised in the layer's displayConfig, in the
+   * camelCase shape GetLayers returns. Omitted by default so existing specs see
+   * a layer with no media at all.
+   */
+  media?: StubMediaConfig[];
+}
+
+/** A `display.media` entry as the layers API serves it. */
+export interface StubMediaConfig {
+  id: string;
+  kind: 'snapshot' | 'audio';
+  label: string;
+  urlKey: string;
+  attributionKey?: string;
+  allowedOrigins?: string[];
+  playbackAction?: string;
+  snapshot?: { refreshIntervalSeconds: number; cacheBustParam?: string };
+  audio?: Record<string, never>;
 }
 
 /** A stub observation for the GET /v1/entities/observations history endpoint. */
@@ -192,6 +211,7 @@ export async function setupMockRoutes(page: Page, opts?: MockRouteOptions): Prom
     trail: { color: '#00e5ff', width: 2, opacity: 0.8 },
     style: { color: '#00e5ff', pointSize: 6 },
     fieldRenderers: [],
+    ...(opts?.media ? { media: opts.media } : {}),
   };
 
   // GET /v1/layers — one advertised layer with a count matching the stub feed.

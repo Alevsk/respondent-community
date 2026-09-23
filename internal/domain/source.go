@@ -2,6 +2,7 @@
 package domain
 
 import (
+	"context"
 	"fmt"
 	"strings"
 )
@@ -35,6 +36,20 @@ func ParseEntityID(entityID string) (LayerType, string) {
 		return "", ""
 	}
 	return LayerType(parts[0]), parts[1]
+}
+
+// ResolveEntity looks up an entity by either form of identifier the API accepts:
+// a composite "layerType:externalID" key, or a raw UUID as used by AI insight
+// entity refs.
+//
+// This is the single interpretation of an entity identifier. Every caller that
+// turns a caller-supplied id into a stored entity goes through it, so the two
+// forms cannot drift apart between services.
+func ResolveEntity(ctx context.Context, entities EntityRepository, entityID string) (*Entity, error) {
+	if layerType, externalID := ParseEntityID(entityID); layerType != "" && externalID != "" {
+		return entities.GetByExternalID(ctx, string(layerType), externalID)
+	}
+	return entities.GetByID(ctx, entityID)
 }
 
 // FormatLayerName converts a source_type to readable name

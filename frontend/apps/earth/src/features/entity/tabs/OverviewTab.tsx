@@ -25,6 +25,8 @@ import SeverityBadge from './shared/SeverityBadge';
 import SectionHeader from './shared/SectionHeader';
 import { parseNumericString } from './shared/numericUtils';
 import { useDetailVariant } from './shared/DetailVariantContext';
+import MediaSection, { mediaMetadataKeys } from '@/features/media/MediaSection';
+import { useUIStore } from '@/app/store';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -100,7 +102,22 @@ function formatFieldValue(value: string): string {
 
 // ─── OverviewTab ──────────────────────────────────────────────────────────────
 
-const OverviewTab: React.FC<EntityTabProps> = ({ detail, isLoading, layerType }) => {
+/**
+ * `mediaActive` is false while the panel is minimized. A minimized panel keeps
+ * its state but must not keep a camera refreshing.
+ */
+export interface OverviewTabProps extends EntityTabProps {
+  mediaActive?: boolean;
+}
+
+const OverviewTab: React.FC<OverviewTabProps> = ({
+  detail,
+  isLoading,
+  layerType,
+  entityId,
+  mediaActive = true,
+}) => {
+  const declaredMedia = useUIStore((s) => s.layers[layerType]?.displayConfig?.media);
   useDetailVariant(); // consumed by child components via context
 
   // Parse AI metadata JSON once
@@ -152,7 +169,13 @@ const OverviewTab: React.FC<EntityTabProps> = ({ detail, isLoading, layerType })
     ...(entity.metadata || {}),
     ...(latestObservation?.metadata || {}),
   };
-  const fields = resolveFields(mergedMetadata, layerType);
+  // Media URLs are rendered by the media section, not repeated as scalar rows.
+  // The raw values stay untouched in mergedMetadata for the Metadata tab.
+  const mediaKeys = mediaMetadataKeys(declaredMedia);
+  const fieldMetadata = mediaKeys.size
+    ? Object.fromEntries(Object.entries(mergedMetadata).filter(([key]) => !mediaKeys.has(key)))
+    : mergedMetadata;
+  const fields = resolveFields(fieldMetadata, layerType);
 
   const hasLocation = !!latestObservation;
   const hasDetails = fields.length > 0;
@@ -188,6 +211,14 @@ const OverviewTab: React.FC<EntityTabProps> = ({ detail, isLoading, layerType })
           {layerType.replace(/_/g, ' ')}
         </Typography>
       </Box>
+
+      <MediaSection
+        entityId={entityId}
+        layerType={layerType}
+        entityName={entity.name}
+        metadata={mergedMetadata}
+        active={mediaActive}
+      />
 
       {/* ── Section 1: Location ── */}
       {hasLocation && (

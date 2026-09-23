@@ -43,6 +43,7 @@ import (
 	"github.com/Alevsk/respondent/internal/app/entity"
 	"github.com/Alevsk/respondent/internal/app/indicator"
 	"github.com/Alevsk/respondent/internal/app/layer"
+	"github.com/Alevsk/respondent/internal/app/media"
 
 	// Transport
 	grpctransport "github.com/Alevsk/respondent/internal/transport/grpc"
@@ -322,8 +323,30 @@ func runServe(ctx context.Context) error {
 	entityService := entity.NewEntityService(entityRepo, obsRepo, logger.With().Str("component", "entity-service").Logger())
 	indicatorService := indicator.NewIndicatorService(entityRepo, obsRepo, cacheStorage, dynReg, logger.With().Str("component", "indicator-service").Logger())
 
+	// Playback notifications: the registry owns every outbound media call, and
+	// it only ever executes actions a source definition declared. Its client
+	// carries the shared per-host rate budget so notifications and catalog
+	// polls spend from the same bucket.
+	mediaActions, err := declarative.NewMediaActionRegistry(
+		compiledSources,
+		&http.Client{Timeout: 5 * time.Second, Transport: rlTransport},
+		logging.NewLogger("media-actions", nil),
+	)
+	if err != nil {
+		return fmt.Errorf("build media action registry: %w", err)
+	}
+	mediaService := media.NewService(
+		entityRepo,
+		obsRepo,
+		dynReg,
+		mediaActions,
+		mediaActions,
+		logger.With().Str("component", "media-service").Logger(),
+	)
+
 	grpcLogger := logger.With().Str("component", "grpc").Logger()
 	layerGRPC := grpctransport.NewLayerServer(layerService, grpcLogger)
+	mediaGRPC := grpctransport.NewMediaServer(mediaService, grpcLogger)
 	entityGRPC := grpctransport.NewEntityServer(entityService, grpcLogger)
 	indicatorGRPC := grpctransport.NewIndicatorServer(indicatorService, grpcLogger)
 
@@ -350,6 +373,9 @@ func runServe(ctx context.Context) error {
 	}
 	if err := respondentv1.RegisterAIServiceHandlerServer(ctx, gwMux, aiGRPC); err != nil {
 		return fmt.Errorf("register AI gateway: %w", err)
+	}
+	if err := respondentv1.RegisterMediaServiceHandlerServer(ctx, gwMux, mediaGRPC); err != nil {
+		return fmt.Errorf("register media gateway: %w", err)
 	}
 
 	// ── 17. HTTP mux ───────────────────────────────────────────────────

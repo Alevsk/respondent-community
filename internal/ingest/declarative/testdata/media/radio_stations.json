@@ -1,0 +1,110 @@
+[
+  {
+    "stationuuid": "ffc0d701-f43b-4232-8be6-f7ff72add8ef",
+    "name": "\tBlasmusikradio mit Bernd",
+    "url_resolved": "https://stream.laut.fm/blasmusikradio_mit_bernd",
+    "homepage": "https://laut.fm/blasmusikradio_mit_bernd",
+    "tags": "blasmusik,folk,marsch,polka",
+    "countrycode": "DE",
+    "language": "german",
+    "votes": 270,
+    "codec": "MP3",
+    "bitrate": 128,
+    "hls": 0,
+    "lastcheckok": 1,
+    "lastchecktime_iso8601": "2026-09-21T05:21:11Z",
+    "geo_lat": 48.1372,
+    "geo_long": 11.5755
+  },
+  {
+    "stationuuid": "11111111-2222-3333-4444-555555555555",
+    "name": "Null Island AAC",
+    "url_resolved": "https://stream.example.org/nullisland.aac",
+    "countrycode": "GH",
+    "language": "english",
+    "codec": "AAC",
+    "bitrate": 64,
+    "hls": 0,
+    "lastcheckok": 1,
+    "lastchecktime_iso8601": "2026-09-21T05:00:00Z",
+    "geo_lat": 0.0,
+    "geo_long": 0.0
+  },
+  {
+    "stationuuid": "22222222-2222-3333-4444-555555555555",
+    "name": "HLS Only",
+    "url_resolved": "https://stream.example.org/hls/playlist.m3u8",
+    "codec": "AAC",
+    "bitrate": 96,
+    "hls": 1,
+    "lastcheckok": 1,
+    "geo_lat": 40.0,
+    "geo_long": -74.0
+  },
+  {
+    "stationuuid": "33333333-2222-3333-4444-555555555555",
+    "name": "Unsupported Codec",
+    "url_resolved": "https://stream.example.org/stream.ogg",
+    "codec": "OGG",
+    "bitrate": 96,
+    "hls": 0,
+    "lastcheckok": 1,
+    "geo_lat": 41.0,
+    "geo_long": -73.0
+  },
+  {
+    "stationuuid": "44444444-2222-3333-4444-555555555555",
+    "name": "Failed Health Check",
+    "url_resolved": "https://stream.example.org/dead.mp3",
+    "codec": "MP3",
+    "bitrate": 128,
+    "hls": 0,
+    "lastcheckok": 0,
+    "geo_lat": 42.0,
+    "geo_long": -72.0
+  },
+  {
+    "stationuuid": "55555555-2222-3333-4444-555555555555",
+    "name": "Plain HTTP Stream",
+    "url_resolved": "http://stream.example.org/insecure.mp3",
+    "codec": "MP3",
+    "bitrate": 128,
+    "hls": 0,
+    "lastcheckok": 1,
+    "geo_lat": 43.0,
+    "geo_long": -71.0
+  },
+  {
+    "stationuuid": "66666666-2222-3333-4444-555555555555",
+    "name": "No Coordinates",
+    "url_resolved": "https://stream.example.org/nogeo.mp3",
+    "codec": "MP3",
+    "bitrate": 128,
+    "hls": 0,
+    "lastcheckok": 1,
+    "geo_lat": null,
+    "geo_long": null
+  },
+  {
+    "stationuuid": "not-a-uuid",
+    "name": "Malformed Identity",
+    "url_resolved": "https://stream.example.org/bad.mp3",
+    "codec": "MP3",
+    "bitrate": 128,
+    "hls": 0,
+    "lastcheckok": 1,
+    "geo_lat": 44.0,
+    "geo_long": -70.0
+  },
+  {
+    "stationuuid": "77777777-2222-3333-4444-555555555555",
+    "name": "   ",
+    "url_resolved": "https://stream.example.org/blank.mp3",
+    "codec": "MP3",
+    "bitrate": 128,
+    "hls": 0,
+    "lastcheckok": 1,
+    "geo_lat": 45.0,
+    "geo_long": -69.0
+  }
+]

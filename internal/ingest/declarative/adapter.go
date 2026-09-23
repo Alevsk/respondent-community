@@ -243,6 +243,12 @@ func (a *DeclarativeAdapter) fetchAndProcess(ctx context.Context) error {
 
 	def := cs.Definition()
 
+	// Each refresh cycle starts from the highest-priority discovered mirror.
+	// Mirror advancement within a cycle is owned by the transport.
+	if ht, ok := a.transport.(*HTTPTransport); ok && ht.hasDiscovery() {
+		ht.resetMirrors()
+	}
+
 	// Spatial mode: delegate to spatial crawl loop
 	if def.Transport.Spatial != nil {
 		return a.fetchSpatial(ctx)

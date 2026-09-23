@@ -126,6 +126,12 @@ func (l *Loader) LoadFile(path string) (*CompiledSource, error) {
 	if err := l.validate.Struct(def); err != nil {
 		return nil, fmt.Errorf("validate %q: %w", path, err)
 	}
+	if err := validateMedia(def.Display.Media, def.Entity.Metadata, def.Observation.Metadata, def.MediaActions); err != nil {
+		return nil, fmt.Errorf("validate %q: %w", path, err)
+	}
+	if err := validateDiscovery(def.Transport.Discovery); err != nil {
+		return nil, fmt.Errorf("validate %q: %w", path, err)
+	}
 
 	// Cross-field: dedupe mode requires a non-empty content_hash expression.
 	if def.Recording.Mode == "dedupe" && strings.TrimSpace(def.Observation.ContentHash) == "" {
@@ -591,6 +597,19 @@ func (l *Loader) compileCEL(def *SourceDefinition, resolvedHeaders map[string]st
 		cs.stopWhen, err = l.compiler.CompileStopWhen(strings.TrimSpace(def.Transport.Pagination.StopWhen))
 		if err != nil {
 			return nil, fmt.Errorf("compile pagination.stop_when: %w", err)
+		}
+	}
+
+	// Compile media_actions path expressions (optional). Each uses a dedicated
+	// environment whose only variable is the entity's merged metadata map.
+	if len(def.MediaActions) > 0 {
+		cs.mediaActions = make(map[string]cel.Program, len(def.MediaActions))
+		for _, a := range def.MediaActions {
+			prg, compileErr := l.compiler.CompileMediaActionPath(strings.TrimSpace(a.Path))
+			if compileErr != nil {
+				return nil, fmt.Errorf("compile media_actions[%s].path: %w", a.Name, compileErr)
+			}
+			cs.mediaActions[a.Name] = prg
 		}
 	}
 

@@ -25,6 +25,7 @@ display:
     values:
       operational: "#00ff9d"
     default_color: "#888888"
+  media: []
   field_renderers: []
 ```
 
@@ -165,6 +166,119 @@ color_by:
     decommissioned: "#ff4444"
   default_color: "#888888"
 ```
+
+---
+
+## Media
+
+`display.media` declares that a layer's entities carry playable media — a camera
+snapshot or an audio stream — and where the URL comes from. The browser picks a
+component from the declared `kind` alone; there is no provider name, layer-name
+prefix or URL suffix anywhere in the frontend, so a new provider on an already
+supported protocol is onboarded in YAML.
+
+Media bytes never enter the pipeline. Frames and audio are loaded by the browser
+directly from the provider and never reach SQLite, observation metadata,
+realtime messages or map textures — only the catalog does.
+
+```yaml
+display:
+  media:
+    - id: camera
+      kind: snapshot
+      label: "Camera feed"
+      url_key: snapshot_url
+      attribution_key: attribution
+      allowed_origins:
+        - "https://cctv.example.gov"
+      snapshot:
+        refresh_interval: "30s"
+        cache_bust_param: "_respondent_frame"
+```
+
+{{< field name="media[].id" type="string" required="true" >}}
+Stable slot identifier, matching `^[a-z][a-z0-9_]{0,63}$` and unique within the
+layer. It is the id the browser sends when reporting playback, so keep it stable
+across releases.
+{{< /field >}}
+
+{{< field name="media[].kind" type="string" required="true" >}}
+Which component to mount. Allowed values: `snapshot` (a still image that
+refreshes while viewed) and `audio` (a native MP3/AAC stream). Any other value
+is rejected at source load. Full-motion video and HLS are not supported in this
+release.
+{{< /field >}}
+
+{{< field name="media[].label" type="string" required="true" >}}
+Human-readable name for the media, shown in the detail panel and used in the
+Play control's accessible name.
+{{< /field >}}
+
+{{< field name="media[].url_key" type="string" required="true" >}}
+Metadata key holding the media URL. It must be declared in this source's
+`entity.metadata` or `observation.metadata`; a key the source never emits fails
+the load. The value is resolved with the same entity-plus-latest-observation
+precedence as the overview, and is not repeated as an ordinary overview row.
+{{< /field >}}
+
+{{< field name="media[].attribution_key" type="string" required="false" >}}
+Metadata key holding the provider credit shown beside the media. Must also be a
+declared metadata key.
+{{< /field >}}
+
+{{< field name="media[].allowed_origins" type="string[]" required="false" >}}
+Exact HTTPS origins (scheme and host, no path or query) the media URL may use.
+Declare them whenever the provider serves from a fixed host; omit them only when
+hosts genuinely vary per entity, as they do for a community radio directory.
+{{< /field >}}
+
+{{< field name="media[].playback_action" type="string" required="false" >}}
+Name of a top-level `media_actions` entry to invoke once per user-initiated
+playback start. Audio only. See [Playback notifications](../transports/#playback-notifications).
+{{< /field >}}
+
+{{< field name="media[].snapshot.refresh_interval" type="duration" required="true" >}}
+How often the image reloads while it is on screen, in whole seconds between
+`5s` and `1h`. Required for `kind: snapshot` and rejected for `kind: audio`.
+The next load is scheduled only after the current one settles, so requests never
+overlap.
+{{< /field >}}
+
+{{< field name="media[].snapshot.cache_bust_param" type="string" required="false" >}}
+Query parameter appended to each refresh to defeat caching. Opt in only when the
+provider needs it: adding a parameter to a signed URL breaks the signature.
+{{< /field >}}
+
+### URL policy
+
+Whatever the source declares, a media URL is admitted only if it is absolute
+HTTPS with no embedded credentials, no control characters, and a public host —
+loopback, private, CGNAT and link-local literals are rejected, as are
+single-label hosts and `.local` / `.internal` suffixes. Per-entry
+`allowed_origins` narrow that further.
+
+{{< callout type="warning" title="Browser checks are not a network boundary" >}}
+The browser cannot pin DNS or inspect redirects, so this policy screens obvious
+mistakes and hostile catalog values — it is not an SSRF control. Media is loaded
+directly by the browser from the third party; a future server-side relay would
+need its own outbound-request controls.
+{{< /callout >}}
+
+### Runtime behaviour
+
+- **One camera at a time.** At most one snapshot session refreshes per
+  application. Other panels showing a camera offer a **View camera** control
+  that takes the slot over.
+- **Only while visible.** Refreshing stops when the panel is minimized, the
+  media scrolls off screen, the browser tab is hidden, the layer is disabled, or
+  the user explores a historical time range. Historical observations describe
+  catalog metadata, not archived frames.
+- **One audio element.** Playback starts only from an explicit Play gesture, one
+  station at a time. The player persists after the detail panel closes and is
+  released by Stop or by disabling its layer. A page reload does not resume it.
+- **Honest freshness.** The displayed time is when the frame was *received*, not
+  when the camera captured it. A failed refresh shows a stale badge over the last
+  good frame rather than a blank panel.
 
 ---
 

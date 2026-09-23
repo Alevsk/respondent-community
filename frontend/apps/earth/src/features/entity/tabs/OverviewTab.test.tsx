@@ -14,6 +14,7 @@ import { ThemeProvider, createTheme } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
 import type { EntityDetailResponse } from '@respondent/core';
 import OverviewTab from './OverviewTab';
+import { MediaProvider } from '@/features/media/MediaProvider';
 
 const theme = createTheme({
   palette: {
@@ -39,12 +40,14 @@ const renderTab = (aiMetadataJson?: string) => {
   return render(
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      <OverviewTab
-        entityId="news_articles:test"
-        layerType="news_articles"
-        detail={detail}
-        isLoading={false}
-      />
+      <MediaProvider>
+        <OverviewTab
+          entityId="news_articles:test"
+          layerType="news_articles"
+          detail={detail}
+          isLoading={false}
+        />
+      </MediaProvider>
     </ThemeProvider>,
   );
 };

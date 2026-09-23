@@ -65,16 +65,22 @@ func DisplaySpecToDomain(d *DisplaySpec) *domain.LayerDisplayConfig {
 			DefaultColor: d.ColorBy.DefaultColor,
 		}
 	}
+	for _, m := range d.Media {
+		dc.Media = append(dc.Media, mediaSpecToDomain(m))
+	}
 	return dc
 }
 
 // displayOnlyDef is a minimal struct for extracting display config and v2 metadata
 // from YAML without requiring the full CEL compiler or validation pipeline.
 type displayOnlyDef struct {
-	SourceType string      `yaml:"source_type"`
-	LayerType  string      `yaml:"layer_type"`
-	Display    DisplaySpec `yaml:"display"`
-	EntityType string      `yaml:"entity_type"`
+	Entity       EntityMapping     `yaml:"entity"`
+	Observation  ObsMapping        `yaml:"observation"`
+	MediaActions []MediaActionSpec `yaml:"media_actions"`
+	SourceType   string            `yaml:"source_type"`
+	LayerType    string            `yaml:"layer_type"`
+	Display      DisplaySpec       `yaml:"display"`
+	EntityType   string            `yaml:"entity_type"`
 
 	// v2 fields extracted for server-side wiring
 	Filtering string            `yaml:"filtering"`
@@ -328,6 +334,12 @@ func RegisterDisplayConfigs(dir string, dynReg *domain.DynamicSourceRegistry, lo
 		}
 
 		if def.LayerType == "" || def.Display.Icon.Shape == "" {
+			continue
+		}
+		if err := validateMedia(def.Display.Media, def.Entity.Metadata, def.Observation.Metadata, def.MediaActions); err != nil {
+			if log != nil {
+				log.Warn("invalid media display configuration", logging.String("file", filePath), logging.Err("error", err))
+			}
 			continue
 		}
 
