@@ -118,10 +118,16 @@ func TestOpen_IOTuningPragmas(t *testing.T) {
 	defer func() { _ = db.Close() }()
 
 	// cache_size is reported in pages when positive, or as negative KiB when set
-	// that way. We set -65536 (64 MB); SQLite echoes it back as -65536.
+	// that way. One budget is split across the whole pool, so the per-connection
+	// value depends on how many readers this host runs.
 	var cacheSize int
 	require.NoError(t, db.SqlDB().QueryRow("PRAGMA cache_size").Scan(&cacheSize))
-	assert.Equal(t, -65536, cacheSize, "cache_size must be 64 MB (-65536 KiB)")
+	// The exact value depends on how many readers this host runs, since one
+	// budget is divided across the pool (pagecache.go). What must hold
+	// everywhere: it is expressed in KiB, and no single connection may reserve
+	// the 64MiB that used to be hardcoded per connection.
+	assert.Negative(t, cacheSize, "cache_size must be set in KiB, not pages")
+	assert.Less(t, -cacheSize, 65536, "no connection may reserve the old 64MiB")
 
 	// temp_store: 0=default, 1=FILE, 2=MEMORY.
 	var tempStore int
@@ -130,7 +136,7 @@ func TestOpen_IOTuningPragmas(t *testing.T) {
 
 	var mmapSize int64
 	require.NoError(t, db.SqlDB().QueryRow("PRAGMA mmap_size").Scan(&mmapSize))
-	assert.Equal(t, int64(268435456), mmapSize, "mmap_size must be 256 MB")
+	assert.Equal(t, int64(64*1024*1024), mmapSize, "mmap_size must be the container-sized 64MiB window")
 }
 
 // TestOpen_ReadWritePools verifies the read/write pool split for file databases:

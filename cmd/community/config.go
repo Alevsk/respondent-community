@@ -92,6 +92,11 @@ type IngestConfig struct {
 	Enabled    bool   `yaml:"enabled" mapstructure:"enabled"`
 	SourcesDir string `yaml:"sources_dir" mapstructure:"sources_dir"`
 	DevMode    bool   `yaml:"dev_mode" mapstructure:"dev_mode"`
+	// Concurrency caps how many sources ingest at once. Each in-flight ingest
+	// holds a decoded catalog, so this multiplies peak memory directly. 0
+	// derives it from the CPUs available, which is the right answer on both a
+	// 1-vCPU droplet and a build box.
+	Concurrency int `yaml:"concurrency" mapstructure:"concurrency"`
 }
 
 // AIConfig configures AI features (enrichment + analysis).
@@ -167,6 +172,7 @@ func setCommunityDefaults() {
 	// Ingestion (live feeder enabled by default; RESPONDENT_INGEST_ENABLED=false
 	// serves a static instance for the deterministic e2e suite).
 	viper.SetDefault("ingest.enabled", true)
+	viper.SetDefault("ingest.concurrency", 0) // 0 = derive from available CPUs
 
 	// AI workers.
 	viper.SetDefault("ai.workers.enrichment", 2)

@@ -2,6 +2,7 @@ package feeder
 
 import (
 	"context"
+	"runtime"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -55,9 +56,8 @@ func newTestIngestionService(t *testing.T, logger zerolog.Logger, body func(ctx 
 				Interval: 24 * time.Hour, // long interval: only the initial run fires
 			},
 		},
-		tickers: make([]*time.Ticker, 0),
-		stopCh:  make(chan struct{}),
-		sem:     make(chan struct{}, 4),
+		stopCh: make(chan struct{}),
+		sem:    make(chan struct{}, 4),
 	}
 }
 
@@ -112,4 +112,34 @@ func TestIngestionService_StopWaitsForInflight(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("Stop() did not return after the ingest finished")
 	}
+}
+
+// Each in-flight ingest holds a whole decoded catalog, so the semaphore width
+// multiplies peak memory. The hardcoded 4 was worst on the host that could
+// least afford it: on one vCPU four pipelines interleave rather than run in
+// parallel, gaining nothing while four working sets stay live.
+func TestIngestConcurrency(t *testing.T) {
+	t.Run("honours an explicit setting", func(t *testing.T) {
+		if got := IngestConcurrency(3); got != 3 {
+			t.Errorf("got %d, want 3", got)
+		}
+	})
+
+	t.Run("derives from CPUs when unset", func(t *testing.T) {
+		want := runtime.GOMAXPROCS(0) / 2
+		if want < 1 {
+			want = 1
+		}
+		if got := IngestConcurrency(0); got != want {
+			t.Errorf("got %d, want %d", got, want)
+		}
+	})
+
+	t.Run("never drops below one on a single-vCPU host", func(t *testing.T) {
+		restore := runtime.GOMAXPROCS(1)
+		defer runtime.GOMAXPROCS(restore)
+		if got := IngestConcurrency(0); got != 1 {
+			t.Errorf("got %d, want 1: a zero-width semaphore would deadlock ingestion", got)
+		}
+	})
 }

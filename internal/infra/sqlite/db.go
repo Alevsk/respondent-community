@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"runtime"
 	"strings"
 
 	"github.com/rs/zerolog"
@@ -87,10 +86,13 @@ func Open(path string, logger zerolog.Logger) (*DB, error) {
 	// snapshot/analysis ORDER BYs spill their temp B-trees to disk — the "loads
 	// and returns data super slowly" symptom.
 
-	// 64 MB page cache (negative = KiB). Default is -2000 (≈2 MB). Keeps hot
-	// index/leaf pages resident so repeated reads of the same entities/indexes
-	// don't re-hit disk on every query.
-	if _, err := db.Exec("PRAGMA cache_size=-65536"); err != nil {
+	// Page cache (negative = KiB), one shared budget split across every
+	// connection in both pools. Keeps hot index/leaf pages resident so repeated
+	// reads of the same entities/indexes don't re-hit disk on every query,
+	// without the total growing with the pool. See pagecache.go.
+	readConns := readPoolSize()
+	cacheKiB := perConnectionCacheKiB(1 + readConns)
+	if _, err := db.Exec(fmt.Sprintf("PRAGMA cache_size=-%d", cacheKiB)); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("set cache size: %w", err)
 	}
@@ -102,11 +104,12 @@ func Open(path string, logger zerolog.Logger) (*DB, error) {
 		return nil, fmt.Errorf("set temp store: %w", err)
 	}
 
-	// Memory-map up to 256 MB of the database file so reads served from the mmap
-	// region avoid a read() syscall + buffer copy per page. mmap_size is virtual
-	// address space (paged in on demand), not committed RAM, so it is safe on
-	// modest hosts. A no-op for :memory: databases.
-	if _, err := db.Exec("PRAGMA mmap_size=268435456"); err != nil {
+	// Memory-map part of the database file so reads served from the mmap region
+	// avoid a read() syscall + buffer copy per page. The mapping is virtual
+	// address space rather than committed RAM, but cgroup v2 charges the pages
+	// it faults in as file memory, so the window is sized for a small container
+	// rather than left at a server-sized default. A no-op for :memory: databases.
+	if _, err := db.Exec(fmt.Sprintf("PRAGMA mmap_size=%d", mmapBytes)); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("set mmap size: %w", err)
 	}
@@ -144,9 +147,9 @@ func Open(path string, logger zerolog.Logger) (*DB, error) {
 	readPragmas := []string{
 		"_pragma=query_only(1)", // defense-in-depth: this pool never writes
 		"_pragma=busy_timeout(5000)",
-		"_pragma=cache_size(-65536)",
+		fmt.Sprintf("_pragma=cache_size(-%d)", cacheKiB),
 		"_pragma=temp_store(2)", // MEMORY
-		"_pragma=mmap_size(268435456)",
+		fmt.Sprintf("_pragma=mmap_size(%d)", mmapBytes),
 	}
 	readDSN := "file:" + path + "?" + strings.Join(readPragmas, "&")
 	rdb, err := sql.Open("sqlite", readDSN)
@@ -154,12 +157,8 @@ func Open(path string, logger zerolog.Logger) (*DB, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("open sqlite read pool: %w", err)
 	}
-	n := runtime.NumCPU()
-	if n < 2 {
-		n = 2
-	}
-	rdb.SetMaxOpenConns(n)
-	rdb.SetMaxIdleConns(n)
+	rdb.SetMaxOpenConns(readConns)
+	rdb.SetMaxIdleConns(readConns)
 	rdb.SetConnMaxLifetime(0)
 	if err := rdb.Ping(); err != nil {
 		_ = rdb.Close()

@@ -4,6 +4,7 @@ package feeder
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"sync"
 	"time"
 
@@ -45,7 +46,6 @@ type IngestionService struct {
 	obsRepo         domain.ObservationRepository
 	enabledSources  []string
 	sourceConfigs   map[string]SourceConfig
-	tickers         []*time.Ticker
 	stopCh          chan struct{}
 	wg              sync.WaitGroup
 	enrichPublisher enrichment.JobPublisher             // nil if AI not configured
@@ -67,6 +67,7 @@ func NewIngestionService(
 	sourceConfigs map[string]SourceConfig,
 	enrichPublisher enrichment.JobPublisher,
 	sourceAIConfigs map[string]*aiconfig.SourceAIConfig,
+	concurrency int,
 ) *IngestionService {
 	return &IngestionService{
 		logger:          logger,
@@ -77,12 +78,30 @@ func NewIngestionService(
 		obsRepo:         obsRepo,
 		enabledSources:  enabledSources,
 		sourceConfigs:   sourceConfigs,
-		tickers:         make([]*time.Ticker, 0),
 		stopCh:          make(chan struct{}),
 		enrichPublisher: enrichPublisher,
 		sourceAIConfigs: sourceAIConfigs,
-		sem:             make(chan struct{}, 4), // bounded to 4 to prevent OOM on startup
+		sem:             make(chan struct{}, IngestConcurrency(concurrency)),
 	}
+}
+
+// IngestConcurrency resolves how many sources may ingest at once.
+//
+// Each in-flight ingest holds a whole decoded catalog, so this number
+// multiplies the resident working set directly. A hardcoded 4 was the worst
+// possible choice on a single-vCPU host: four pipelines there do not run in
+// parallel, they interleave — no throughput is gained while four working sets
+// stay live at once and every slot is held four times longer. Deriving it from
+// the CPUs actually available keeps the multiplier honest: 1 on a droplet, 8
+// on a 16-core box. A configured value wins.
+func IngestConcurrency(configured int) int {
+	if configured > 0 {
+		return configured
+	}
+	if half := runtime.GOMAXPROCS(0) / 2; half > 1 {
+		return half
+	}
+	return 1
 }
 
 // executeIngest acquires the concurrency semaphore before running ingestSource
@@ -113,19 +132,25 @@ func (s *IngestionService) Start(ctx context.Context) {
 			continue
 		}
 
-		ticker := time.NewTicker(cfg.Interval)
-		s.tickers = append(s.tickers, ticker)
-
 		s.wg.Add(1)
-		go func(name string, t *time.Ticker) {
+		go func(name string, interval time.Duration) {
 			defer s.wg.Done()
 			s.logger.Info().
 				Str("source", name).
-				Dur("interval", cfg.Interval).
+				Dur("interval", interval).
 				Msg("starting source ticker")
 
 			// Initial ingest bounded by semaphore
 			s.executeIngest(ctx, name)
+
+			// The ticker starts only once this source's first ingest has
+			// returned. Constructing every ticker up front phase-locked all
+			// sources sharing an interval to the same instant, so the 16
+			// hourly sources re-stampeded together forever. Starting the clock
+			// after a semaphore-serialised first run spreads them out by
+			// construction, with no offset to invent or tune.
+			t := time.NewTicker(interval)
+			defer t.Stop()
 
 			for {
 				select {
@@ -137,7 +162,7 @@ func (s *IngestionService) Start(ctx context.Context) {
 					s.executeIngest(ctx, name)
 				}
 			}
-		}(sourceName, ticker)
+		}(sourceName, cfg.Interval)
 	}
 }
 
@@ -147,9 +172,6 @@ func (s *IngestionService) Start(ctx context.Context) {
 func (s *IngestionService) Stop() {
 	s.logger.Info().Msg("stopping ingestion daemon")
 	close(s.stopCh)
-	for _, ticker := range s.tickers {
-		ticker.Stop()
-	}
 	s.wg.Wait()
 	s.logger.Info().Msg("stopped all source tickers")
 }

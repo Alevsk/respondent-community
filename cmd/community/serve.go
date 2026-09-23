@@ -320,6 +320,7 @@ func runServe(ctx context.Context) error {
 		sourceConfigs,
 		enrichPub, // nil if AI disabled
 		sourceAIConfigs,
+		cfg.Ingest.Concurrency,
 	)
 
 	// ── 16. gRPC-gateway API ───────────────────────────────────────────
