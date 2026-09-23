@@ -1,0 +1,76 @@
+import type { MediaConfig } from '@respondent/core';
+
+/** Backslashes, whitespace and control characters never belong in a media URL. */
+function hasUnsafeCharacter(value: string): boolean {
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    if (code <= 0x20 || code === 0x7f || value[i] === '\\') return true;
+  }
+  return false;
+}
+
+/** Browser-side literal-host screening; browsers cannot DNS-pin or inspect redirects. */
+export function validateMediaUrl(value: string, origins?: string[]): string | null {
+  if (!/^https:\/\//i.test(value) || hasUnsafeCharacter(value)) return null;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'https:' || url.username || url.password) return null;
+    const host = url.hostname.toLowerCase().replace(/\.$/, '');
+    if (host.startsWith('[')) {
+      // Only global unicast IPv6. Also excludes IPv4-mapped, local, multicast,
+      // unspecified and loopback literals without ambiguous text-prefix checks.
+      const first = parseInt(host.slice(1).split(':')[0], 16);
+      if (!(first >= 0x2000 && first <= 0x3fff)) return null;
+    } else if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) {
+      const [a, b] = host.split('.').map(Number);
+      if (
+        a === 0 ||
+        a === 10 ||
+        a === 127 ||
+        a >= 224 ||
+        (a === 100 && b >= 64 && b <= 127) ||
+        (a === 169 && b === 254) ||
+        (a === 172 && b >= 16 && b <= 31) ||
+        (a === 192 && (b === 168 || b === 0)) ||
+        (a === 198 && (b === 18 || b === 19))
+      )
+        return null;
+    } else if (
+      !host.includes('.') ||
+      /(^|\.)(localhost|local|internal|lan|home|test\.invalid)$/.test(host) ||
+      host.endsWith('.home.arpa')
+    ) {
+      return null;
+    }
+    if (origins && !origins.includes(url.origin)) return null;
+    return url.href;
+  } catch {
+    return null;
+  }
+}
+
+export function snapshotUrl(value: string, param?: string, now = Date.now()): string {
+  if (!param) return value;
+  const url = new URL(value);
+  url.searchParams.set(param, String(now));
+  return url.href;
+}
+
+export interface ResolvedMedia {
+  config: MediaConfig;
+  url: string | null;
+  attribution: string;
+}
+
+export function resolveMedia(
+  configs: MediaConfig[] | undefined,
+  entity: Record<string, string>,
+  observation?: Record<string, string>,
+): ResolvedMedia[] {
+  const metadata = { ...entity, ...observation };
+  return (configs ?? []).map((config) => ({
+    config,
+    url: validateMediaUrl(metadata[config.urlKey] ?? '', config.allowedOrigins),
+    attribution: config.attributionKey ? (metadata[config.attributionKey] ?? '') : '',
+  }));
+}

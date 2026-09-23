@@ -1,0 +1,136 @@
+/**
+ * AudioPlayer — the persistent transport bar for the one audio session.
+ *
+ * It outlives the entity panel on purpose: a listener who closes the detail
+ * view keeps hearing the station and keeps a visible way to stop it. Disabling
+ * the station's layer, or pressing Stop, releases the element.
+ */
+
+import React, { useEffect } from 'react';
+import { useStore } from 'zustand';
+import { Box, IconButton, Slider, Tooltip, Typography } from '@mui/material';
+import { Pause, Play, Radio, X } from 'lucide-react';
+import { alpha, theme, DASHBOARD_TYPOGRAPHY } from '@respondent/core';
+import { useUIStore } from '@/app/store';
+import { useMediaContext } from './MediaProvider';
+
+export const AudioPlayer: React.FC = () => {
+  const ctx = useMediaContext();
+  const audio = ctx?.audio;
+  const state = useStore(
+    audio?.store ?? emptyStore,
+    (s) => s as ReturnType<NonNullable<typeof audio>['store']['getState']>,
+  );
+  const enabledLayers = useUIStore((s) => s.enabledLayers);
+
+  const stationLayer = state.station?.layerId;
+  useEffect(() => {
+    // Turning a layer off withdraws its media along with its entities.
+    if (stationLayer && !enabledLayers.includes(stationLayer)) audio?.stop();
+  }, [stationLayer, enabledLayers, audio]);
+
+  if (!audio || !state.station) return null;
+
+  const { station, status, error, volume } = state;
+  const playing = status === 'playing' || status === 'loading';
+
+  return (
+    <Box
+      data-testid="media-audio-player"
+      sx={{
+        position: 'fixed',
+        left: '50%',
+        transform: 'translateX(-50%)',
+        bottom: 'calc(16px + env(safe-area-inset-bottom, 0px))',
+        zIndex: 1300,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 1,
+        px: 1.25,
+        py: 0.75,
+        maxWidth: 'min(520px, calc(100vw - 32px))',
+        borderRadius: 2,
+        border: `1px solid ${alpha(theme.palette.primary.main, 0.25)}`,
+        backgroundColor: alpha(theme.palette.background.paper, 0.94),
+        backdropFilter: 'blur(6px)',
+      }}
+      role="region"
+      aria-label="Audio player"
+    >
+      <Radio size={14} color={theme.palette.primary.main} />
+      {/* The stream is always live, whatever time range the globe is showing. */}
+      <Typography
+        variant="caption"
+        sx={{
+          fontSize: 9,
+          fontWeight: 700,
+          letterSpacing: '0.08em',
+          px: 0.5,
+          borderRadius: 0.5,
+          color: 'common.black',
+          backgroundColor: theme.palette.primary.main,
+        }}
+      >
+        LIVE
+      </Typography>
+
+      <Box sx={{ minWidth: 0, flex: 1 }}>
+        <Typography
+          variant="caption"
+          noWrap
+          sx={{
+            display: 'block',
+            fontSize: DASHBOARD_TYPOGRAPHY.dashboardXs.fontSize,
+            fontWeight: 600,
+          }}
+        >
+          {station.name}
+        </Typography>
+        <Typography
+          variant="caption"
+          noWrap
+          sx={{ display: 'block', fontSize: 10, color: error ? 'error.main' : 'text.secondary' }}
+        >
+          {error || station.attribution || (status === 'loading' ? 'Connecting…' : 'Live stream')}
+        </Typography>
+      </Box>
+
+      <Tooltip title={playing ? 'Pause' : 'Play'} placement="top" arrow>
+        <IconButton
+          size="small"
+          aria-label={playing ? 'Pause audio' : 'Play audio'}
+          onClick={() => (playing ? audio.pause() : audio.resume())}
+        >
+          {playing ? <Pause size={14} /> : <Play size={14} />}
+        </IconButton>
+      </Tooltip>
+
+      <Slider
+        size="small"
+        aria-label="Volume"
+        value={volume}
+        min={0}
+        max={1}
+        step={0.05}
+        onChange={(_, value) => audio.setVolume(Array.isArray(value) ? value[0] : value)}
+        sx={{ width: 72, display: { xs: 'none', sm: 'block' } }}
+      />
+
+      <Tooltip title="Stop" placement="top" arrow>
+        <IconButton size="small" aria-label="Stop audio" onClick={() => audio.stop()}>
+          <X size={14} />
+        </IconButton>
+      </Tooltip>
+    </Box>
+  );
+};
+
+/** Stand-in store so the hook order stays stable without a provider. */
+const emptyStore = {
+  getState: () => ({ station: null, status: 'idle' as const, error: '', volume: 0.8 }),
+  getInitialState: () => ({ station: null, status: 'idle' as const, error: '', volume: 0.8 }),
+  setState: () => {},
+  subscribe: () => () => {},
+} as unknown as NonNullable<ReturnType<typeof useMediaContext>>['audio']['store'];
+
+export default AudioPlayer;

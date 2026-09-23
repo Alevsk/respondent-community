@@ -25,6 +25,7 @@ export const endpoints = {
   scenes: `${API_BASE_URL}/v1/scenes`,
   filters: `${API_BASE_URL}/v1/filters`,
   cctv: `${API_BASE_URL}/v1/cctv`,
+  mediaPlayback: `${API_BASE_URL}/v1/media/playback`,
   aiInsights: `${API_BASE_URL}/v1/ai/insights`,
   aiNotificationFilters: `${API_BASE_URL}/v1/ai/notifications/filters`,
 };

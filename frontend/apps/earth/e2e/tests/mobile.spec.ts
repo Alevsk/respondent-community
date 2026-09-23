@@ -16,7 +16,13 @@
  *   - selecting an entity mounts mobile-entity-panel (MobileEntityPanel.tsx).
  */
 import { test, expect, type Page } from '@playwright/test';
-import { setupMockRoutes, DEFAULT_ENTITIES, DEFAULT_LAYER_ID } from '../helpers/routes';
+import {
+  setupMockRoutes,
+  DEFAULT_ENTITIES,
+  DEFAULT_LAYER_ID,
+  type StubEntity,
+  type StubMediaConfig,
+} from '../helpers/routes';
 import { selectEntity, getSelectedEntityId, openCluster } from '../helpers/selection';
 
 const STUB = DEFAULT_ENTITIES[0];
@@ -153,5 +159,131 @@ test.describe('Earth App — mobile (Pixel 5)', () => {
     await expect(page.getByTestId('aspect-ratio-grid')).toHaveCount(0);
 
     await page.getByRole('button', { name: 'Exit recording mode' }).click();
+  });
+});
+
+/**
+ * Declarative media on the phone surface. Desktop coverage lives in
+ * media.spec.ts; this project is the only one that renders MobileEntityPanel,
+ * so the mobile controls are asserted here.
+ */
+const MEDIA_LAYER_ID = 'media_e2e';
+const MEDIA_CAMERA_URL = 'https://camera.e2e.example/frame.jpg';
+const MEDIA_STREAM_URL = 'https://radio.e2e.example/stream.mp3';
+
+const MEDIA_CONFIG: StubMediaConfig[] = [
+  {
+    id: 'camera',
+    kind: 'snapshot',
+    label: 'Harbour camera',
+    urlKey: 'snapshot_url',
+    attributionKey: 'attribution',
+    allowedOrigins: ['https://camera.e2e.example'],
+    snapshot: { refreshIntervalSeconds: 5, cacheBustParam: '_frame' },
+  },
+  {
+    id: 'radio',
+    kind: 'audio',
+    label: 'Harbour radio',
+    urlKey: 'stream_url',
+    attributionKey: 'attribution',
+    audio: {},
+  },
+];
+
+const MEDIA_ENTITY: StubEntity = {
+  id: `${MEDIA_LAYER_ID}:CAM-1`,
+  externalId: 'CAM-1',
+  name: 'Harbour East',
+  layerType: MEDIA_LAYER_ID,
+  metadata: {
+    snapshot_url: MEDIA_CAMERA_URL,
+    stream_url: MEDIA_STREAM_URL,
+    attribution: 'E2E Authority',
+  },
+  lat: 40,
+  lon: -74,
+};
+
+// A 1x1 JPEG — the smallest thing that decodes to a real image.
+const JPEG_1PX = Buffer.from(
+  '/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0a' +
+    'HBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAA' +
+    'AAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q==',
+  'base64',
+);
+
+test.describe('Earth App — mobile declarative media (Pixel 5)', () => {
+  let frames: number;
+
+  test.beforeEach(async ({ page }) => {
+    frames = 0;
+    await page.route('https://camera.e2e.example/**', (route) => {
+      frames += 1;
+      return route.fulfill({ status: 200, contentType: 'image/jpeg', body: JPEG_1PX });
+    });
+    await page.route('https://radio.e2e.example/**', (route) =>
+      route.fulfill({ status: 200, contentType: 'audio/mpeg', body: Buffer.alloc(0) }),
+    );
+    await setupMockRoutes(page, {
+      layerId: MEDIA_LAYER_ID,
+      entities: [MEDIA_ENTITY],
+      media: MEDIA_CONFIG,
+    });
+    await page.goto('/');
+    await expect(page.getByTestId('earth-shell')).toBeVisible();
+
+    // Layers start inactive in the store; a camera only refreshes for an
+    // enabled layer.
+    await navButton(page, 'Layers').click();
+    const drawer = page.getByTestId('mobile-drawer-data-layers');
+    await expect(drawer).toBeVisible();
+    const row = drawer.getByTestId(`filter-option-${MEDIA_LAYER_ID}`);
+    await row.click();
+    await expect(row).toHaveAttribute('data-active', 'true');
+    await page.keyboard.press('Escape');
+    await expect(drawer).not.toBeVisible();
+  });
+
+  test('the mobile entity panel renders the media section and refreshes one camera', async ({
+    page,
+  }) => {
+    await selectEntity(page, MEDIA_ENTITY.id, MEDIA_LAYER_ID);
+    const panel = page.getByTestId('mobile-entity-panel');
+    await expect(panel).toBeVisible();
+    // The phone panel opens collapsed to a header; the tab body — and with it
+    // the camera — only exists once it is expanded.
+    await panel.getByRole('button', { name: 'Maximize panel' }).click();
+
+    const section = panel.getByTestId('media-section');
+    await expect(section).toBeVisible();
+    await expect(section.getByText('Harbour camera')).toBeVisible();
+    await expect.poll(() => frames, { timeout: 10_000 }).toBeGreaterThan(0);
+
+    // The card stays inside the phone viewport.
+    const box = await section.boundingBox();
+    const width = page.viewportSize()!.width;
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(width + 1);
+  });
+
+  test('the persistent audio player is reachable and dismissible on a phone', async ({ page }) => {
+    await selectEntity(page, MEDIA_ENTITY.id, MEDIA_LAYER_ID);
+    const panel = page.getByTestId('mobile-entity-panel');
+    await expect(panel).toBeVisible();
+    await panel.getByRole('button', { name: 'Maximize panel' }).click();
+
+    await page.getByRole('button', { name: 'Play Harbour radio' }).first().click();
+    const player = page.getByTestId('media-audio-player');
+    await expect(player).toBeVisible();
+    await expect(player).toContainText('Harbour East');
+
+    const box = await player.boundingBox();
+    const width = page.viewportSize()!.width;
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(width + 1);
+
+    await player.getByRole('button', { name: 'Stop audio' }).click();
+    await expect(page.getByTestId('media-audio-player')).toHaveCount(0);
   });
 });

@@ -5,6 +5,8 @@ import { theme } from '@respondent/core';
 import EarthShell from './EarthShell';
 import BootstrapGate from '../shared/bootstrap/BootstrapGate';
 import ErrorBoundary from '../shared/ui/ErrorBoundary';
+import { MediaProvider } from '../features/media/MediaProvider';
+import { AudioPlayer } from '../features/media/AudioPlayer';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -23,7 +25,12 @@ function EarthApp() {
         <CssBaseline />
         <ErrorBoundary>
           <BootstrapGate>
-            <EarthShell />
+            {/* Media ownership lives above the shell so an audio session
+                survives closing the entity panel that started it. */}
+            <MediaProvider>
+              <EarthShell />
+              <AudioPlayer />
+            </MediaProvider>
           </BootstrapGate>
         </ErrorBoundary>
       </ThemeProvider>
