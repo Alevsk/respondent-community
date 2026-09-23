@@ -129,6 +129,9 @@ func (l *Loader) LoadFile(path string) (*CompiledSource, error) {
 	if err := validateMedia(def.Display.Media, def.Entity.Metadata, def.Observation.Metadata, def.MediaActions); err != nil {
 		return nil, fmt.Errorf("validate %q: %w", path, err)
 	}
+	if err := validateDiscovery(def.Transport.Discovery); err != nil {
+		return nil, fmt.Errorf("validate %q: %w", path, err)
+	}
 
 	// Cross-field: dedupe mode requires a non-empty content_hash expression.
 	if def.Recording.Mode == "dedupe" && strings.TrimSpace(def.Observation.ContentHash) == "" {

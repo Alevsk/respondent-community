@@ -121,6 +121,10 @@ type TransportSpec struct {
 	Pagination       *PaginationSpec   `yaml:"pagination,omitempty"`
 	Spatial          *SpatialSpec      `yaml:"spatial,omitempty"`
 
+	// Discovery optionally resolves the request origin through DNS SRV instead
+	// of using the host in URL. The declared path and query still apply.
+	Discovery *DiscoverySpec `yaml:"discovery,omitempty"`
+
 	// Transport-specific configurations
 	WebSocket  *WebSocketSpec  `yaml:"websocket,omitempty"`
 	SSE        *SSESpec        `yaml:"sse,omitempty"`
