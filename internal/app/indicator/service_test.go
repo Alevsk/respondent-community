@@ -6,12 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Alevsk/respondent/internal/app/layer/layertest"
 	"github.com/Alevsk/respondent/internal/domain"
 )
 
 func TestIndicatorService_GetGlobalIndicators_NoIndicatorLayers(t *testing.T) {
-	svc := NewIndicatorService(nil, nil, nil, domain.NewDynamicSourceRegistry())
+	svc := NewIndicatorService(nil, nil, domain.NewDynamicSourceRegistry())
 
 	snapshots, err := svc.GetGlobalIndicators(context.Background(), nil)
 	if err != nil {
@@ -40,8 +39,8 @@ func TestIndicatorService_GetGlobalIndicators_WithCacheData(t *testing.T) {
 		dynReg.Unregister(st)
 	}()
 
-	// Set up cache with a test entity + observation.
-	cache := layertest.NewFakeCacheStorage()
+	// Seed the durable store with a test entity + observation.
+	obsRepo := newStubObsRepo()
 	entity := &domain.Entity{
 		ID:         "test_indicator:noaa_space_weather",
 		ExternalID: "noaa_space_weather",
@@ -57,11 +56,9 @@ func TestIndicatorService_GetGlobalIndicators_WithCacheData(t *testing.T) {
 			"kp":      "3.33",
 		},
 	}
-	if err := cache.SetEntity(context.Background(), entity, obs); err != nil {
-		t.Fatalf("SetEntity: %v", err)
-	}
+	obsRepo.addSnapshot(entity.LayerType, entity, obs)
 
-	svc := NewIndicatorService(nil, nil, cache, dynReg)
+	svc := NewIndicatorService(nil, obsRepo, dynReg)
 
 	snapshots, err := svc.GetGlobalIndicators(context.Background(), nil)
 	if err != nil {
@@ -166,7 +163,7 @@ func TestIndicatorService_GetGlobalIndicators_FilterByLayerID(t *testing.T) {
 		dynReg.Unregister(st2)
 	}()
 
-	cache := layertest.NewFakeCacheStorage()
+	obsRepo := newStubObsRepo()
 	for _, lt := range []string{"ind_layer_1", "ind_layer_2"} {
 		entity := &domain.Entity{
 			ID:         lt + ":test",
@@ -180,10 +177,10 @@ func TestIndicatorService_GetGlobalIndicators_FilterByLayerID(t *testing.T) {
 			SourceType: lt,
 			Metadata:   map[string]string{"val1": "1", "val2": "2"},
 		}
-		_ = cache.SetEntity(context.Background(), entity, obs)
+		obsRepo.addSnapshot(entity.LayerType, entity, obs)
 	}
 
-	svc := NewIndicatorService(nil, nil, cache, dynReg)
+	svc := NewIndicatorService(nil, obsRepo, dynReg)
 
 	// Filter to only layer 1.
 	snapshots, err := svc.GetGlobalIndicators(context.Background(), []string{"ind_layer_1"})
@@ -229,7 +226,7 @@ func findIndicatorValue(values []domain.IndicatorValue, key string) *domain.Indi
 	return nil
 }
 
-func TestIndicatorService_GetGlobalIndicators_EmptyCache_DBFallback(t *testing.T) {
+func TestIndicatorService_GetGlobalIndicators_FromDurableStore(t *testing.T) {
 	dynReg := domain.NewDynamicSourceRegistry() //nolint:staticcheck // TODO: migrate to constructor injection
 	lt := domain.LayerType("test_indicator_fallback")
 	st := domain.SourceType("test_indicator_fallback_src")
@@ -259,9 +256,9 @@ func TestIndicatorService_GetGlobalIndicators_EmptyCache_DBFallback(t *testing.T
 		Metadata:   map[string]string{"val1": "3"},
 	}
 	entityRepo.add(entity)
-	obsRepo.add(obs)
+	obsRepo.addSnapshot(entity.LayerType, entity, obs)
 
-	svc := NewIndicatorService(entityRepo, obsRepo, nil, dynReg)
+	svc := NewIndicatorService(entityRepo, obsRepo, dynReg)
 
 	snapshots, err := svc.GetGlobalIndicators(context.Background(), nil)
 	if err != nil {
@@ -286,7 +283,7 @@ func TestIndicatorService_GetGlobalIndicators_NilRepos(t *testing.T) {
 	})
 	defer dynReg.Unregister(st)
 
-	svc := NewIndicatorService(nil, nil, nil, dynReg)
+	svc := NewIndicatorService(nil, nil, dynReg)
 
 	snapshots, err := svc.GetGlobalIndicators(context.Background(), nil)
 	if err != nil {
@@ -305,8 +302,8 @@ func TestIndicatorService_GetGlobalIndicators_NonIndicatorLayerFiltered(t *testi
 	dynReg.SetRenderingMode(lt, "map")
 	defer dynReg.Unregister(st)
 
-	cache := layertest.NewFakeCacheStorage()
-	svc := NewIndicatorService(nil, nil, cache, dynReg)
+	obsRepo := newStubObsRepo()
+	svc := NewIndicatorService(nil, obsRepo, dynReg)
 
 	snapshots, err := svc.GetGlobalIndicators(context.Background(), []string{"test_non_indicator"})
 	if err != nil {
@@ -325,8 +322,8 @@ func TestIndicatorService_GetGlobalIndicators_NoSpec(t *testing.T) {
 	dynReg.SetRenderingMode(lt, "indicator")
 	defer dynReg.Unregister(st)
 
-	cache := layertest.NewFakeCacheStorage()
-	svc := NewIndicatorService(nil, nil, cache, dynReg)
+	obsRepo := newStubObsRepo()
+	svc := NewIndicatorService(nil, obsRepo, dynReg)
 
 	snapshots, err := svc.GetGlobalIndicators(context.Background(), nil)
 	if err != nil {
@@ -351,7 +348,7 @@ func TestIndicatorService_GetGlobalIndicators_MissingField(t *testing.T) {
 	})
 	defer dynReg.Unregister(st)
 
-	cache := layertest.NewFakeCacheStorage()
+	obsRepo := newStubObsRepo()
 	entity := &domain.Entity{
 		ID:         "test_indicator_missing:test",
 		ExternalID: "test",
@@ -364,9 +361,9 @@ func TestIndicatorService_GetGlobalIndicators_MissingField(t *testing.T) {
 		SourceType: "test_indicator_missing",
 		Metadata:   map[string]string{"other_field": "value"},
 	}
-	_ = cache.SetEntity(context.Background(), entity, obs)
+	obsRepo.addSnapshot(entity.LayerType, entity, obs)
 
-	svc := NewIndicatorService(nil, nil, cache, dynReg)
+	svc := NewIndicatorService(nil, obsRepo, dynReg)
 
 	snapshots, err := svc.GetGlobalIndicators(context.Background(), nil)
 	if err != nil {
@@ -397,7 +394,7 @@ func TestIndicatorService_GetGlobalIndicators_DBError(t *testing.T) {
 	obsRepo := newStubObsRepo()
 	obsRepo.getErr = fmt.Errorf("database error")
 
-	svc := NewIndicatorService(nil, obsRepo, nil, dynReg)
+	svc := NewIndicatorService(nil, obsRepo, dynReg)
 
 	snapshots, err := svc.GetGlobalIndicators(context.Background(), nil)
 	if err != nil {

@@ -5,39 +5,10 @@ import (
 	"encoding/json"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/Alevsk/respondent/internal/domain"
-	"github.com/Alevsk/respondent/internal/infra/inmem"
 )
-
-func TestMemcacheFeederCache_SetEntity(t *testing.T) {
-	mc := inmem.NewMemCache(0, time.Minute)
-	defer func() { _ = mc.Close() }()
-	adapter := &memcacheFeederCache{cache: mc}
-
-	entity := &domain.Entity{
-		ID:         "e1",
-		ExternalID: "ext1",
-		LayerType:  "flights",
-		Name:       "Test",
-	}
-	obs := &domain.Observation{
-		ID:       "o1",
-		EntityID: "e1",
-	}
-
-	err := adapter.SetEntity(context.Background(), entity, obs, 5*time.Minute)
-	require.NoError(t, err)
-
-	// Verify entity is in cache.
-	gotEntity, _, err := mc.GetEntity(context.Background(), "flights", "ext1")
-	require.NoError(t, err)
-	assert.Equal(t, "e1", gotEntity.ID)
-}
 
 type mockQueueingBroadcaster struct {
 	mu      sync.Mutex

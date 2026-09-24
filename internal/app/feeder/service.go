@@ -23,7 +23,6 @@ type SourceConfig struct {
 	Interval              time.Duration
 	Timeout               time.Duration
 	APIURL                string
-	CacheTTL              time.Duration
 	ObservationRecordMode config.ObservationRecordMode
 	DryRun                bool // When true, fetch+parse+log but do NOT persist to DB/cache
 }
@@ -35,12 +34,11 @@ type sourceProvider interface {
 }
 
 // IngestionService runs the ingestion daemon: it polls each enabled source,
-// writes entities/observations through the injected cache and repositories, and
+// writes entities/observations through the injected repositories, and
 // publishes layer updates via the injected publisher.
 type IngestionService struct {
 	logger          zerolog.Logger
 	registry        sourceProvider
-	cache           FeederCache     // hot cache adapter (nil skips caching)
 	publisher       FeederPublisher // pub/sub adapter (nil skips publishing)
 	entityRepo      domain.EntityRepository
 	obsRepo         domain.ObservationRepository
@@ -54,12 +52,11 @@ type IngestionService struct {
 }
 
 // NewIngestionService creates a new ingestion service.
-// cache and publisher are optional (pass nil to skip caching/publishing).
+// publisher is optional (pass nil to skip publishing).
 // enrichPublisher and sourceAIConfigs are optional (pass nil to disable AI enrichment publishing).
 func NewIngestionService(
 	logger zerolog.Logger,
 	registry sourceProvider,
-	cache FeederCache,
 	publisher FeederPublisher,
 	entityRepo domain.EntityRepository,
 	obsRepo domain.ObservationRepository,
@@ -72,7 +69,6 @@ func NewIngestionService(
 	return &IngestionService{
 		logger:          logger,
 		registry:        registry,
-		cache:           cache,
 		publisher:       publisher,
 		entityRepo:      entityRepo,
 		obsRepo:         obsRepo,
@@ -224,7 +220,7 @@ func (s *IngestionService) ingestSource(ctx context.Context, sourceName string) 
 		Int("observations", len(observations)).
 		Msg("data fetched")
 
-	// Dry-run mode: log results but skip all persistence (DB + cache)
+	// Dry-run mode: log results but skip all persistence
 	if sc, ok := s.sourceConfigs[sourceName]; ok && sc.DryRun {
 		s.logger.Info().
 			Str("source", sourceName).
@@ -244,7 +240,7 @@ func (s *IngestionService) ingestSource(ctx context.Context, sourceName string) 
 	return nil
 }
 
-// persistEntities dual-writes entities to the hot cache and the durable store (SQLite).
+// persistEntities writes entities and observations to the durable store (SQLite).
 func (s *IngestionService) persistEntities(ctx context.Context, sourceName string, entities []*domain.Entity, observations []*domain.Observation) error {
 	if len(entities) == 0 {
 		return nil
@@ -400,25 +396,12 @@ func (s *IngestionService) persistEntities(ctx context.Context, sourceName strin
 
 	// --- Broadcast, and the hot cache alongside it ---
 	//
-	// Only entities with new observations are handled here. In dedupe mode the
-	// rest are unchanged, and a stale entity may carry coordinates the AI
-	// pipeline enriched — overwriting those with the raw 0,0 from the feed
-	// would undo the enrichment, and rebroadcasting them says nothing new.
-	//
-	// The publish is NOT conditional on the cache write. It used to be nested
-	// inside it, after a `continue` on cache error, so a cache that was failing
-	// or absent silenced the live globe entirely even though every entity had
-	// already been committed to the durable store. Broadcasting is what the
-	// globe depends on; caching is an optimisation beside it.
-	cacheCount := 0
+	// Only entities with new observations are broadcast. In dedupe mode the rest
+	// are unchanged, so rebroadcasting them would say nothing new.
+	broadcast := 0
 	obsMap := make(map[string]*domain.Observation, len(observations))
 	for _, obs := range observations {
 		obsMap[obs.EntityID] = obs
-	}
-
-	ttl := s.sourceConfigs[sourceName].CacheTTL
-	if ttl <= 0 {
-		ttl = 60 * time.Second
 	}
 
 	for _, entity := range entities {
@@ -442,25 +425,18 @@ func (s *IngestionService) persistEntities(ctx context.Context, sourceName strin
 			}
 		}
 
-		if s.cache != nil {
-			if err := s.cache.SetEntity(ctx, entity, obs, ttl); err != nil {
-				s.logger.Error().Str("external_id", entity.ExternalID).Err(err).Msg("failed to cache entity")
-			} else {
-				cacheCount++
-			}
-		}
-
 		if s.publisher != nil {
 			updateJSON, marshalErr := MarshalLayerUpdate(entity, obs)
 			if marshalErr == nil {
 				_ = s.publisher.PublishLayerUpdate(ctx, entity.LayerType, updateJSON)
+				broadcast++
 			}
 		}
 	}
 
 	s.logger.Info().
 		Int("total", len(entities)).
-		Int("cached", cacheCount).
+		Int("broadcast", broadcast).
 		Int("db_persisted", len(dbObservations)).
 		Msg("persisted entities")
 

@@ -22,7 +22,7 @@ import (
 
 func TestNewServer(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 
 	assert.NotNil(t, server)
 	assert.NotNil(t, server.Clients())
@@ -30,7 +30,7 @@ func TestNewServer(t *testing.T) {
 
 func TestServer_ClientConnectDisconnect(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -85,7 +85,7 @@ func TestServer_ClientConnectDisconnect(t *testing.T) {
 
 func TestServer_BroadcastLayerUpdate(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -156,7 +156,7 @@ func TestServer_BroadcastLayerUpdate(t *testing.T) {
 
 func TestServer_BroadcastWithFullChannel(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -225,7 +225,7 @@ func TestServer_SubscribeUnsubscribe(t *testing.T) {
 
 func TestServer_ConcurrentBroadcast(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -318,7 +318,7 @@ func buildTimeRangeMsg(t *testing.T, layerID, from, to string) realtime.WSMessag
 // without performing any database query — that path is tested separately.
 func newEnabledTimeRangeServer(maxLookback, maxSpan time.Duration) *realtime.Server {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 	server.SetTimeRangeConfig(realtime.TimeRangeConfig{
 		Enabled:      true,
 		MaxLookback:  maxLookback,
@@ -393,7 +393,7 @@ func TestHandleTimeRange_UsesPerLayerOverride(t *testing.T) {
 
 	// Build server with the same registry that holds the per-layer override.
 	logger2 := zerolog.Nop()
-	server := realtime.NewServer(logger2, nil, nil, nil, dynReg)
+	server := realtime.NewServer(logger2, nil, nil, dynReg)
 	server.SetTimeRangeConfig(realtime.TimeRangeConfig{
 		Enabled:      true,
 		MaxLookback:  serverLookback,
@@ -469,13 +469,13 @@ func TestDefaultOnDemandConfig(t *testing.T) {
 }
 func TestServer_SetAllowedOrigins(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 	origins := []string{"https://example.com", "https://test.com"}
 	server.SetAllowedOrigins(origins)
 }
 func TestServer_SetBackfillConfig(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 	cfg := realtime.BackfillConfig{
 		Enabled:         true,
 		StalenessWindow: 1 * time.Hour,
@@ -488,7 +488,7 @@ func TestServer_SetBackfillConfig(t *testing.T) {
 }
 func TestServer_SetTimeRangeConfig(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 	cfg := realtime.TimeRangeConfig{
 		Enabled:      true,
 		MaxLookback:  72 * time.Hour,
@@ -501,7 +501,7 @@ func TestServer_SetTimeRangeConfig(t *testing.T) {
 }
 func TestServer_SetOnDemandConfig(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 	cfg := realtime.OnDemandConfig{
 		Enabled:       true,
 		Cooldown:      5 * time.Second,
@@ -600,7 +600,7 @@ func TestClient_GetSubscriptions(t *testing.T) {
 }
 func TestServer_IsSpatialLayer(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, viewportRegistry("flights_commercial", "ships"))
+	server := realtime.NewServer(logger, nil, nil, viewportRegistry("flights_commercial", "ships"))
 	assert.True(t, server.IsSpatialLayer("flights_commercial"))
 	assert.True(t, server.IsSpatialLayer("ships"))
 	assert.False(t, server.IsSpatialLayer("satellites"))
@@ -613,13 +613,13 @@ func TestServer_IsSpatialLayer(t *testing.T) {
 // snapshot and billboards froze when panning. Resolving via filtering mode fixes it.
 func TestServer_IsSpatialLayer_ResolvesByLayerTypeNotSourceName(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, viewportRegistry("air_quality"))
+	server := realtime.NewServer(logger, nil, nil, viewportRegistry("air_quality"))
 	assert.True(t, server.IsSpatialLayer("air_quality"), "layer type is viewport-filtered")
 	assert.False(t, server.IsSpatialLayer("openaq_air_quality"), "source name is not a layer type")
 }
 func TestServer_NewClients(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 	assert.NotNil(t, server.Clients())
 	assert.Empty(t, server.Clients())
 }
@@ -638,7 +638,7 @@ func TestClient_CooldownMethods(t *testing.T) {
 }
 func TestServer_Run_ContextCancel(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
@@ -655,7 +655,7 @@ func TestServer_Run_ContextCancel(t *testing.T) {
 }
 func TestServer_Run_ClientRegistration(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go server.Run(ctx)
@@ -667,7 +667,7 @@ func TestServer_Run_ClientRegistration(t *testing.T) {
 }
 func TestServer_Run_ClientUnregistration(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go server.Run(ctx)
@@ -684,7 +684,7 @@ func TestServer_Run_ClientUnregistration(t *testing.T) {
 }
 func TestServer_BroadcastUpdate(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go server.Run(ctx)
@@ -718,13 +718,13 @@ func TestServer_BroadcastUpdate(t *testing.T) {
 }
 func TestServer_BroadcastUpdate_NilEntity(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 	server.BroadcastUpdate(nil)
 	server.BroadcastUpdate(&domain.EntityUpdate{Entity: nil})
 }
 func TestServer_BroadcastSnapshot(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go server.Run(ctx)
@@ -743,7 +743,7 @@ func TestServer_BroadcastSnapshot(t *testing.T) {
 }
 func TestServer_BroadcastCCTVFrame(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go server.Run(ctx)
@@ -802,7 +802,7 @@ func TestClient_ConcurrentOperations(t *testing.T) {
 }
 func TestServer_ConcurrentConfigUpdates(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 	var wg sync.WaitGroup
 	const goroutines = 4
 	wg.Add(goroutines)
@@ -913,7 +913,7 @@ func TestWSMessage_AllTypes(t *testing.T) {
 }
 func TestServer_SendSnapshotToClient(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 	sendCh := make(chan []byte, 256)
 	client := realtime.NewClient("test", nil, sendCh, logger)
 	entities := make([]*domain.Entity, 100)
@@ -947,7 +947,7 @@ done:
 }
 func TestServer_SendSnapshotToClient_FullBuffer(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 	sendCh := make(chan []byte, 1)
 	client := realtime.NewClient("test-client-full", nil, sendCh, logger)
 	sendCh <- []byte("fill")
@@ -1004,7 +1004,7 @@ func TestHandleMessage_Ping(t *testing.T) {
 
 func TestServer_GetBackfillThreshold(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 	threshold := server.GetBackfillThreshold("unknown_layer")
 	assert.Equal(t, 10, threshold)
 	server.SetBackfillConfig(realtime.BackfillConfig{
@@ -1017,7 +1017,7 @@ func TestServer_GetBackfillThreshold(t *testing.T) {
 func TestClient_SubscriptionLimit(t *testing.T) {
 	logger := zerolog.Nop()
 	sendCh := make(chan []byte, 256)
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 	client := realtime.NewClient("test", nil, sendCh, logger)
 	client.SetServer(server)
 	for i := range 101 {

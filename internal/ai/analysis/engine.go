@@ -419,23 +419,18 @@ func (e *Engine) fetchData(ctx context.Context, def *AnalysisDefinition, log zer
 	var records []AnalysisRecord
 
 	for _, layerType := range layers {
-		// Fetch latest observations for this layer.
-		observations, err := e.obsRepo.GetLatestForLayer(ctx, layerType, defaultMaxRecordsPerLayer)
+		// One page carries each entity alongside its latest observation, so the
+		// per-observation entity lookup this loop used to make is gone.
+		snapshots, err := e.obsRepo.GetLatestForLayerPage(ctx, layerType, defaultMaxRecordsPerLayer, 0)
 		if err != nil {
 			log.Warn().Err(err).Str("layer", layerType).Msg("failed to fetch observations, skipping layer")
 			continue
 		}
 
 		// Filter by lookback window.
-		for _, obs := range observations {
+		for _, snapshot := range snapshots {
+			entity, obs := &snapshot.Entity, &snapshot.Observation
 			if obs.Timestamp.Before(cutoff) {
-				continue
-			}
-
-			// Fetch associated entity.
-			entity, err := e.entityRepo.GetByID(ctx, obs.EntityID)
-			if err != nil {
-				log.Debug().Err(err).Str("entity_id", obs.EntityID).Msg("entity not found, skipping")
 				continue
 			}
 

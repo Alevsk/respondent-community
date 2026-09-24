@@ -35,6 +35,7 @@ import (
 type mockObsRepo struct {
 	mu              sync.RWMutex
 	snapshots       []*domain.EntitySnapshot
+	bboxSnapshots   []*domain.EntitySnapshot // what the two bbox queries return
 	latestObs       []*domain.Observation
 	err             error
 	getBBoxErr      error
@@ -51,16 +52,29 @@ func newMockObsRepo() *mockObsRepo {
 	}
 }
 
+// SetSnapshots seeds the whole store: both the full-layer page and the bbox
+// queries answer from it. Tests that need the viewport to differ from the
+// layer use setBBoxSnapshots to override just the spatial answer.
 func (m *mockObsRepo) SetSnapshots(snaps []*domain.EntitySnapshot) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.snapshots = snaps
+	m.bboxSnapshots = snaps
 }
 
 func (m *mockObsRepo) SetLatestObs(obs []*domain.Observation) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.latestObs = obs
+	// The page query is what snapshots read, so seeding "latest observations"
+	// must populate it as well.
+	m.snapshots = nil
+	for _, o := range obs {
+		m.snapshots = append(m.snapshots, &domain.EntitySnapshot{
+			Entity:      domain.Entity{ID: o.EntityID, ExternalID: o.EntityID},
+			Observation: *o,
+		})
+	}
 }
 
 func (m *mockObsRepo) SetErr(err error) {
@@ -105,13 +119,51 @@ func (m *mockObsRepo) GetLatest(ctx context.Context, entityID string) (*domain.O
 	return nil, m.err
 }
 
-func (m *mockObsRepo) GetLatestForLayer(ctx context.Context, layerType string, limit int) ([]*domain.Observation, error) {
+func (m *mockObsRepo) GetLatestForLayerPage(_ context.Context, _ string, limit, offset int) ([]*domain.EntitySnapshot, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	if m.err != nil {
 		return nil, m.err
 	}
-	return m.latestObs, nil
+	snaps := m.snapshots
+	if offset >= len(snaps) {
+		return nil, nil
+	}
+	snaps = snaps[offset:]
+	if limit > 0 && limit < len(snaps) {
+		snaps = snaps[:limit]
+	}
+	return snaps, nil
+}
+
+// addSnapshot seeds one entity+observation pair, the shape every page and bbox
+// query returns.
+func (m *mockObsRepo) addSnapshot(e *domain.Entity, o *domain.Observation) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	snap := &domain.EntitySnapshot{Entity: *e}
+	if o != nil {
+		snap.Observation = *o
+	}
+	m.snapshots = append(m.snapshots, snap)
+}
+
+// setBBoxSnapshots seeds what the two bbox queries return. It is separate from
+// the page seeding because they are separate queries: a viewport answer is not
+// the same set as a full-layer page.
+func (m *mockObsRepo) setBBoxSnapshots(entities []*domain.Entity, obs []*domain.Observation, err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.getBBoxErr = err
+	m.getLiveErr = err
+	m.bboxSnapshots = nil
+	for i, e := range entities {
+		snap := &domain.EntitySnapshot{Entity: *e}
+		if i < len(obs) && obs[i] != nil {
+			snap.Observation = *obs[i]
+		}
+		m.bboxSnapshots = append(m.bboxSnapshots, snap)
+	}
 }
 
 func (m *mockObsRepo) GetLatestForEntityIDs(ctx context.Context, entityIDs []string) (map[string]*domain.Observation, error) {
@@ -147,7 +199,7 @@ func (m *mockObsRepo) GetLatestForLayerByBBox(ctx context.Context, layerType str
 	if m.err != nil {
 		return nil, m.err
 	}
-	return m.snapshots, nil
+	return m.bboxSnapshots, nil
 }
 
 func (m *mockObsRepo) GetLatestByCurrentPositionInBBox(ctx context.Context, layerType string, south, north, west, east float64, from, to time.Time, limit int) ([]*domain.EntitySnapshot, error) {
@@ -159,7 +211,7 @@ func (m *mockObsRepo) GetLatestByCurrentPositionInBBox(ctx context.Context, laye
 	if m.err != nil {
 		return nil, m.err
 	}
-	return m.snapshots, nil
+	return m.bboxSnapshots, nil
 }
 
 func (m *mockObsRepo) PatchAIMetadata(ctx context.Context, observationID string, metadata map[string]any) error {
@@ -175,6 +227,7 @@ type mockEntityRepo struct {
 	getByIDsErr    error
 	getByExtIDErr  error
 	err            error
+	created        []*domain.Entity
 }
 
 func newMockEntityRepo() *mockEntityRepo {
@@ -198,12 +251,24 @@ func (m *mockEntityRepo) Create(ctx context.Context, e *domain.Entity) error {
 }
 
 func (m *mockEntityRepo) CreateBatch(ctx context.Context, entities []*domain.Entity) error {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.createBatchErr != nil {
 		return m.createBatchErr
 	}
-	return m.err
+	if m.err != nil {
+		return m.err
+	}
+	m.created = append(m.created, entities...)
+	return nil
+}
+
+// createdEntities returns everything CreateBatch was given, so a test can
+// assert that a fetch actually reached the durable store.
+func (m *mockEntityRepo) createdEntities() []*domain.Entity {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return append([]*domain.Entity(nil), m.created...)
 }
 
 func (m *mockEntityRepo) GetByID(ctx context.Context, id string) (*domain.Entity, error) {
@@ -265,7 +330,16 @@ func (m *mockEntityRepo) GetDistinctLayerTypes(ctx context.Context) ([]string, e
 }
 
 func (m *mockEntityRepo) CountByLayerType(ctx context.Context) (map[string]int64, error) {
-	return nil, m.err
+	if m.err != nil {
+		return nil, m.err
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	counts := make(map[string]int64)
+	for _, e := range m.entities {
+		counts[e.LayerType]++
+	}
+	return counts, nil
 }
 
 func (m *mockEntityRepo) Update(ctx context.Context, entity *domain.Entity) error {
@@ -313,7 +387,7 @@ func makeEntitySnapshot(layerType, externalID string) *domain.EntitySnapshot {
 func newServerWithRepos(t *testing.T, obsRepo *mockObsRepo, entityRepo *mockEntityRepo) *realtime.Server {
 	t.Helper()
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, entityRepo, obsRepo, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, entityRepo, obsRepo, domain.NewDynamicSourceRegistry())
 	server.SetTimeRangeConfig(realtime.TimeRangeConfig{
 		Enabled:      true,
 		MaxLookback:  48 * time.Hour,
@@ -370,8 +444,8 @@ func TestHandleUnsubscribe_StopsOnDemandTicker(t *testing.T) {
 	apiSrv := testAPIServer(t, nil)
 	defer apiSrv.Close()
 
-	sc := newSpatialMockCache()
-	sc.SetBBoxResults(nil, nil, nil)
+	sc := &mockObsRepo{}
+	sc.setBBoxSnapshots(nil, nil, nil)
 	_, client := newTickerTestServer(t, apiSrv.URL, 500*time.Millisecond, sc)
 
 	client.Subscribe("layer1")
@@ -408,7 +482,7 @@ func TestHandleViewportUpdate_EmptyLayerID(t *testing.T) {
 func TestHandleViewportUpdate_InvalidBBox_TooFarSouth(t *testing.T) {
 	logger := zerolog.Nop()
 	client := realtime.NewClient("test", nil, make(chan []byte, 256), logger)
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 	client.SetServer(server)
 
 	tests := []struct {
@@ -438,7 +512,7 @@ func TestHandleViewportUpdate_InvalidBBox_TooFarSouth(t *testing.T) {
 
 func TestHandleViewportUpdate_ValidBBox_NonSpatialLayer(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 	client := realtime.NewClient("test", nil, make(chan []byte, 512), logger)
 	client.SetServer(server)
 	client.Subscribe("layer1")
@@ -459,7 +533,7 @@ func TestHandleViewportUpdate_ValidBBox_NonSpatialLayer(t *testing.T) {
 func TestHandleViewportUpdate_ValidBBox_SpatialLayer_NoCache(t *testing.T) {
 	logger := zerolog.Nop()
 	// spatial layer but no cache — should set viewport, then return early
-	server := realtime.NewServer(logger, nil, nil, nil, viewportRegistry("test_spatial"))
+	server := realtime.NewServer(logger, nil, nil, viewportRegistry("test_spatial"))
 	client := realtime.NewClient("test", nil, make(chan []byte, 512), logger)
 	client.SetServer(server)
 
@@ -508,17 +582,17 @@ func TestHandleViewportUpdate_WithTimeRange_TriggersDoTimeRange(t *testing.T) {
 }
 
 func TestHandleViewportUpdate_SpatialLayerWithSpatialCache(t *testing.T) {
-	sc := newSpatialMockCache()
+	sc := &mockObsRepo{}
 	entities := []*domain.Entity{
 		{ID: "test_spatial:e1", ExternalID: "e1", LayerType: "test_spatial"},
 	}
 	obs := []*domain.Observation{
 		{ID: "obs1", EntityID: "test_spatial:e1", Timestamp: time.Now()},
 	}
-	sc.SetBBoxResults(entities, obs, nil)
+	sc.setBBoxSnapshots(entities, obs, nil)
 
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, sc, nil, nil, viewportRegistry("test_spatial"))
+	server := realtime.NewServer(logger, nil, sc, viewportRegistry("test_spatial"))
 	server.SetBackfillConfig(realtime.BackfillConfig{
 		Enabled:    false, // disable backfill so we don't need obsRepo
 		MaxResults: 500,
@@ -549,11 +623,11 @@ func TestHandleViewportUpdate_SpatialLayerWithSpatialCache(t *testing.T) {
 
 func TestHandleViewportUpdate_ZeroEntities_LogsDebug(t *testing.T) {
 	// Spatial layer but cache returns 0 entities and on-demand/backfill disabled
-	sc := newSpatialMockCache()
-	sc.SetBBoxResults(nil, nil, nil) // zero results
+	sc := &mockObsRepo{}
+	sc.setBBoxSnapshots(nil, nil, nil) // zero results
 
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, sc, nil, nil, viewportRegistry("test_spatial"))
+	server := realtime.NewServer(logger, nil, sc, viewportRegistry("test_spatial"))
 	server.SetBackfillConfig(realtime.BackfillConfig{
 		Enabled:    false,
 		MaxResults: 500,
@@ -594,7 +668,7 @@ func TestDoTimeRangeQuery_NoServer(t *testing.T) {
 
 func TestDoTimeRangeQuery_TimeRangeDisabled(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 	server.SetTimeRangeConfig(realtime.TimeRangeConfig{Enabled: false})
 
 	send := make(chan []byte, 256)
@@ -663,7 +737,7 @@ func TestDoTimeRangeQuery_WithObsRepo_Frozen_BBox(t *testing.T) {
 	obsRepo.SetSnapshots([]*domain.EntitySnapshot{snap})
 
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, obsRepo, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, obsRepo, domain.NewDynamicSourceRegistry())
 	server.SetTimeRangeConfig(realtime.TimeRangeConfig{
 		Enabled:      true,
 		MaxLookback:  48 * time.Hour,
@@ -707,7 +781,7 @@ func TestDoTimeRangeQuery_WithObsRepo_Live_BBox(t *testing.T) {
 	obsRepo.SetSnapshots([]*domain.EntitySnapshot{snap})
 
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, obsRepo, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, obsRepo, domain.NewDynamicSourceRegistry())
 	server.SetTimeRangeConfig(realtime.TimeRangeConfig{
 		Enabled:      true,
 		MaxLookback:  48 * time.Hour,
@@ -756,7 +830,7 @@ func TestDoTimeRangeQuery_WithObsRepo_NoViewport(t *testing.T) {
 	obsRepo.SetSnapshots([]*domain.EntitySnapshot{snap})
 
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, obsRepo, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, obsRepo, domain.NewDynamicSourceRegistry())
 	server.SetTimeRangeConfig(realtime.TimeRangeConfig{
 		Enabled:      true,
 		MaxLookback:  48 * time.Hour,
@@ -795,7 +869,7 @@ func TestDoTimeRangeQuery_ObsRepoError(t *testing.T) {
 	obsRepo.SetErr(errors.New("db error"))
 
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, obsRepo, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, obsRepo, domain.NewDynamicSourceRegistry())
 	server.SetTimeRangeConfig(realtime.TimeRangeConfig{
 		Enabled:      true,
 		MaxLookback:  48 * time.Hour,
@@ -831,7 +905,7 @@ func TestDoTimeRangeQuery_Cooldown(t *testing.T) {
 	obsRepo.SetSnapshots([]*domain.EntitySnapshot{snap})
 
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, obsRepo, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, obsRepo, domain.NewDynamicSourceRegistry())
 	server.SetTimeRangeConfig(realtime.TimeRangeConfig{
 		Enabled:      true,
 		MaxLookback:  48 * time.Hour,
@@ -880,7 +954,7 @@ func TestDoBackfill_EmptyResult(t *testing.T) {
 	obsRepo.SetSnapshots(nil) // returns nil, nil, nil
 
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, obsRepo, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, obsRepo, domain.NewDynamicSourceRegistry())
 	server.SetBackfillConfig(realtime.BackfillConfig{
 		Enabled:         true,
 		StalenessWindow: 30 * time.Minute,
@@ -899,7 +973,7 @@ func TestDoBackfill_WithSnapshots(t *testing.T) {
 	obsRepo.SetSnapshots([]*domain.EntitySnapshot{snap})
 
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, obsRepo, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, obsRepo, domain.NewDynamicSourceRegistry())
 	server.SetBackfillConfig(realtime.BackfillConfig{
 		Enabled:         true,
 		StalenessWindow: 30 * time.Minute,
@@ -925,7 +999,7 @@ func TestDoBackfill_DeduplicatesExisting(t *testing.T) {
 	})
 
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, obsRepo, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, obsRepo, domain.NewDynamicSourceRegistry())
 	server.SetBackfillConfig(realtime.BackfillConfig{
 		Enabled:         true,
 		StalenessWindow: 30 * time.Minute,
@@ -951,7 +1025,7 @@ func TestDoBackfill_RepoError(t *testing.T) {
 	obsRepo.SetErr(errors.New("db failure"))
 
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, obsRepo, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, obsRepo, domain.NewDynamicSourceRegistry())
 	server.SetBackfillConfig(realtime.BackfillConfig{
 		Enabled:         true,
 		StalenessWindow: 30 * time.Minute,
@@ -969,7 +1043,7 @@ func TestDoBackfill_EmptySnapshots(t *testing.T) {
 	obsRepo.SetSnapshots(nil)
 
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, obsRepo, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, obsRepo, domain.NewDynamicSourceRegistry())
 	server.SetBackfillConfig(realtime.BackfillConfig{
 		Enabled:         true,
 		StalenessWindow: 30 * time.Minute,
@@ -1002,7 +1076,7 @@ func TestSendSnapshotToClient_IndicatorLayer(t *testing.T) {
 	defer dynReg.Unregister(st)
 
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, dynReg)
+	server := realtime.NewServer(logger, nil, nil, dynReg)
 	send := make(chan []byte, 512)
 	client := realtime.NewClient("test", nil, send, logger)
 
@@ -1045,7 +1119,7 @@ func TestSendSnapshotToClient_IndicatorLayer_FullBuffer(t *testing.T) {
 	defer dynReg.Unregister(st)
 
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 	send := make(chan []byte, 1) // tiny buffer
 	send <- []byte("fill")       // fill it
 	client := realtime.NewClient("test", nil, send, logger)
@@ -1073,7 +1147,7 @@ func TestSendSnapshotToClient_IndicatorLayer_FullBuffer(t *testing.T) {
 
 func TestSendSnapshotToClient_ChunkedSnapshot(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 	send := make(chan []byte, 1024)
 	client := realtime.NewClient("test", nil, send, logger)
 
@@ -1113,7 +1187,7 @@ done:
 
 func TestSendSnapshotToClient_EmptyEntities(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 	send := make(chan []byte, 256)
 	client := realtime.NewClient("test", nil, send, logger)
 
@@ -1130,7 +1204,7 @@ func TestSendSnapshotToClient_EmptyEntities(t *testing.T) {
 func TestSendSnapshotToClient_ObsNilInList(t *testing.T) {
 	// Test that nil observations in the list don't cause a panic
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 	send := make(chan []byte, 256)
 	client := realtime.NewClient("test", nil, send, logger)
 
@@ -1153,14 +1227,14 @@ func TestSendSnapshotToClient_ObsNilInList(t *testing.T) {
 
 func TestFlushBatchedUpdates_EmptyPending(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 	// Empty pending — should return without panic
 	server.FlushBatchedUpdates()
 }
 
 func TestFlushBatchedUpdates_WithSubscribedClient(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1183,7 +1257,7 @@ func TestFlushBatchedUpdates_WithSubscribedClient(t *testing.T) {
 func TestFlushBatchedUpdates_WithFrozenClient(t *testing.T) {
 	// Frozen client must NOT receive flushed updates.
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1214,7 +1288,7 @@ func TestFlushBatchedUpdates_WithFrozenClient(t *testing.T) {
 
 func TestHandleConnection_Basic(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1243,7 +1317,7 @@ func TestHandleConnection_Basic(t *testing.T) {
 
 func TestHandleConnection_WithAllowedOrigins(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 	server.SetAllowedOrigins([]string{"*"})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1268,7 +1342,7 @@ func TestHandleConnection_WithAllowedOrigins(t *testing.T) {
 func TestHandleConnection_SubscribeViaWebSocket(t *testing.T) {
 	// Connect via real WebSocket and send a subscribe message.
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1302,7 +1376,7 @@ func TestHandleConnection_SubscribeViaWebSocket(t *testing.T) {
 
 func TestHandleConnection_UnsubscribeViaWebSocket(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1339,7 +1413,7 @@ func TestHandleConnection_UnsubscribeViaWebSocket(t *testing.T) {
 
 func TestHandleConnection_ViewportUpdateViaWebSocket(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1374,7 +1448,7 @@ func TestHandleConnection_ViewportUpdateViaWebSocket(t *testing.T) {
 
 func TestHandleConnection_InvalidJSONMessage(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1406,7 +1480,7 @@ func TestHandleConnection_InvalidJSONMessage(t *testing.T) {
 
 func TestServer_Run_UnregisterClosesChannel(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1433,7 +1507,7 @@ func TestServer_Run_UnregisterClosesChannel(t *testing.T) {
 
 func TestBroadcastUpdate_SubscribedClientReceives(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1468,7 +1542,7 @@ func TestBroadcastUpdate_SubscribedClientReceives(t *testing.T) {
 
 func TestBroadcastUpdate_SetsSourceWhenEmpty(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1502,7 +1576,7 @@ func TestBroadcastUpdate_SetsSourceWhenEmpty(t *testing.T) {
 
 func TestBroadcastSnapshot_NilEntities(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1535,7 +1609,7 @@ func TestBroadcastSnapshot_NilEntities(t *testing.T) {
 
 func TestBroadcastCCTVFrame_NoClients(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1555,15 +1629,11 @@ func TestBroadcastCCTVFrame_NoClients(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// handleSubscribe — server with cache (non-spatial, with and without obsRepo)
+// handleSubscribe — non-spatial layer served from the durable store
 // ---------------------------------------------------------------------------
 
-func TestHandleSubscribe_WithCacheHit(t *testing.T) {
-	from := newStandardMockCacheOnly()
-	_ = from // unused but satisfies the interface
-
-	// Use spatialMockCache that also implements GetLayerEntities
-	sc := newSpatialMockCache()
+func TestHandleSubscribe_FromDurableStore(t *testing.T) {
+	sc := &mockObsRepo{}
 	entities := []*domain.Entity{
 		{ID: "layer1:e1", ExternalID: "e1", LayerType: "layer1"},
 	}
@@ -1571,10 +1641,10 @@ func TestHandleSubscribe_WithCacheHit(t *testing.T) {
 		{ID: "obs1", EntityID: "layer1:e1", Timestamp: time.Now()},
 	}
 	// Inject via SetEntity so GetLayerEntities returns it
-	_ = sc.SetEntity(context.Background(), entities[0], obs[0])
+	sc.addSnapshot(entities[0], obs[0])
 
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, sc, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, sc, domain.NewDynamicSourceRegistry())
 	server.SetBackfillConfig(realtime.BackfillConfig{Enabled: false, MaxResults: 500})
 	server.SetOnDemandConfig(realtime.OnDemandConfig{Enabled: false})
 
@@ -1616,7 +1686,7 @@ func TestHandleSubscribe_WithObsRepo(t *testing.T) {
 	obsRepo.SetLatestObs([]*domain.Observation{o})
 
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, entityRepo, obsRepo, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, entityRepo, obsRepo, domain.NewDynamicSourceRegistry())
 	server.SetBackfillConfig(realtime.BackfillConfig{Enabled: false, MaxResults: 500})
 	server.SetOnDemandConfig(realtime.OnDemandConfig{Enabled: false})
 
@@ -1644,7 +1714,7 @@ func TestHandleSubscribe_ObsRepoError(t *testing.T) {
 	entityRepo := newMockEntityRepo()
 
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, entityRepo, obsRepo, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, entityRepo, obsRepo, domain.NewDynamicSourceRegistry())
 	server.SetBackfillConfig(realtime.BackfillConfig{Enabled: false, MaxResults: 500})
 
 	send := make(chan []byte, 512)
@@ -1663,44 +1733,18 @@ func TestHandleSubscribe_ObsRepoError(t *testing.T) {
 	}
 }
 
-func TestHandleSubscribe_EntityRepoError(t *testing.T) {
-	obsRepo := newMockObsRepo()
-	entityRepo := newMockEntityRepo()
-	entityRepo.getByIDsErr = errors.New("entity batch error")
-
-	o := &domain.Observation{ID: "obs1", EntityID: "entity1", Timestamp: time.Now()}
-	obsRepo.SetLatestObs([]*domain.Observation{o})
-
-	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, entityRepo, obsRepo, domain.NewDynamicSourceRegistry())
-
-	send := make(chan []byte, 512)
-	client := realtime.NewClient("test", nil, send, logger)
-	client.SetServer(server)
-
-	msg := realtime.WSMessage{Type: "subscribe", LayerID: "entity_err_layer"}
-	data, _ := json.Marshal(msg)
-	client.HandleMessage(data)
-
-	select {
-	case <-send:
-		t.Fatal("should not send message when entity repo returns error")
-	case <-time.After(200 * time.Millisecond):
-	}
-}
-
 func TestHandleSubscribe_WithViewport_SpatialCache(t *testing.T) {
-	sc := newSpatialMockCache()
+	sc := &mockObsRepo{}
 	entities := []*domain.Entity{
 		{ID: "test_spatial:e1", ExternalID: "e1", LayerType: "test_spatial"},
 	}
 	obs := []*domain.Observation{
 		{ID: "obs1", EntityID: "test_spatial:e1", Timestamp: time.Now()},
 	}
-	sc.SetBBoxResults(entities, obs, nil)
+	sc.setBBoxSnapshots(entities, obs, nil)
 
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, sc, nil, nil, viewportRegistry("test_spatial"))
+	server := realtime.NewServer(logger, nil, sc, viewportRegistry("test_spatial"))
 	server.SetBackfillConfig(realtime.BackfillConfig{
 		Enabled:    false,
 		MaxResults: 500,
@@ -1772,11 +1816,11 @@ func TestPersistOnDemandAsync_ViaOnDemandFetch(t *testing.T) {
 
 	entityRepo := newMockEntityRepo()
 	obsRepo := newMockObsRepo()
-	sc := newSpatialMockCache()
-	sc.SetBBoxResults(nil, nil, nil)
+	sc := &mockObsRepo{}
+	sc.setBBoxSnapshots(nil, nil, nil)
 
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, sc, entityRepo, obsRepo, viewportRegistry("flights_commercial"))
+	server := realtime.NewServer(logger, entityRepo, obsRepo, viewportRegistry("flights_commercial"))
 	server.SetOnDemandConfig(realtime.OnDemandConfig{
 		Enabled:      true,
 		Cooldown:     0,
@@ -1805,11 +1849,11 @@ func TestHandleSubscribe_SparseViewport_TriggersBackfill(t *testing.T) {
 	snap := makeEntitySnapshot("flights_commercial", "backfill-from-sub")
 	obsRepo.SetSnapshots([]*domain.EntitySnapshot{snap})
 
-	sc := newSpatialMockCache()
-	sc.SetBBoxResults(nil, nil, nil) // empty cache → sparse
+	sc := &mockObsRepo{}
+	sc.setBBoxSnapshots(nil, nil, nil) // empty cache → sparse
 
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, sc, nil, obsRepo, viewportRegistry("flights_commercial"))
+	server := realtime.NewServer(logger, nil, obsRepo, viewportRegistry("flights_commercial"))
 	server.SetBackfillConfig(realtime.BackfillConfig{
 		Enabled:         true,
 		StalenessWindow: 30 * time.Minute,
@@ -1852,7 +1896,7 @@ func TestHandleSubscribe_SparseViewport_TriggersBackfill(t *testing.T) {
 
 func TestBroadcastLayerUpdate_SetsSource(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1887,7 +1931,7 @@ func TestBroadcastLayerUpdate_SetsSource(t *testing.T) {
 
 func TestHandleConnection_MultipleClients_Broadcast(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1954,7 +1998,7 @@ func TestSetTimeRange_NilMapInit(t *testing.T) {
 
 func TestHandleMessage_AllTypes(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 
 	tests := []struct {
 		name string
@@ -2017,7 +2061,7 @@ func TestHandleSubscribe_NoServer(t *testing.T) {
 
 func TestBroadcastUpdate_NilObservation(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -2051,7 +2095,7 @@ func TestBroadcastUpdate_NilObservation(t *testing.T) {
 
 func TestFlushBatchedUpdates_SubscribedClientGetsMessage(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -2085,7 +2129,7 @@ func TestFlushBatchedUpdates_SubscribedClientGetsMessage(t *testing.T) {
 
 func TestFlushBatchedUpdates_SpatialLayerWithViewport(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, viewportRegistry("flights_commercial"))
+	server := realtime.NewServer(logger, nil, nil, viewportRegistry("flights_commercial"))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -2120,7 +2164,7 @@ func TestFlushBatchedUpdates_SpatialLayerWithViewport(t *testing.T) {
 
 func TestFlushBatchedUpdates_SpatialEntityOutsideViewport(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, viewportRegistry("flights_commercial"))
+	server := realtime.NewServer(logger, nil, nil, viewportRegistry("flights_commercial"))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -2153,7 +2197,7 @@ func TestFlushBatchedUpdates_SpatialEntityOutsideViewport(t *testing.T) {
 
 func TestFlushBatchedUpdates_FullSendBuffer(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -2187,7 +2231,7 @@ func TestFlushBatchedUpdates_FullSendBuffer(t *testing.T) {
 
 func TestFlushBatchedUpdates_NotSubscribed(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -2220,7 +2264,7 @@ func TestFlushBatchedUpdates_NotSubscribed(t *testing.T) {
 
 func TestRun_ContextCancel_WithActiveRealClients(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -2261,7 +2305,7 @@ func TestRun_ContextCancel_WithActiveRealClients(t *testing.T) {
 
 func TestRun_UnregisterNonExistentClient(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -2333,11 +2377,11 @@ func TestPersistOnDemandAsync_EntityCreateBatchError(t *testing.T) {
 	entityRepo := newMockEntityRepo()
 	entityRepo.createBatchErr = errors.New("entity create batch failed")
 	obsRepo := newMockObsRepo()
-	sc := newSpatialMockCache()
-	sc.SetBBoxResults(nil, nil, nil)
+	sc := &mockObsRepo{}
+	sc.setBBoxSnapshots(nil, nil, nil)
 
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, sc, entityRepo, obsRepo, viewportRegistry("flights_commercial"))
+	server := realtime.NewServer(logger, entityRepo, obsRepo, viewportRegistry("flights_commercial"))
 	server.SetOnDemandConfig(realtime.OnDemandConfig{
 		Enabled:      true,
 		Cooldown:     0,
@@ -2385,11 +2429,11 @@ func TestPersistOnDemandAsync_GetByExternalIDError(t *testing.T) {
 	entityRepo := newMockEntityRepo()
 	entityRepo.getByExtIDErr = errors.New("uuid lookup failed")
 	obsRepo := newMockObsRepo()
-	sc := newSpatialMockCache()
-	sc.SetBBoxResults(nil, nil, nil)
+	sc := &mockObsRepo{}
+	sc.setBBoxSnapshots(nil, nil, nil)
 
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, sc, entityRepo, obsRepo, viewportRegistry("flights_commercial"))
+	server := realtime.NewServer(logger, entityRepo, obsRepo, viewportRegistry("flights_commercial"))
 	server.SetOnDemandConfig(realtime.OnDemandConfig{
 		Enabled:      true,
 		Cooldown:     0,
@@ -2501,7 +2545,7 @@ func TestHandleViewportUpdate_NilServer(t *testing.T) {
 
 func TestBroadcastLayerUpdate_NonSubscribedClient(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -2527,15 +2571,14 @@ func TestBroadcastLayerUpdate_NonSubscribedClient(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// handleSubscribe — with viewport that doesn't match spatial cache interface
+// handleSubscribe — spatial layer with no observation repository wired
 // ---------------------------------------------------------------------------
 
-func TestHandleSubscribe_SpatialLayer_NilCacheInterface(t *testing.T) {
-	// Cache doesn't implement spatialCacheQuerier — falls through to non-spatial path
-	// but layer IS spatial with viewport
-	plainCache := newStandardMockCacheOnly()
+func TestHandleSubscribe_SpatialLayer_NoObservationRepo(t *testing.T) {
+	// The layer is spatial and a viewport is supplied, but nothing can answer
+	// the spatial query.
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, plainCache, nil, nil, viewportRegistry("test_spatial2"))
+	server := realtime.NewServer(logger, nil, nil, viewportRegistry("test_spatial2"))
 	server.SetBackfillConfig(realtime.BackfillConfig{Enabled: false, MaxResults: 500})
 	server.SetOnDemandConfig(realtime.OnDemandConfig{Enabled: false})
 
@@ -2563,7 +2606,7 @@ func TestHandleSubscribe_SpatialLayer_NilCacheInterface(t *testing.T) {
 
 func TestHandleViewportUpdate_NonSpatialLayer_ExitsAfterViewportSet(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 	client := realtime.NewClient("test", nil, make(chan []byte, 512), logger)
 	client.SetServer(server)
 
@@ -2580,13 +2623,12 @@ func TestHandleViewportUpdate_NonSpatialLayer_ExitsAfterViewportSet(t *testing.T
 }
 
 // ---------------------------------------------------------------------------
-// handleViewportUpdate — spatial but cache doesn't implement spatialCacheQuerier
+// handleViewportUpdate — spatial layer with no observation repository wired
 // ---------------------------------------------------------------------------
 
-func TestHandleViewportUpdate_SpatialLayer_NoCacheInterface(t *testing.T) {
-	plainCache := newStandardMockCacheOnly()
+func TestHandleViewportUpdate_SpatialLayer_NoObservationRepo(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, plainCache, nil, nil, viewportRegistry("test_spa3"))
+	server := realtime.NewServer(logger, nil, nil, viewportRegistry("test_spa3"))
 	server.SetBackfillConfig(realtime.BackfillConfig{Enabled: false, MaxResults: 500})
 
 	client := realtime.NewClient("test", nil, make(chan []byte, 512), logger)
@@ -2607,7 +2649,7 @@ func TestHandleViewportUpdate_SpatialLayer_NoCacheInterface(t *testing.T) {
 
 func TestFlushBatchedUpdates_Concurrent(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -2736,7 +2778,7 @@ func TestSetTimeRange_NilMapInitBranch(t *testing.T) {
 
 func TestHandleConnection_AtCapacity(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -2774,7 +2816,7 @@ func TestWritePump_WriteError(t *testing.T) {
 	// Connect a real WebSocket, then have the server try to write to it after
 	// the connection is closed — exercises writePump's error path.
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -2824,7 +2866,7 @@ func TestWritePump_WriteError(t *testing.T) {
 
 func TestReadPump_NormalClosure(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -2858,7 +2900,7 @@ func TestReadPump_NormalClosure(t *testing.T) {
 
 func TestHandleConnection_TimeRangeMessageViaWebSocket(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 	server.SetTimeRangeConfig(realtime.TimeRangeConfig{
 		Enabled:      true,
 		MaxLookback:  48 * time.Hour,
@@ -2908,10 +2950,10 @@ func TestHandleConnection_TimeRangeMessageViaWebSocket(t *testing.T) {
 
 func TestDoOnDemandFetchCore_BadURL(t *testing.T) {
 	// API URL template with invalid URL
-	sc := newSpatialMockCache()
-	sc.SetBBoxResults(nil, nil, nil)
+	sc := &mockObsRepo{}
+	sc.setBBoxSnapshots(nil, nil, nil)
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, sc, nil, nil, viewportRegistry("flights_commercial"))
+	server := realtime.NewServer(logger, nil, sc, viewportRegistry("flights_commercial"))
 	server.SetOnDemandConfig(realtime.OnDemandConfig{
 		Enabled:      true,
 		Cooldown:     0,
@@ -2931,10 +2973,10 @@ func TestDoOnDemandFetchCore_InvalidJSONResponse(t *testing.T) {
 	}))
 	defer apiSrv.Close()
 
-	sc := newSpatialMockCache()
-	sc.SetBBoxResults(nil, nil, nil)
+	sc := &mockObsRepo{}
+	sc.setBBoxSnapshots(nil, nil, nil)
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, sc, nil, nil, viewportRegistry("flights_commercial"))
+	server := realtime.NewServer(logger, nil, sc, viewportRegistry("flights_commercial"))
 	server.SetOnDemandConfig(realtime.OnDemandConfig{
 		Enabled:      true,
 		Cooldown:     0,
@@ -2954,7 +2996,7 @@ func TestDoOnDemandFetchCore_InvalidJSONResponse(t *testing.T) {
 
 func TestReadPump_AbruptClose(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -2990,7 +3032,7 @@ func TestBroadcastLayerUpdate_UnregisterChannelFull(t *testing.T) {
 	// This tests the BroadcastLayerUpdate default path when the unregister channel
 	// is also full (client send buffer full + unregister channel full).
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -3104,11 +3146,11 @@ func TestPersistOnDemandAsync_EntityUUIDFound_UpsertSucceeds(t *testing.T) {
 	entityRepo.AddEntity(preEntity)
 
 	obsRepo := newMockObsRepo()
-	sc := newSpatialMockCache()
-	sc.SetBBoxResults(nil, nil, nil)
+	sc := &mockObsRepo{}
+	sc.setBBoxSnapshots(nil, nil, nil)
 
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, sc, entityRepo, obsRepo, viewportRegistry("flights_commercial"))
+	server := realtime.NewServer(logger, entityRepo, obsRepo, viewportRegistry("flights_commercial"))
 	server.SetOnDemandConfig(realtime.OnDemandConfig{
 		Enabled:      true,
 		Cooldown:     0,
@@ -3163,11 +3205,11 @@ func TestPersistOnDemandAsync_EntityUUIDFound_UpsertFails(t *testing.T) {
 	obsRepo := newMockObsRepo()
 	obsRepo.upsertErr = errors.New("upsert failed") // CreateBatchUpsert returns error
 
-	sc := newSpatialMockCache()
-	sc.SetBBoxResults(nil, nil, nil)
+	sc := &mockObsRepo{}
+	sc.setBBoxSnapshots(nil, nil, nil)
 
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, sc, entityRepo, obsRepo, viewportRegistry("flights_commercial"))
+	server := realtime.NewServer(logger, entityRepo, obsRepo, viewportRegistry("flights_commercial"))
 	server.SetOnDemandConfig(realtime.OnDemandConfig{
 		Enabled:      true,
 		Cooldown:     0,
@@ -3217,11 +3259,11 @@ func TestPersistOnDemandAsync_NoEntityUUIDFound(t *testing.T) {
 	// CreateBatch succeeds (no error set)
 
 	obsRepo := newMockObsRepo()
-	sc := newSpatialMockCache()
-	sc.SetBBoxResults(nil, nil, nil)
+	sc := &mockObsRepo{}
+	sc.setBBoxSnapshots(nil, nil, nil)
 
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, sc, entityRepo, obsRepo, viewportRegistry("flights_commercial"))
+	server := realtime.NewServer(logger, entityRepo, obsRepo, viewportRegistry("flights_commercial"))
 	server.SetOnDemandConfig(realtime.OnDemandConfig{
 		Enabled:      true,
 		Cooldown:     0,
@@ -3260,7 +3302,7 @@ func TestHandleSubscribe_EmptyLayerID(t *testing.T) {
 
 func TestHandleViewportUpdate_BBoxUnmarshalError(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 	client := realtime.NewClient("test-vp-err", nil, make(chan []byte, 256), logger)
 	client.SetServer(server)
 
@@ -3283,11 +3325,11 @@ func TestHandleViewportUpdate_BBoxUnmarshalError(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestHandleViewportUpdate_BBoxQueryError(t *testing.T) {
-	sc := newSpatialMockCache()
-	sc.SetBBoxResults(nil, nil, errors.New("geo index error"))
+	sc := &mockObsRepo{}
+	sc.setBBoxSnapshots(nil, nil, errors.New("geo index error"))
 
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, sc, nil, nil, viewportRegistry("test_spatial"))
+	server := realtime.NewServer(logger, nil, sc, viewportRegistry("test_spatial"))
 	server.SetBackfillConfig(realtime.BackfillConfig{Enabled: false, MaxResults: 500})
 	server.SetOnDemandConfig(realtime.OnDemandConfig{Enabled: false})
 
@@ -3317,7 +3359,7 @@ func TestHandleViewportUpdate_BBoxQueryError(t *testing.T) {
 
 func TestFlushBatchedUpdates_FrozenSubscribedClient(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -3353,7 +3395,7 @@ func TestFlushBatchedUpdates_FrozenSubscribedClient(t *testing.T) {
 
 func TestHandleConnection_AcceptError(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -3382,7 +3424,7 @@ func TestHandleConnection_AcceptError(t *testing.T) {
 
 func TestRun_BroadcastChannelFull(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -3411,7 +3453,7 @@ func TestRun_BroadcastChannelFull(t *testing.T) {
 // doOnDemandFetchCore — cache SetEntity error (lines 1758-1760)
 // ---------------------------------------------------------------------------
 
-func TestDoOnDemandFetchCore_CacheSetEntityError(t *testing.T) {
+func TestDoOnDemandFetchCore_PersistError(t *testing.T) {
 	aircraft := []struct {
 		Hex string
 		Lat float64
@@ -3438,13 +3480,14 @@ func TestDoOnDemandFetchCore_CacheSetEntityError(t *testing.T) {
 	}))
 	defer apiSrv.Close()
 
-	// Use a spatialMockCache that returns an error on SetEntity.
-	sc := newSpatialMockCache()
-	sc.SetBBoxResults(nil, nil, nil)
-	sc.setErr = errors.New("cache write failure")
+	// Persisting the fetched entities fails; the entities must still reach the
+	// client rather than the whole on-demand fetch being lost.
+	sc := &mockObsRepo{}
+	sc.setBBoxSnapshots(nil, nil, nil)
+	sc.createBatchErr = errors.New("persist failure")
 
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, sc, nil, nil, viewportRegistry("flights_commercial"))
+	server := realtime.NewServer(logger, nil, sc, viewportRegistry("flights_commercial"))
 	server.SetOnDemandConfig(realtime.OnDemandConfig{
 		Enabled:      true,
 		Cooldown:     0,
@@ -3464,13 +3507,7 @@ func TestDoOnDemandFetchCore_CacheSetEntityError(t *testing.T) {
 // doOnDemandFetchCore — persist semaphore full (lines 1775-1776)
 // ---------------------------------------------------------------------------
 
-func TestDoOnDemandFetchCore_PersistSemFull(t *testing.T) {
-	aircraft := []struct {
-		Hex string
-		Lat float64
-		Lon float64
-	}{{"semfull1", 40.0, -74.0}}
-
+func TestDoOnDemandFetchCore_PersistsBeforeReturning(t *testing.T) {
 	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		type ac struct {
 			Hex     string  `json:"hex"`
@@ -3483,19 +3520,19 @@ func TestDoOnDemandFetchCore_PersistSemFull(t *testing.T) {
 			AC    []ac `json:"ac"`
 			Total int  `json:"total"`
 		}
-		acs := make([]ac, len(aircraft))
-		for i, a := range aircraft {
-			acs[i] = ac{Hex: a.Hex, Flight: "T" + a.Hex, Lat: a.Lat, Lon: a.Lon, AltBaro: 35000}
-		}
-		_ = json.NewEncoder(w).Encode(resp{AC: acs, Total: len(acs)})
+		_ = json.NewEncoder(w).Encode(resp{
+			AC:    []ac{{Hex: "abc123", Flight: "TEST1", Lat: 40.5, Lon: -73.5, AltBaro: 35000}},
+			Total: 1,
+		})
 	}))
 	defer apiSrv.Close()
 
-	sc := newSpatialMockCache()
-	sc.SetBBoxResults(nil, nil, nil)
+	entityRepo := newMockEntityRepo()
+	obsRepo := &mockObsRepo{}
+	obsRepo.setBBoxSnapshots(nil, nil, nil)
 
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, sc, nil, nil, viewportRegistry("flights_commercial"))
+	server := realtime.NewServer(logger, entityRepo, obsRepo, viewportRegistry("flights_commercial"))
 	server.SetOnDemandConfig(realtime.OnDemandConfig{
 		Enabled:      true,
 		Cooldown:     0,
@@ -3504,14 +3541,16 @@ func TestDoOnDemandFetchCore_PersistSemFull(t *testing.T) {
 	})
 	server.SetOnDemandParser(parse.ParseADSBLolResponse)
 
-	// Fill the persist semaphore so the "semaphore full, skipping persist" branch fires.
-	server.FillPersistSem()
-	defer server.DrainPersistSem()
-
 	bbox := &domain.BBox{West: -75, South: 39, East: -72, North: 42}
 	entities, _ := server.DoOnDemandFetchDirect(context.Background(), "layer1", "flights_commercial", bbox)
-	// Entities are still returned; only async persist is skipped.
-	assert.NotEmpty(t, entities)
+	require.NotEmpty(t, entities)
+
+	// The persist used to run in a goroutine behind a semaphore that DROPPED
+	// the write when full, so a fetched entity could reach the client and never
+	// be stored. It is synchronous now: by the time the fetch returns, the
+	// durable store has it.
+	assert.NotEmpty(t, entityRepo.createdEntities(),
+		"on-demand entities must be persisted before the fetch returns")
 }
 
 // ---------------------------------------------------------------------------
@@ -3522,7 +3561,7 @@ func TestBroadcastLayerUpdate_UnregisterChannelFullNoRun(t *testing.T) {
 	// Without a running Run() goroutine, the unregister channel is unbuffered
 	// and has no receiver. The select default branch is taken immediately.
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 
 	// Add client directly to the server's clients map (bypasses register channel).
 	send := make(chan []byte, 1)
@@ -3564,7 +3603,7 @@ func TestSendSnapshotToClient_IndicatorLayer_NilObsInList(t *testing.T) {
 	defer dynReg.Unregister(st)
 
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 
 	send := make(chan []byte, 64)
 	client := realtime.NewClient("ind-nilobs", nil, send, logger)
@@ -3589,79 +3628,27 @@ func TestSendSnapshotToClient_IndicatorLayer_NilObsInList(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// paginatingMockCache wraps spatialMockCache with limit/offset support in
-// GetLayerEntities, which is needed for handlePage pagination tests.
-// ---------------------------------------------------------------------------
-
-type paginatingMockCache struct {
-	*spatialMockCache
-	// orderedEntities preserves insertion order for deterministic pagination.
-	orderedEntities []*domain.Entity
-	orderedObs      []*domain.Observation
-}
-
-func newPaginatingMockCache() *paginatingMockCache {
-	return &paginatingMockCache{
-		spatialMockCache: newSpatialMockCache(),
-	}
-}
-
-func (m *paginatingMockCache) AddOrdered(e *domain.Entity, o *domain.Observation) {
-	_ = m.SetEntity(context.Background(), e, o)
-	m.orderedEntities = append(m.orderedEntities, e)
-	m.orderedObs = append(m.orderedObs, o)
-}
-
-func (m *paginatingMockCache) GetLayerEntities(ctx context.Context, layerType string, limit, offset int) ([]*domain.Entity, []*domain.Observation, int64, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	if m.getErr != nil {
-		return nil, nil, 0, m.getErr
-	}
-	// Filter to matching layer, preserving insertion order.
-	var matched []*domain.Entity
-	var matchedObs []*domain.Observation
-	for i, e := range m.orderedEntities {
-		if e.LayerType == layerType {
-			matched = append(matched, e)
-			matchedObs = append(matchedObs, m.orderedObs[i])
-		}
-	}
-	total := int64(len(matched))
-	// Apply offset
-	if offset >= len(matched) {
-		return nil, nil, total, nil
-	}
-	matched = matched[offset:]
-	matchedObs = matchedObs[offset:]
-	// Apply limit
-	if limit > 0 && limit < len(matched) {
-		matched = matched[:limit]
-		matchedObs = matchedObs[:limit]
-	}
-	return matched, matchedObs, total, nil
-}
-
 // ---------------------------------------------------------------------------
 // Global mode subscribe + pagination tests
 // ---------------------------------------------------------------------------
 
 func TestHandleSubscribe_GlobalMode_WithLimitAndCursor(t *testing.T) {
-	// Populate a cache with 50 entities, subscribe with mode:"global" limit:10.
-	// Expect: 10 entities, total=50, cursor present.
-	// Use spatialMockCache (returns all entities regardless of limit) — the
-	// pagination slicing happens inside SendPaginatedSnapshot.
-	sc := newSpatialMockCache()
+	// 50 entities in the store, subscribe with mode:"global" limit:10.
+	// Expect: 10 entities, total=50, cursor present. The total comes from the
+	// entity repository, not from the length of the page.
+	sc := &mockObsRepo{}
+	entityRepo := newMockEntityRepo()
 	now := time.Now()
 	for i := 0; i < 50; i++ {
 		eid := fmt.Sprintf("e%d", i)
 		e := &domain.Entity{ID: "test_layer:" + eid, ExternalID: eid, LayerType: "test_layer"}
 		o := &domain.Observation{ID: "obs-" + eid, EntityID: "test_layer:" + eid, Timestamp: now}
-		_ = sc.SetEntity(context.Background(), e, o)
+		sc.addSnapshot(e, o)
+		entityRepo.AddEntity(e)
 	}
 
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, sc, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, entityRepo, sc, domain.NewDynamicSourceRegistry())
 	server.SetBackfillConfig(realtime.BackfillConfig{Enabled: false, MaxResults: 500})
 	server.SetOnDemandConfig(realtime.OnDemandConfig{Enabled: false})
 
@@ -3714,17 +3701,20 @@ func TestHandleSubscribe_GlobalMode_WithLimitAndCursor(t *testing.T) {
 
 func TestHandlePage_FetchesNextPage(t *testing.T) {
 	// Set up cache with 30 entities, subscribe globally, then request page 2.
-	sc := newPaginatingMockCache()
+	sc := &mockObsRepo{}
+	entityRepo := newMockEntityRepo()
 	now := time.Now()
 	for i := 0; i < 30; i++ {
 		eid := fmt.Sprintf("e%d", i)
 		e := &domain.Entity{ID: "page_layer:" + eid, ExternalID: eid, LayerType: "page_layer"}
 		o := &domain.Observation{ID: "obs-" + eid, EntityID: "page_layer:" + eid, Timestamp: now}
-		sc.AddOrdered(e, o)
+		sc.addSnapshot(e, o)
+		entityRepo.AddEntity(e)
 	}
 
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, sc, nil, nil, domain.NewDynamicSourceRegistry())
+	// The layer total comes from the entity repository, not the page length.
+	server := realtime.NewServer(logger, entityRepo, sc, domain.NewDynamicSourceRegistry())
 	server.SetBackfillConfig(realtime.BackfillConfig{Enabled: false, MaxResults: 500})
 	server.SetOnDemandConfig(realtime.OnDemandConfig{Enabled: false})
 
@@ -3788,17 +3778,17 @@ func TestHandlePage_FetchesNextPage(t *testing.T) {
 
 func TestHandleSubscribe_GlobalMode_SmallLayer_NoCursor(t *testing.T) {
 	// Layer with 3 entities and global mode — no cursor should be sent.
-	sc := newSpatialMockCache()
+	sc := &mockObsRepo{}
 	now := time.Now()
 	for i := 0; i < 3; i++ {
 		eid := fmt.Sprintf("e%d", i)
 		e := &domain.Entity{ID: "small_layer:" + eid, ExternalID: eid, LayerType: "small_layer"}
 		o := &domain.Observation{ID: "obs-" + eid, EntityID: "small_layer:" + eid, Timestamp: now}
-		_ = sc.SetEntity(context.Background(), e, o)
+		sc.addSnapshot(e, o)
 	}
 
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, sc, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, sc, domain.NewDynamicSourceRegistry())
 	server.SetBackfillConfig(realtime.BackfillConfig{Enabled: false, MaxResults: 500})
 	server.SetOnDemandConfig(realtime.OnDemandConfig{Enabled: false})
 
@@ -3841,7 +3831,7 @@ func TestHandleSubscribe_GlobalMode_SmallLayer_NoCursor(t *testing.T) {
 func TestFlushBatchedUpdates_GlobalMode_SkipsViewportFilter(t *testing.T) {
 	// A global-mode client should receive spatial updates that are outside its viewport.
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, viewportRegistry("flights_commercial"))
+	server := realtime.NewServer(logger, nil, nil, viewportRegistry("flights_commercial"))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -3880,7 +3870,7 @@ func TestFlushBatchedUpdates_GlobalMode_SkipsViewportFilter(t *testing.T) {
 func TestHandlePage_NonGlobalSubscription_Rejected(t *testing.T) {
 	// Page request on a non-global subscription should be rejected (no crash).
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 
 	send := make(chan []byte, 512)
 	client := realtime.NewClient("non-global-page", nil, send, logger)
@@ -3954,20 +3944,20 @@ func TestDecodeCursor_InvalidJSON(t *testing.T) {
 func TestHandleSubscribe_GlobalMode_SpatialLayerBypassesGeoQuery(t *testing.T) {
 	// A spatial layer subscribed in global mode should NOT use the geo bbox query,
 	// and should instead use GetLayerEntities (the non-spatial path).
-	sc := newSpatialMockCache()
+	sc := &mockObsRepo{}
 	now := time.Now()
 	for i := 0; i < 5; i++ {
 		eid := fmt.Sprintf("f%d", i)
 		e := &domain.Entity{ID: "flights_commercial:" + eid, ExternalID: eid, LayerType: "flights_commercial"}
 		o := &domain.Observation{ID: "obs-" + eid, EntityID: "flights_commercial:" + eid, Timestamp: now}
-		_ = sc.SetEntity(context.Background(), e, o)
+		sc.addSnapshot(e, o)
 	}
 	// BBox results return nothing — if global mode properly bypasses geo query,
 	// we should still get the entities from GetLayerEntities.
-	sc.SetBBoxResults(nil, nil, nil)
+	sc.setBBoxSnapshots(nil, nil, nil)
 
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, sc, nil, nil, viewportRegistry("flights_commercial"))
+	server := realtime.NewServer(logger, nil, sc, viewportRegistry("flights_commercial"))
 	server.SetBackfillConfig(realtime.BackfillConfig{Enabled: false, MaxResults: 500})
 	server.SetOnDemandConfig(realtime.OnDemandConfig{Enabled: false})
 
@@ -4024,7 +4014,7 @@ func TestUnsubscribe_ClearsGlobalMode(t *testing.T) {
 // viewport causes exactly the entities returned by GetLayerEntitiesByBBox to be
 // delivered in the snapshot — no more, no less — confirming the geo-query path.
 func TestHandleSubscribe_ViewportBBoxFiltering_SnapshotContainsOnlyBBoxEntities(t *testing.T) {
-	sc := newSpatialMockCache()
+	sc := &mockObsRepo{}
 
 	// Two entities inside the viewport (New York area)
 	insideEntities := []*domain.Entity{
@@ -4036,16 +4026,16 @@ func TestHandleSubscribe_ViewportBBoxFiltering_SnapshotContainsOnlyBBoxEntities(
 		{ID: "obs2", EntityID: "test_spatial:e2", Timestamp: time.Now()},
 	}
 	// Mock returns only bbox-filtered entities — simulates real geo-index behavior.
-	sc.SetBBoxResults(insideEntities, insideObs, nil)
+	sc.setBBoxSnapshots(insideEntities, insideObs, nil)
 
 	// Also seed entities in the "non-spatial" flat store so we can verify the
 	// subscribe path does NOT fall through to GetLayerEntities when bbox results exist.
 	outsideEntity := &domain.Entity{ID: "test_spatial:e99", ExternalID: "e99", LayerType: "test_spatial"}
 	outsideObs := &domain.Observation{ID: "obs99", EntityID: "test_spatial:e99"}
-	_ = sc.SetEntity(context.Background(), outsideEntity, outsideObs)
+	sc.addSnapshot(outsideEntity, outsideObs)
 
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, sc, nil, nil, viewportRegistry("test_spatial"))
+	server := realtime.NewServer(logger, nil, sc, viewportRegistry("test_spatial"))
 	server.SetBackfillConfig(realtime.BackfillConfig{
 		Enabled:    false,
 		MaxResults: 500,
@@ -4095,7 +4085,7 @@ func TestHandleSubscribe_ViewportBBoxFiltering_SnapshotContainsOnlyBBoxEntities(
 // viewport_update flow: GetLayerEntitiesByBBox is called and its results are
 // delivered as a layer.snapshot. This complements the existing error-path test.
 func TestHandleViewportUpdate_BBoxFiltering_SuccessPath(t *testing.T) {
-	sc := newSpatialMockCache()
+	sc := &mockObsRepo{}
 	entities := []*domain.Entity{
 		{ID: "test_spatial:a1", ExternalID: "a1", LayerType: "test_spatial"},
 		{ID: "test_spatial:a2", ExternalID: "a2", LayerType: "test_spatial"},
@@ -4104,10 +4094,10 @@ func TestHandleViewportUpdate_BBoxFiltering_SuccessPath(t *testing.T) {
 		{ID: "obs-a1", EntityID: "test_spatial:a1", Timestamp: time.Now()},
 		{ID: "obs-a2", EntityID: "test_spatial:a2", Timestamp: time.Now()},
 	}
-	sc.SetBBoxResults(entities, obs, nil)
+	sc.setBBoxSnapshots(entities, obs, nil)
 
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, sc, nil, nil, viewportRegistry("test_spatial"))
+	server := realtime.NewServer(logger, nil, sc, viewportRegistry("test_spatial"))
 	server.SetBackfillConfig(realtime.BackfillConfig{
 		Enabled:    false,
 		MaxResults: 500,
@@ -4153,10 +4143,10 @@ func TestHandleViewportUpdate_BBoxFiltering_SuccessPath(t *testing.T) {
 // TestHandleViewportUpdate_NonSpatialLayer_NoSnapshot verifies that
 // viewport_update on a non-spatial layer is silently ignored (no snapshot sent).
 func TestHandleViewportUpdate_NonSpatialLayer_NoSnapshot(t *testing.T) {
-	sc := newSpatialMockCache()
+	sc := &mockObsRepo{}
 	// Only "test_spatial" is registered as viewport-filtered; "non_spatial" is not.
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, sc, nil, nil, viewportRegistry("test_spatial"))
+	server := realtime.NewServer(logger, nil, sc, viewportRegistry("test_spatial"))
 
 	send := make(chan []byte, 256)
 	client := realtime.NewClient("vp-non-spatial", nil, send, logger)
@@ -4188,7 +4178,7 @@ func TestHandleViewportUpdate_NonSpatialLayer_NoSnapshot(t *testing.T) {
 // This locks both the spatial filter AND the global-mode bypass in a single test.
 func TestFlushBatchedUpdates_ViewportFilterAndGlobalBypass_Combined(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, viewportRegistry("flights_commercial"))
+	server := realtime.NewServer(logger, nil, nil, viewportRegistry("flights_commercial"))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -4311,16 +4301,8 @@ func TestHandleSubscribe_NonViewport_DurableStoreOverPartialCache(t *testing.T) 
 	}
 	obsRepo.SetLatestObs(latest)
 
-	// Hot cache holds only a PARTIAL subset (1 of 3) — the bug trusted this.
-	cache := newSpatialMockCache()
-	if err := cache.SetEntity(context.Background(),
-		&domain.Entity{ID: lt + ":c1", ExternalID: "c1", LayerType: lt},
-		&domain.Observation{ID: "o-c1", EntityID: lt + ":c1", Timestamp: time.Now()}); err != nil {
-		t.Fatalf("seed cache: %v", err)
-	}
-
 	// Empty registry => non-spatial layer => no viewport scoping.
-	server := realtime.NewServer(logger, cache, entityRepo, obsRepo, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, entityRepo, obsRepo, domain.NewDynamicSourceRegistry())
 	server.SetOnDemandConfig(realtime.OnDemandConfig{Enabled: false})
 
 	client, send := newClientForServer(t, server)
@@ -4328,7 +4310,7 @@ func TestHandleSubscribe_NonViewport_DurableStoreOverPartialCache(t *testing.T) 
 
 	ents := drainSnapshotEntities(t, send)
 	if len(ents) != 3 {
-		t.Errorf("snapshot entities = %d, want 3 (full durable set, not the 1-entity partial cache)", len(ents))
+		t.Errorf("snapshot entities = %d, want 3 (the full durable set)", len(ents))
 	}
 	assertAllLive(t, ents)
 }
@@ -4336,13 +4318,6 @@ func TestHandleSubscribe_NonViewport_DurableStoreOverPartialCache(t *testing.T) 
 func TestHandleSubscribe_Viewport_DurableBBoxSupplementsSparseCache(t *testing.T) {
 	logger := zerolog.Nop()
 	const lt = "flights_commercial"
-
-	// Hot geo-cache returns a sparse result (1 entity), below threshold.
-	cache := newSpatialMockCache()
-	cache.SetBBoxResults(
-		[]*domain.Entity{{ID: lt + ":f1", ExternalID: "f1", LayerType: lt}},
-		[]*domain.Observation{{ID: "o-f1", EntityID: lt + ":f1", Timestamp: time.Now()}},
-		nil)
 
 	// Durable store (current-position bbox) holds the full fresh set (5 flights).
 	obsRepo := newMockObsRepo()
@@ -4356,7 +4331,7 @@ func TestHandleSubscribe_Viewport_DurableBBoxSupplementsSparseCache(t *testing.T
 	}
 	obsRepo.SetSnapshots(snaps)
 
-	server := realtime.NewServer(logger, cache, entityRepo, obsRepo, viewportRegistry(lt))
+	server := realtime.NewServer(logger, entityRepo, obsRepo, viewportRegistry(lt))
 	// threshold=3: cache(1) < 3 triggers the durable bbox query; result(5) >= 3 so
 	// the rate-limited on-demand path stays off.
 	server.SetBackfillConfig(realtime.BackfillConfig{Enabled: false, MaxResults: 500, Thresholds: map[string]int{lt: 3}})
@@ -4386,11 +4361,10 @@ func TestViewportUpdate_PanToUncachedRegion_LoadsFromDurableStore(t *testing.T) 
 	europe := &domain.BBox{West: -10, South: 35, East: 40, North: 70}
 	us := &domain.BBox{West: -125, South: 25, East: -66, North: 49}
 
-	cache := newSpatialMockCache()
 	obsRepo := newMockObsRepo()
 	entityRepo := newMockEntityRepo()
 
-	server := realtime.NewServer(logger, cache, entityRepo, obsRepo, viewportRegistry(lt))
+	server := realtime.NewServer(logger, entityRepo, obsRepo, viewportRegistry(lt))
 	// Disable on-demand AND backfill so the durable-store fallback is the only path
 	// that can serve a panned-to region — isolating the regression.
 	server.SetBackfillConfig(realtime.BackfillConfig{Enabled: false, MaxResults: 500, Thresholds: map[string]int{lt: 10}})
@@ -4398,8 +4372,8 @@ func TestViewportUpdate_PanToUncachedRegion_LoadsFromDurableStore(t *testing.T) 
 
 	client, send := newClientForServer(t, server)
 
-	// 1) Subscribe with the Europe viewport — the hot cache holds Europe entities.
-	cache.SetBBoxResults(
+	// 1) Subscribe with the Europe viewport.
+	obsRepo.setBBoxSnapshots(
 		[]*domain.Entity{
 			{ID: lt + ":eu1", ExternalID: "eu1", LayerType: lt},
 			{ID: lt + ":eu2", ExternalID: "eu2", LayerType: lt},
@@ -4414,8 +4388,7 @@ func TestViewportUpdate_PanToUncachedRegion_LoadsFromDurableStore(t *testing.T) 
 		t.Fatalf("europe subscribe: got %d entities, want 2", got)
 	}
 
-	// 2) Pan to the US — the hot cache has NOTHING for the US, but the durable store does.
-	cache.SetBBoxResults(nil, nil, nil)
+	// 2) Pan to the US — a different region, so a different answer.
 	var usSnaps []*domain.EntitySnapshot
 	for _, id := range []string{"us1", "us2", "us3"} {
 		usSnaps = append(usSnaps, &domain.EntitySnapshot{

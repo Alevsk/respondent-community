@@ -24,7 +24,6 @@ type SourceRegistry interface {
 type IndicatorService struct {
 	entityRepo domain.EntityRepository
 	obsRepo    domain.ObservationRepository
-	cache      domain.CacheStorage
 	dynReg     SourceRegistry
 	logger     zerolog.Logger
 }
@@ -35,7 +34,6 @@ type IndicatorService struct {
 func NewIndicatorService(
 	entityRepo domain.EntityRepository,
 	obsRepo domain.ObservationRepository,
-	cache domain.CacheStorage,
 	dynReg SourceRegistry,
 	logger ...zerolog.Logger,
 ) *IndicatorService {
@@ -46,7 +44,6 @@ func NewIndicatorService(
 	return &IndicatorService{
 		entityRepo: entityRepo,
 		obsRepo:    obsRepo,
-		cache:      cache,
 		dynReg:     dynReg,
 		logger:     l,
 	}
@@ -101,21 +98,16 @@ func (s *IndicatorService) GetGlobalIndicators(ctx context.Context, layerIDs []s
 // buildSnapshot builds an IndicatorSnapshot for a single layer type by reading
 // the latest observations for all entities in that layer.
 func (s *IndicatorService) buildSnapshot(ctx context.Context, lt domain.LayerType, spec *domain.IndicatorSpec, _ SourceRegistry) (*domain.IndicatorSnapshot, error) {
-	// Try cache first, then DB.
-	var latestObs []*domain.Observation
-	if s.cache != nil {
-		_, obs, _, err := s.cache.GetLayerEntities(ctx, string(lt), 100, 0)
-		if err == nil && len(obs) > 0 {
-			latestObs = obs
-		}
+	if s.obsRepo == nil {
+		return nil, nil
 	}
-
-	if len(latestObs) == 0 && s.obsRepo != nil {
-		obs, err := s.obsRepo.GetLatestForLayer(ctx, string(lt), 100)
-		if err != nil {
-			return nil, err
-		}
-		latestObs = obs
+	snapshots, err := s.obsRepo.GetLatestForLayerPage(ctx, string(lt), 100, 0)
+	if err != nil {
+		return nil, err
+	}
+	latestObs := make([]*domain.Observation, 0, len(snapshots))
+	for i := range snapshots {
+		latestObs = append(latestObs, &snapshots[i].Observation)
 	}
 
 	if len(latestObs) == 0 {

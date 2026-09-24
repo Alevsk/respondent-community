@@ -24,26 +24,29 @@ type SourceRegistry interface {
 }
 
 // LayerService implements the LayerService gRPC service.
-// It depends on interfaces (domain.EntityRepository, domain.ObservationRepository, domain.CacheStorage)
+// It depends on interfaces (domain.EntityRepository, domain.ObservationRepository)
 // rather than concrete implementations, following the Dependency Inversion Principle.
 type LayerService struct {
 	entityRepo domain.EntityRepository
 	obsRepo    domain.ObservationRepository
-	cache      domain.CacheStorage // nil if cache unavailable
 	dynReg     SourceRegistry
 }
+
+// maxSnapshotLimit caps how many entities one snapshot request may materialise.
+// The limit arrives from an unauthenticated HTTP query parameter, and without a
+// ceiling a single request would build a response holding an entire layer —
+// 34,936 entities for power_plants — on a host sized for far less.
+const maxSnapshotLimit = 5000
 
 // NewLayerService creates a new LayerService with interface-based dependencies.
 func NewLayerService(
 	entityRepo domain.EntityRepository,
 	obsRepo domain.ObservationRepository,
-	cache domain.CacheStorage,
 	dynReg SourceRegistry,
 ) *LayerService {
 	return &LayerService{
 		entityRepo: entityRepo,
 		obsRepo:    obsRepo,
-		cache:      cache,
 		dynReg:     dynReg,
 	}
 }
@@ -174,86 +177,50 @@ func (s *LayerService) ToggleLayer(ctx context.Context, toggle *domain.LayerTogg
 	return layer, nil
 }
 
-// GetLayerSnapshot returns current snapshot of entities for a layer with pagination
+// GetLayerSnapshot returns one page of a layer's entities with their latest
+// observations.
+//
+// It reads the durable store directly. It used to consult a hot cache first and
+// return whatever that held as soon as it held anything, which made the answer
+// depend on what had been ingested since boot and, because the cache iterated a
+// Go map, differ between two identical requests. The store answers the same
+// question the same way every time, and TotalCount now comes from the store's
+// own per-layer count rather than from the length of the page.
 func (s *LayerService) GetLayerSnapshot(ctx context.Context, layerID string, limit, offset int) (*domain.SnapshotResult, error) {
 	if limit <= 0 {
 		limit = 500
 	}
-
-	layerType := domain.LayerType(layerID)
-
-	// Try to get from cache first (real-time data)
-	if s.cache != nil {
-		entities, observations, totalCount, err := s.cache.GetLayerEntities(ctx, string(layerType), limit, offset)
-		if err == nil && len(entities) > 0 {
-			hasMore := int64(offset+limit) < totalCount
-			return &domain.SnapshotResult{
-				Entities:     entities,
-				Observations: observations,
-				TotalCount:   totalCount,
-				HasMore:      hasMore,
-			}, nil
-		}
+	if limit > maxSnapshotLimit {
+		limit = maxSnapshotLimit
+	}
+	if offset < 0 {
+		offset = 0
 	}
 
-	// Fallback to database (historical data)
-	observations, err := s.obsRepo.GetLatestForLayer(ctx, string(layerType), 1000)
+	layerType := string(domain.LayerType(layerID))
+
+	snapshots, err := s.obsRepo.GetLatestForLayerPage(ctx, layerType, limit, offset)
 	if err != nil {
 		return nil, err
 	}
 
-	// Collect all entity IDs for a single batch fetch (avoids N+1 queries).
-	ids := make([]string, 0, len(observations))
-	for _, obs := range observations {
-		ids = append(ids, obs.EntityID)
+	entities := make([]*domain.Entity, 0, len(snapshots))
+	observations := make([]*domain.Observation, 0, len(snapshots))
+	for i := range snapshots {
+		entities = append(entities, &snapshots[i].Entity)
+		observations = append(observations, &snapshots[i].Observation)
 	}
-	fetched, err := s.entityRepo.GetByIDs(ctx, ids)
+
+	counts, err := s.entityRepo.CountByLayerType(ctx)
 	if err != nil {
 		return nil, err
 	}
-	entityMap := make(map[string]*domain.Entity, len(fetched))
-	for _, e := range fetched {
-		entityMap[e.ID] = e
-	}
-
-	// Keep only observations that have a matching entity, maintaining
-	// index alignment between both slices for the pagination logic below.
-	entities := make([]*domain.Entity, 0, len(fetched))
-	aligned := make([]*domain.Observation, 0, len(fetched))
-	for _, obs := range observations {
-		if e, ok := entityMap[obs.EntityID]; ok {
-			entities = append(entities, e)
-			aligned = append(aligned, obs)
-		}
-	}
-	observations = aligned
-
-	// Apply pagination to database results
-	totalCount := int64(len(entities))
-	start := offset
-	if start > len(entities) {
-		start = len(entities)
-	}
-	end := offset + limit
-	if end > len(entities) {
-		end = len(entities)
-	}
-
-	obsStart := start
-	if obsStart > len(observations) {
-		obsStart = len(observations)
-	}
-	obsEnd := end
-	if obsEnd > len(observations) {
-		obsEnd = len(observations)
-	}
-
-	hasMore := int64(offset+limit) < totalCount
+	totalCount := counts[layerType]
 
 	return &domain.SnapshotResult{
-		Entities:     entities[start:end],
-		Observations: observations[obsStart:obsEnd],
+		Entities:     entities,
+		Observations: observations,
 		TotalCount:   totalCount,
-		HasMore:      hasMore,
+		HasMore:      int64(offset+len(entities)) < totalCount,
 	}, nil
 }

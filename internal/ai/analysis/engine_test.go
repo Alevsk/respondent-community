@@ -184,8 +184,11 @@ func (r *mockEntityRepository) UpdateCoordinates(_ context.Context, _ string, _,
 
 // mockObservationRepository implements domain.ObservationRepository for testing.
 type mockObservationRepository struct {
-	mu                   sync.Mutex
-	latestForLayer       map[string][]*domain.Observation // layerType -> observations
+	mu             sync.Mutex
+	latestForLayer map[string][]*domain.Observation // layerType -> observations
+	// entities lets the page query join an observation to its entity, the way
+	// the real SQL does; the engine no longer fetches entities one at a time.
+	entities             *mockEntityRepository
 	getLatestForLayerErr error
 }
 
@@ -216,13 +219,33 @@ func (r *mockObservationRepository) GetByEntityID(_ context.Context, _ string, _
 func (r *mockObservationRepository) GetLatest(_ context.Context, _ string) (*domain.Observation, error) {
 	return nil, nil
 }
-func (r *mockObservationRepository) GetLatestForLayer(_ context.Context, layerType string, _ int) ([]*domain.Observation, error) {
+func (r *mockObservationRepository) GetLatestForLayerPage(ctx context.Context, layerType string, limit, offset int) ([]*domain.EntitySnapshot, error) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.getLatestForLayerErr != nil {
-		return nil, r.getLatestForLayerErr
+	obs := r.latestForLayer[layerType]
+	err := r.getLatestForLayerErr
+	entities := r.entities
+	r.mu.Unlock()
+	if err != nil {
+		return nil, err
 	}
-	return r.latestForLayer[layerType], nil
+	snaps := make([]*domain.EntitySnapshot, 0, len(obs))
+	for _, o := range obs {
+		snap := &domain.EntitySnapshot{Observation: *o}
+		if entities != nil {
+			if e, gErr := entities.GetByID(ctx, o.EntityID); gErr == nil && e != nil {
+				snap.Entity = *e
+			}
+		}
+		snaps = append(snaps, snap)
+	}
+	if offset >= len(snaps) {
+		return nil, nil
+	}
+	snaps = snaps[offset:]
+	if limit > 0 && limit < len(snaps) {
+		snaps = snaps[:limit]
+	}
+	return snaps, nil
 }
 func (r *mockObservationRepository) GetLatestForEntityIDs(_ context.Context, _ []string) (map[string]*domain.Observation, error) {
 	return nil, nil
@@ -347,6 +370,7 @@ func newTestEngine(t *testing.T, provider *mockLLMProvider) (*Engine, *mockEntit
 
 	entityRepo := newMockEntityRepo()
 	obsRepo := newMockObsRepo()
+	obsRepo.entities = entityRepo
 	insightRepo := newMockInsightRepo()
 	reg := schema.NewRegistry()
 	clk := &mockClock{now: time.Date(2026, 3, 28, 12, 0, 0, 0, time.UTC)}

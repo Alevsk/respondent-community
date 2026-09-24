@@ -27,8 +27,7 @@ func declaring(layerTypes ...string) *domain.DynamicSourceRegistry {
 func TestNewLayerServer(t *testing.T) {
 	eRepo := &testEntityRepo{}
 	oRepo := &testObsRepo{}
-	cache := &testCacheStorage{}
-	svc := layer.NewLayerService(eRepo, oRepo, cache, domain.NewDynamicSourceRegistry())
+	svc := layer.NewLayerService(eRepo, oRepo, domain.NewDynamicSourceRegistry())
 	srv := NewLayerServer(svc)
 	if srv == nil {
 		t.Fatal("expected server, got nil")
@@ -79,8 +78,7 @@ func TestLayerServer_GetLayers(t *testing.T) {
 				layerTypesErr: tt.layerTypesErr,
 			}
 			oRepo := &testObsRepo{}
-			cache := &testCacheStorage{totalCount: tt.cacheCount}
-			svc := layer.NewLayerService(eRepo, oRepo, cache, declaring(tt.layerTypes...))
+			svc := layer.NewLayerService(eRepo, oRepo, declaring(tt.layerTypes...))
 			srv := NewLayerServer(svc)
 
 			resp, err := srv.GetLayers(context.Background(), &respondentv1.GetLayersRequest{})
@@ -160,8 +158,7 @@ func TestLayerServer_ToggleLayer(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			eRepo := &testEntityRepo{}
 			oRepo := &testObsRepo{}
-			cache := &testCacheStorage{}
-			svc := layer.NewLayerService(eRepo, oRepo, cache, domain.NewDynamicSourceRegistry())
+			svc := layer.NewLayerService(eRepo, oRepo, domain.NewDynamicSourceRegistry())
 			srv := NewLayerServer(svc)
 
 			resp, err := srv.ToggleLayer(context.Background(), tt.req)
@@ -201,31 +198,33 @@ func TestLayerServer_ToggleLayer(t *testing.T) {
 
 func TestLayerServer_GetLayerSnapshot(t *testing.T) {
 	now := time.Now()
-
-	entities := []*domain.Entity{
-		{ID: "uuid-1", ExternalID: "UAL1234", LayerType: "flights_commercial", Name: "UAL1234"},
-		{ID: "uuid-2", ExternalID: "DAL5678", LayerType: "flights_commercial", Name: "DAL5678"},
+	snaps := []*domain.EntitySnapshot{
+		{
+			Entity:      domain.Entity{ID: "uuid-1", ExternalID: "DAL5678", LayerType: "flights_commercial", Name: "DAL5678"},
+			Observation: domain.Observation{EntityID: "uuid-1", Timestamp: now, Position: &domain.GeoPoint{Lat: 37.0, Lon: -122.0}, AltitudeM: 9000},
+		},
+		{
+			Entity:      domain.Entity{ID: "uuid-2", ExternalID: "UAL1234", LayerType: "flights_commercial", Name: "UAL1234"},
+			Observation: domain.Observation{EntityID: "uuid-2", Timestamp: now, Position: &domain.GeoPoint{Lat: 37.7749, Lon: -122.4194}, AltitudeM: 10000},
+		},
 	}
-
-	observations := []*domain.Observation{
-		{EntityID: "uuid-1", Timestamp: now, Position: &domain.GeoPoint{Lat: 37.7749, Lon: -122.4194}, AltitudeM: 10000},
-		{EntityID: "uuid-2", Timestamp: now, Position: &domain.GeoPoint{Lat: 37.0, Lon: -122.0}, AltitudeM: 9000},
+	// CountByLayerType derives the layer total from these, which is what
+	// TotalCount and HasMore are computed from — not the length of the page.
+	stored := map[string]*domain.Entity{
+		"uuid-1": {ID: "uuid-1", LayerType: "flights_commercial"},
+		"uuid-2": {ID: "uuid-2", LayerType: "flights_commercial"},
+		"uuid-3": {ID: "uuid-3", LayerType: "flights_commercial"},
 	}
 
 	tests := []struct {
 		name            string
 		req             *respondentv1.GetLayerSnapshotRequest
-		cacheEntities   []*domain.Entity
-		cacheObs        []*domain.Observation
-		cacheCount      int64
-		cacheErr        error
-		dbEntities      []*domain.Entity
-		dbEntityErr     error
-		dbObs           []*domain.Observation
-		dbObsErr        error
+		page            []*domain.EntitySnapshot
+		pageErr         error
 		wantCode        codes.Code
 		wantEntityCount int
 		wantObsCount    int
+		wantTotal       int64
 		wantHasMore     bool
 	}{
 		{
@@ -234,113 +233,68 @@ func TestLayerServer_GetLayerSnapshot(t *testing.T) {
 			wantCode: codes.InvalidArgument,
 		},
 		{
-			name:            "cache hit",
+			name:            "returns the page from the durable store",
 			req:             &respondentv1.GetLayerSnapshotRequest{LayerId: "flights_commercial", Limit: 100},
-			cacheEntities:   entities,
-			cacheObs:        observations,
-			cacheCount:      2,
+			page:            snaps,
 			wantCode:        codes.OK,
 			wantEntityCount: 2,
 			wantObsCount:    2,
-		},
-		{
-			name:            "cache miss fallback to db",
-			req:             &respondentv1.GetLayerSnapshotRequest{LayerId: "flights_commercial", Limit: 100},
-			cacheErr:        fmt.Errorf("cache miss"),
-			dbEntities:      entities,
-			dbObs:           observations,
-			wantCode:        codes.OK,
-			wantEntityCount: 2,
-			wantObsCount:    2,
-		},
-		{
-			name:     "db error on observation",
-			req:      &respondentv1.GetLayerSnapshotRequest{LayerId: "flights_commercial", Limit: 100},
-			cacheErr: fmt.Errorf("cache miss"),
-			dbObsErr: fmt.Errorf("db error"),
-			wantCode: codes.Internal,
-		},
-		{
-			name:            "empty cache returns db data",
-			req:             &respondentv1.GetLayerSnapshotRequest{LayerId: "flights_commercial", Limit: 100},
-			cacheEntities:   nil,
-			cacheObs:        nil,
-			cacheCount:      0,
-			dbEntities:      entities,
-			dbObs:           observations,
-			wantCode:        codes.OK,
-			wantEntityCount: 2,
-			wantObsCount:    2,
-		},
-		{
-			name:            "default limit",
-			req:             &respondentv1.GetLayerSnapshotRequest{LayerId: "flights_commercial"},
-			cacheEntities:   entities,
-			cacheObs:        observations,
-			cacheCount:      2,
-			wantCode:        codes.OK,
-			wantEntityCount: 2,
-			wantObsCount:    2,
-		},
-		{
-			name:            "zero limit defaults to 500",
-			req:             &respondentv1.GetLayerSnapshotRequest{LayerId: "flights_commercial", Limit: 0},
-			cacheEntities:   entities,
-			cacheObs:        observations,
-			cacheCount:      2,
-			wantCode:        codes.OK,
-			wantEntityCount: 2,
-			wantObsCount:    2,
-		},
-		{
-			name:            "negative limit defaults to 500",
-			req:             &respondentv1.GetLayerSnapshotRequest{LayerId: "flights_commercial", Limit: -10},
-			cacheEntities:   entities,
-			cacheObs:        observations,
-			cacheCount:      2,
-			wantCode:        codes.OK,
-			wantEntityCount: 2,
-			wantObsCount:    2,
-		},
-		{
-			name:            "has_more true",
-			req:             &respondentv1.GetLayerSnapshotRequest{LayerId: "flights_commercial", Limit: 1},
-			cacheEntities:   entities,
-			cacheObs:        observations,
-			cacheCount:      10,
-			wantCode:        codes.OK,
-			wantEntityCount: 2,
-			wantObsCount:    2,
+			wantTotal:       3,
 			wantHasMore:     true,
 		},
 		{
-			name:            "with offset",
-			req:             &respondentv1.GetLayerSnapshotRequest{LayerId: "flights_commercial", Limit: 100, Offset: 1},
-			cacheEntities:   entities,
-			cacheObs:        observations,
-			cacheCount:      2,
+			name:     "database error propagates",
+			req:      &respondentv1.GetLayerSnapshotRequest{LayerId: "flights_commercial", Limit: 100},
+			pageErr:  fmt.Errorf("db error"),
+			wantCode: codes.Internal,
+		},
+		{
+			name:            "empty layer returns an empty page, not an error",
+			req:             &respondentv1.GetLayerSnapshotRequest{LayerId: "flights_commercial", Limit: 100},
+			page:            nil,
+			wantCode:        codes.OK,
+			wantEntityCount: 0,
+			wantObsCount:    0,
+			wantTotal:       3,
+			wantHasMore:     true,
+		},
+		{
+			name:            "zero limit defaults",
+			req:             &respondentv1.GetLayerSnapshotRequest{LayerId: "flights_commercial", Limit: 0},
+			page:            snaps,
 			wantCode:        codes.OK,
 			wantEntityCount: 2,
 			wantObsCount:    2,
+			wantTotal:       3,
+			wantHasMore:     true,
+		},
+		{
+			name:            "negative limit defaults",
+			req:             &respondentv1.GetLayerSnapshotRequest{LayerId: "flights_commercial", Limit: -10},
+			page:            snaps,
+			wantCode:        codes.OK,
+			wantEntityCount: 2,
+			wantObsCount:    2,
+			wantTotal:       3,
+			wantHasMore:     true,
+		},
+		{
+			name:            "offset past the end of the layer reports no more",
+			req:             &respondentv1.GetLayerSnapshotRequest{LayerId: "flights_commercial", Limit: 100, Offset: 3},
+			page:            nil,
+			wantCode:        codes.OK,
+			wantEntityCount: 0,
+			wantObsCount:    0,
+			wantTotal:       3,
+			wantHasMore:     false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			eRepo := &testEntityRepo{
-				getByIDEntity: entities[0],
-			}
-			oRepo := &testObsRepo{
-				latestForLayer:    tt.dbObs,
-				latestForLayerErr: tt.dbObsErr,
-			}
-			cache := &testCacheStorage{
-				entities:     tt.cacheEntities,
-				observations: tt.cacheObs,
-				totalCount:   tt.cacheCount,
-				err:          tt.cacheErr,
-			}
-			svc := layer.NewLayerService(eRepo, oRepo, cache, domain.NewDynamicSourceRegistry())
+			eRepo := &testEntityRepo{entities: stored}
+			oRepo := &testObsRepo{layerPage: tt.page, layerPageErr: tt.pageErr}
+			svc := layer.NewLayerService(eRepo, oRepo, domain.NewDynamicSourceRegistry())
 			srv := NewLayerServer(svc)
 
 			resp, err := srv.GetLayerSnapshot(context.Background(), tt.req)
@@ -358,24 +312,55 @@ func TestLayerServer_GetLayerSnapshot(t *testing.T) {
 				}
 				return
 			}
-
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if resp == nil {
-				t.Fatal("expected response, got nil")
-			}
 			if len(resp.Entities) != tt.wantEntityCount {
-				t.Errorf("expected %d entities, got %d", tt.wantEntityCount, len(resp.Entities))
+				t.Errorf("entities: got %d, want %d", len(resp.Entities), tt.wantEntityCount)
 			}
 			if len(resp.Observations) != tt.wantObsCount {
-				t.Errorf("expected %d observations, got %d", tt.wantObsCount, len(resp.Observations))
+				t.Errorf("observations: got %d, want %d", len(resp.Observations), tt.wantObsCount)
+			}
+			if resp.TotalCount != tt.wantTotal {
+				t.Errorf("total: got %d, want %d (the layer total, not the page length)", resp.TotalCount, tt.wantTotal)
 			}
 			if resp.HasMore != tt.wantHasMore {
-				t.Errorf("expected HasMore %v, got %v", tt.wantHasMore, resp.HasMore)
+				t.Errorf("has_more: got %v, want %v", resp.HasMore, tt.wantHasMore)
 			}
 		})
 	}
+}
+
+// An unauthenticated caller supplies limit. Without a ceiling one request would
+// materialise an entire layer — 34,936 entities for power_plants — on a host
+// sized for far less.
+func TestLayerServer_GetLayerSnapshotClampsLimit(t *testing.T) {
+	var gotLimit int
+	oRepo := &testObsRepo{}
+	eRepo := &testEntityRepo{entities: map[string]*domain.Entity{}}
+	svc := layer.NewLayerService(eRepo, recordingLimitObsRepo{testObsRepo: oRepo, seen: &gotLimit}, domain.NewDynamicSourceRegistry())
+	srv := NewLayerServer(svc)
+
+	_, err := srv.GetLayerSnapshot(context.Background(), &respondentv1.GetLayerSnapshotRequest{
+		LayerId: "power_plants",
+		Limit:   1_000_000,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotLimit != 5000 {
+		t.Errorf("limit reached the repository as %d; it must be clamped to 5000", gotLimit)
+	}
+}
+
+type recordingLimitObsRepo struct {
+	*testObsRepo
+	seen *int
+}
+
+func (r recordingLimitObsRepo) GetLatestForLayerPage(_ context.Context, _ string, limit, _ int) ([]*domain.EntitySnapshot, error) {
+	*r.seen = limit
+	return nil, nil
 }
 
 func TestDomainLayerToProto_NilLayer(t *testing.T) {

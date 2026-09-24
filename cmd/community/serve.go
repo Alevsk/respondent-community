@@ -118,10 +118,7 @@ func runServe(ctx context.Context) error {
 	layerRepo := sqlitedb.NewLayerRepository(db.SqlDB(), repoLogger)
 	_ = layerRepo // layerRepo used for future layer management endpoints
 
-	// ── 4. In-memory cache ─────────────────────────────────────────────
-	cacheStorage := inmem.NewMemCache(0, time.Minute)
-	defer func() { _ = cacheStorage.Close() }()
-
+	// ── 4. AI dedup key-value store ────────────────────────────────────
 	kvCache := inmem.NewKVCache()
 
 	// ── 5. In-process messaging ────────────────────────────────────────
@@ -208,7 +205,6 @@ func runServe(ctx context.Context) error {
 	// layer set is passed — dynReg is the single source of truth.
 	wsServer := realtime.NewServer(
 		logger.With().Str("component", "websocket").Logger(),
-		cacheStorage,
 		entityRepo,
 		obsRepo,
 		dynReg,
@@ -243,7 +239,6 @@ func runServe(ctx context.Context) error {
 			StreamName: "COMMUNITY_AI",
 		})
 		enrichWorker.SetNotifier(notifier)
-		enrichWorker.SetSpatialCache(cacheStorage)
 
 		// Geo-resolution: tier 2 (Nominatim, for specific localities) + tier 3
 		// (offline country centroids). The built-in centroid table covers every
@@ -306,14 +301,12 @@ func runServe(ctx context.Context) error {
 	}
 
 	// ── 14. Feeder adapters ────────────────────────────────────────────
-	feederCache := &memcacheFeederCache{cache: cacheStorage}
 	feederPub := &directFeederPublisher{ws: wsServer}
 
 	// ── 15. Ingestion service ──────────────────────────────────────────
 	ingestionSvc := feeder.NewIngestionService(
 		logger.With().Str("component", "feeder").Logger(),
 		sourceRegistry,
-		feederCache,
 		feederPub,
 		entityRepo,
 		obsRepo,
@@ -325,9 +318,9 @@ func runServe(ctx context.Context) error {
 	)
 
 	// ── 16. gRPC-gateway API ───────────────────────────────────────────
-	layerService := layer.NewLayerService(entityRepo, obsRepo, cacheStorage, dynReg)
+	layerService := layer.NewLayerService(entityRepo, obsRepo, dynReg)
 	entityService := entity.NewEntityService(entityRepo, obsRepo, logger.With().Str("component", "entity-service").Logger())
-	indicatorService := indicator.NewIndicatorService(entityRepo, obsRepo, cacheStorage, dynReg, logger.With().Str("component", "indicator-service").Logger())
+	indicatorService := indicator.NewIndicatorService(entityRepo, obsRepo, dynReg, logger.With().Str("component", "indicator-service").Logger())
 
 	// Playback notifications: the registry owns every outbound media call, and
 	// it only ever executes actions a source definition declared. Its client

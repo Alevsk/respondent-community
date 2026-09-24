@@ -33,12 +33,6 @@ const maxSubscriptionsPerClient = 100
 // Each connection spawns 2 goroutines and allocates a 256-element send buffer.
 const maxClients = 1000
 
-// spatialCacheQuerier is a subset of domain.SpatialCacheStorage that supports geo queries.
-// Extracted to a package-level type to avoid repeating the inline interface definition.
-type spatialCacheQuerier interface {
-	GetLayerEntitiesByBBox(ctx context.Context, layerType string, bbox domain.BBox, limit int) ([]*domain.Entity, []*domain.Observation, error)
-}
-
 // LayerRegistry is the read-only view of declarative layer-type metadata that the
 // realtime server depends on. Every per-layer behavior the server exhibits
 // (spatial viewport filtering, indicator rendering, history windows) is resolved
@@ -193,7 +187,6 @@ type Server struct {
 	broadcast             chan []byte
 	notificationBroadcast chan notificationBroadcastMsg
 	logger                zerolog.Logger
-	cache                 domain.CacheStorage
 	obsRepo               domain.ObservationRepository
 	entityRepo            domain.EntityRepository
 	httpClient            *http.Client // for on-demand external API fetches
@@ -205,8 +198,6 @@ type Server struct {
 	// Pub/Sub batching: accumulate updates per layer, flush on timer
 	pendingUpdates map[string][]pendingUpdate // layerID -> pending updates
 	pendingMu      sync.Mutex
-	// Persist concurrency limiter — bounds goroutines spawned by persistOnDemandAsync.
-	persistSem chan struct{}
 	// Allowed origins for WebSocket connections (passed to websocket.AcceptOptions).
 	// Use []string{"*"} to allow all origins (development mode).
 	// When empty, only same-origin connections are accepted.
@@ -221,7 +212,7 @@ type Server struct {
 // metadata (filtering mode, rendering mode, history, indicators); whether a layer
 // uses viewport-based spatial filtering is resolved from it, not from a separate
 // precomputed set, so there is a single source of truth and nothing to drift.
-func NewServer(logger zerolog.Logger, cache domain.CacheStorage, entityRepo domain.EntityRepository, obsRepo domain.ObservationRepository, dynReg LayerRegistry) *Server {
+func NewServer(logger zerolog.Logger, entityRepo domain.EntityRepository, obsRepo domain.ObservationRepository, dynReg LayerRegistry) *Server {
 	return &Server{
 		clients:               make(map[*Client]bool),
 		register:              make(chan *Client),
@@ -229,7 +220,6 @@ func NewServer(logger zerolog.Logger, cache domain.CacheStorage, entityRepo doma
 		broadcast:             make(chan []byte, 256),
 		notificationBroadcast: make(chan notificationBroadcastMsg, 256),
 		logger:                logger,
-		cache:                 cache,
 		obsRepo:               obsRepo,
 		entityRepo:            entityRepo,
 		httpClient:            &http.Client{Timeout: 5 * time.Second},
@@ -238,7 +228,6 @@ func NewServer(logger zerolog.Logger, cache domain.CacheStorage, entityRepo doma
 		timeRangeCfg:          DefaultTimeRangeConfig(),
 		onDemandCfg:           DefaultOnDemandConfig(),
 		pendingUpdates:        make(map[string][]pendingUpdate),
-		persistSem:            make(chan struct{}, 10),
 	}
 }
 

@@ -166,21 +166,44 @@ func (r *observationRepository) GetLatest(ctx context.Context, entityID string) 
 	return r.scanObservation(row)
 }
 
-func (r *observationRepository) GetLatestForLayer(ctx context.Context, layerType string, limit int) ([]*domain.Observation, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT o.id, o.entity_id, o.ts, o.event_time, o.event_end, o.lat, o.lon, o.altitude_m,
-         o.velocity, o.metadata, o.ai_metadata, o.source_type, o.content_hash, o.source, o.created_at
-         FROM observations o
-         JOIN entities e ON e.id = o.entity_id
+// LatestForLayerPageSQL is the query behind GetLatestForLayerPage, exported so
+// a test can assert its query plan.
+//
+// It keysets on external_id rather than sorting. idx_entities_layer_external is
+// (layer_type, external_id), so the scan is already in key order: no temp
+// B-tree, and LIMIT terminates early. The query it replaced ended in
+// "ORDER BY o.ts DESC LIMIT ?", which materialised every row in the layer into
+// a temp B-tree, sorted it, and only then applied the limit — so LIMIT 100 cost
+// the same as the whole layer (measured at 167ms for power_plants, against 0ms
+// for the same query without the sort). It was also arbitrary in practice: a
+// bulk-ingested catalog shares one timestamp, so "the 100 most recent" was an
+// unpredictable 100.
+const LatestForLayerPageSQL = `SELECT e.id, e.external_id, e.layer_type, e.name, e.metadata, e.ai_metadata, e.source, e.created_at,
+                o.id, o.entity_id, o.ts, o.event_time, o.event_end, o.lat, o.lon, o.altitude_m,
+                o.velocity, o.metadata, o.ai_metadata, o.source_type, o.content_hash, o.source, o.created_at
+         FROM entities e
+         JOIN observations o ON o.entity_id = e.id
          WHERE e.layer_type = ?
-           AND o.ts = (SELECT MAX(o2.ts) FROM observations o2 WHERE o2.entity_id = o.entity_id)
-         ORDER BY o.ts DESC
-         LIMIT ?`, layerType, limit)
+           AND o.ts = (SELECT MAX(o2.ts) FROM observations o2 WHERE o2.entity_id = e.id)
+         ORDER BY e.external_id
+         LIMIT ? OFFSET ?`
+
+// GetLatestForLayerPage returns each entity's latest observation for a layer,
+// with its entity, ordered by external_id ascending, skipping offset rows and
+// returning at most limit.
+//
+// Pages neither overlap nor skip, and identical requests return identical rows:
+// the property the hot cache it replaced could not provide, because that cache
+// ranged a Go map whose iteration order is randomised per call.
+func (r *observationRepository) GetLatestForLayerPage(
+	ctx context.Context, layerType string, limit, offset int,
+) ([]*domain.EntitySnapshot, error) {
+	rows, err := r.db.QueryContext(ctx, LatestForLayerPageSQL, layerType, limit, offset)
 	if err != nil {
 		return nil, translateError("observation", err)
 	}
 	defer func() { _ = rows.Close() }()
-	return r.scanObservations(rows)
+	return r.scanSnapshots(rows)
 }
 
 func (r *observationRepository) GetLatestForEntityIDs(ctx context.Context, entityIDs []string) (map[string]*domain.Observation, error) {

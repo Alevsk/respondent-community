@@ -184,7 +184,7 @@ func (f *FakeObservationRepo) GetLatest(_ context.Context, entityID string) (*do
 	return obs[len(obs)-1], nil
 }
 
-func (f *FakeObservationRepo) GetLatestForLayer(_ context.Context, _ string, _ int) ([]*domain.Observation, error) {
+func (f *FakeObservationRepo) GetLatestForLayerPage(_ context.Context, _ string, _, _ int) ([]*domain.EntitySnapshot, error) {
 	return nil, nil
 }
 

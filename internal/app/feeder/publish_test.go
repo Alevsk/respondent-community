@@ -2,7 +2,6 @@ package feeder
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -28,20 +27,15 @@ func (r *publishTestEntityRepo) GetByExternalIDs(_ context.Context, layerType st
 
 type publishTestObsRepo struct{ domain.ObservationRepository }
 
-func (r *publishTestObsRepo) CreateBatch(_ context.Context, _ []*domain.Observation) error { return nil }
+func (r *publishTestObsRepo) CreateBatch(_ context.Context, _ []*domain.Observation) error {
+	return nil
+}
 func (r *publishTestObsRepo) CreateBatchUpsert(_ context.Context, _ []*domain.Observation) error {
 	return nil
 }
 
 func (r *publishTestObsRepo) GetLatestContentHashes(_ context.Context, _ []string) (map[string]string, error) {
 	return map[string]string{}, nil
-}
-
-// failingCache stands in for a hot cache that is unavailable.
-type failingCache struct{}
-
-func (failingCache) SetEntity(_ context.Context, _ *domain.Entity, _ *domain.Observation, _ time.Duration) error {
-	return errors.New("cache unavailable")
 }
 
 type recordingPublisher struct {
@@ -58,18 +52,17 @@ func (p *recordingPublisher) PublishLayerUpdate(_ context.Context, layerType str
 	return nil
 }
 
-// The Pub/Sub publish that drives every live globe update was nested inside the
-// hot-cache block, after a `continue` on cache error. A cache that is failing —
-// or absent — therefore silenced the live globe entirely, even though the
-// entities had already been written to the durable store. Broadcasting is not
-// conditional on caching.
-func TestPersistEntitiesPublishesWhenTheCacheFails(t *testing.T) {
+// The Pub/Sub publish that drives every live globe update was once nested
+// inside a hot-cache block, after a `continue` on cache error, so a failing or
+// absent cache silenced the live globe even though every entity had been
+// written to the durable store. The cache is gone; this pins the property it
+// violated — persisting a batch broadcasts it.
+func TestPersistEntitiesBroadcastsEveryNewEntity(t *testing.T) {
 	pub := &recordingPublisher{}
 	s := &IngestionService{
 		logger:        zerolog.Nop(),
 		entityRepo:    &publishTestEntityRepo{},
 		obsRepo:       &publishTestObsRepo{},
-		cache:         failingCache{},
 		publisher:     pub,
 		sourceConfigs: map[string]SourceConfig{"src": {Name: "src"}},
 		stopCh:        make(chan struct{}),

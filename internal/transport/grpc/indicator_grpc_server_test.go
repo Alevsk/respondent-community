@@ -11,46 +11,10 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-type testCacheStorage struct {
-	entities     []*domain.Entity
-	observations []*domain.Observation
-	totalCount   int64
-	err          error
-	countErr     error
-}
-
-func (c *testCacheStorage) SetEntity(_ context.Context, _ *domain.Entity, _ *domain.Observation) error {
-	return nil
-}
-func (c *testCacheStorage) GetEntity(_ context.Context, _, _ string) (*domain.Entity, *domain.Observation, error) {
-	return nil, nil, nil
-}
-func (c *testCacheStorage) GetLayerEntities(_ context.Context, _ string, _, _ int) ([]*domain.Entity, []*domain.Observation, int64, error) {
-	return c.entities, c.observations, c.totalCount, c.err
-}
-func (c *testCacheStorage) GetLayerCount(_ context.Context, _ string) (int64, error) {
-	return c.totalCount, c.countErr
-}
-func (c *testCacheStorage) ClearLayer(_ context.Context, _ string) error {
-	return nil
-}
-func (c *testCacheStorage) GetStats(_ context.Context) (map[string]any, error) {
-	return nil, nil
-}
-func (c *testCacheStorage) HealthCheck(_ context.Context) error {
-	return nil
-}
-func (c *testCacheStorage) Close() error {
-	return nil
-}
-
-var _ domain.CacheStorage = (*testCacheStorage)(nil)
-
 func TestNewIndicatorServer(t *testing.T) {
 	eRepo := &testEntityRepo{}
 	oRepo := &testObsRepo{}
-	cache := &testCacheStorage{}
-	svc := indicator.NewIndicatorService(eRepo, oRepo, cache, domain.NewDynamicSourceRegistry())
+	svc := indicator.NewIndicatorService(eRepo, oRepo, domain.NewDynamicSourceRegistry())
 	srv := NewIndicatorServer(svc)
 	if srv == nil {
 		t.Fatal("expected server, got nil")
@@ -88,8 +52,7 @@ func TestIndicatorServer_GetGlobalIndicators(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			eRepo := &testEntityRepo{}
 			oRepo := &testObsRepo{}
-			cache := &testCacheStorage{}
-			svc := indicator.NewIndicatorService(eRepo, oRepo, cache, domain.NewDynamicSourceRegistry())
+			svc := indicator.NewIndicatorService(eRepo, oRepo, domain.NewDynamicSourceRegistry())
 			srv := NewIndicatorServer(svc)
 
 			resp, err := srv.GetGlobalIndicators(context.Background(), tt.req)

@@ -231,22 +231,8 @@ func (s *stubObsRepo) GetLatest(_ context.Context, entityID string) (*domain.Obs
 	return latest, nil
 }
 
-func (s *stubObsRepo) GetLatestForLayer(_ context.Context, layerType string, limit int) ([]*domain.Observation, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.getErr != nil {
-		return nil, s.getErr
-	}
-	var out []*domain.Observation
-	for _, o := range s.observations {
-		if o.SourceType == layerType {
-			out = append(out, o)
-			if len(out) >= limit {
-				break
-			}
-		}
-	}
-	return out, nil
+func (s *stubObsRepo) GetLatestForLayerPage(_ context.Context, _ string, _, _ int) ([]*domain.EntitySnapshot, error) {
+	return nil, nil
 }
 
 func (s *stubObsRepo) CreateBatchUpsert(_ context.Context, obs []*domain.Observation) error {

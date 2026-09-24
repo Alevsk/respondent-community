@@ -39,7 +39,12 @@ type ObservationRepository interface {
 	CreateBatchUpsert(ctx context.Context, observations []*Observation) error
 	GetByEntityID(ctx context.Context, entityID string, limit int, before time.Time) ([]*Observation, error)
 	GetLatest(ctx context.Context, entityID string) (*Observation, error)
-	GetLatestForLayer(ctx context.Context, layerType string, limit int) ([]*Observation, error)
+	// GetLatestForLayerPage returns each entity's latest observation for a
+	// layer, with its entity, ordered by external_id ascending, skipping offset
+	// rows and returning at most limit.
+	// Deterministic and index-served: pages neither overlap nor skip, and the
+	// same request always returns the same rows in the same order.
+	GetLatestForLayerPage(ctx context.Context, layerType string, limit, offset int) ([]*EntitySnapshot, error)
 	GetLatestForEntityIDs(ctx context.Context, entityIDs []string) (map[string]*Observation, error)
 	GetLatestContentHashes(ctx context.Context, entityIDs []string) (map[string]string, error)
 	// GetLayerSnapshotAt returns the latest observation per entity for a layer
@@ -125,34 +130,6 @@ type CalibrationRepository interface {
 type KeyValueCache interface {
 	Get(ctx context.Context, key string) (string, error)
 	Set(ctx context.Context, key string, value string, ttl time.Duration) error
-}
-
-// CacheStorage defines the interface for hot cache operations.
-// This abstraction allows swapping cache implementations (in-memory, etc.).
-type CacheStorage interface {
-	// Entity operations with observations
-	SetEntity(ctx context.Context, entity *Entity, observation *Observation) error
-	GetEntity(ctx context.Context, layerType, externalID string) (*Entity, *Observation, error)
-	GetLayerEntities(ctx context.Context, layerType string, limit, offset int) ([]*Entity, []*Observation, int64, error)
-	GetLayerCount(ctx context.Context, layerType string) (int64, error)
-
-	// Layer operations
-	ClearLayer(ctx context.Context, layerType string) error
-	GetStats(ctx context.Context) (map[string]any, error)
-
-	// Health and lifecycle
-	HealthCheck(ctx context.Context) error
-	Close() error
-}
-
-// SpatialCacheStorage extends CacheStorage with geo-spatial query support.
-// Implementations that back spatial layers (viewport-based filtering) should
-// implement this interface so callers can use type assertions rather than
-// unsafe runtime casts.
-type SpatialCacheStorage interface {
-	CacheStorage
-	// GetLayerEntitiesByBBox retrieves entities within a geographic bounding box.
-	GetLayerEntitiesByBBox(ctx context.Context, layerType string, bbox BBox, limit int) ([]*Entity, []*Observation, error)
 }
 
 // AIEnrichmentLogRepository handles AI enrichment audit logging.

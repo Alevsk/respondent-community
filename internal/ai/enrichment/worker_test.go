@@ -144,7 +144,7 @@ func (m *mockObsRepo) GetLatest(_ context.Context, _ string) (*domain.Observatio
 	}
 	return m.obs, nil
 }
-func (m *mockObsRepo) GetLatestForLayer(_ context.Context, _ string, _ int) ([]*domain.Observation, error) {
+func (m *mockObsRepo) GetLatestForLayerPage(_ context.Context, _ string, _, _ int) ([]*domain.EntitySnapshot, error) {
 	return nil, nil
 }
 func (m *mockObsRepo) GetLatestForEntityIDs(_ context.Context, _ []string) (map[string]*domain.Observation, error) {

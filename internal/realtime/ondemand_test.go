@@ -13,7 +13,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/Alevsk/respondent/internal/app/layer/layertest"
 	"github.com/Alevsk/respondent/internal/domain"
 	"github.com/Alevsk/respondent/internal/ingest/parse"
 	"github.com/Alevsk/respondent/internal/realtime"
@@ -30,12 +29,12 @@ func testAPIServer(t *testing.T, aircraft []parse.ADSBLolAircraft) *httptest.Ser
 	}))
 }
 
-func newTestOnDemandServer(t *testing.T, apiURL string) (*realtime.Server, *layertest.FakeCacheStorage) {
+func newTestOnDemandServer(t *testing.T, apiURL string) (*realtime.Server, *mockObsRepo) {
 	t.Helper()
 	logger := zerolog.Nop()
-	mockCache := layertest.NewFakeCacheStorage()
+	obsRepo := &mockObsRepo{}
 
-	server := realtime.NewServer(logger, mockCache, nil, nil, viewportRegistry("flights_commercial"))
+	server := realtime.NewServer(logger, nil, obsRepo, viewportRegistry("flights_commercial"))
 
 	cfg := realtime.OnDemandConfig{
 		Enabled:      true,
@@ -49,7 +48,7 @@ func newTestOnDemandServer(t *testing.T, apiURL string) (*realtime.Server, *laye
 	server.SetOnDemandConfig(cfg)
 	server.SetOnDemandParser(parse.ParseADSBLolResponse)
 
-	return server, mockCache
+	return server, obsRepo
 }
 
 func TestOnDemandConfig_Defaults(t *testing.T) {
@@ -63,7 +62,7 @@ func TestOnDemandConfig_Defaults(t *testing.T) {
 
 func TestOnDemandConfig_SetUpdatesTimeout(t *testing.T) {
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+	server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 
 	cfg := realtime.OnDemandConfig{
 		Enabled:      true,
@@ -117,12 +116,12 @@ func TestFetchSparseRegion_Integration(t *testing.T) {
 	client := realtime.NewClient("test", nil, make(chan []byte, 256), zerolog.Nop())
 
 	bbox := &domain.BBox{West: -75.0, South: 39.0, East: -72.0, North: 42.0}
-	var cacheEntities []*domain.Entity
+	var storedEntities []*domain.Entity
 
 	entities, _ := server.FetchSparseRegion(
 		t.Context(), client,
 		"adsb_lol_flights", "flights_commercial",
-		bbox, cacheEntities,
+		bbox, storedEntities,
 	)
 
 	require.GreaterOrEqual(t, len(entities), 2, "should return at least the 2 on-demand entities")
@@ -155,7 +154,7 @@ func TestFetchSparseRegion_ViewportTiling(t *testing.T) {
 	}))
 	defer apiServer.Close()
 
-	server := realtime.NewServer(zerolog.Nop(), layertest.NewFakeCacheStorage(), nil, nil,
+	server := realtime.NewServer(zerolog.Nop(), nil, &mockObsRepo{},
 		viewportRegistry("flights_commercial"))
 	server.SetOnDemandConfig(realtime.OnDemandConfig{
 		Enabled:      true,
@@ -286,18 +285,18 @@ func TestFetchSparseRegion_Deduplication(t *testing.T) {
 	client := realtime.NewClient("test", nil, make(chan []byte, 256), zerolog.Nop())
 	bbox := &domain.BBox{West: -75.0, South: 39.0, East: -72.0, North: 42.0}
 
-	// "existing" is already in cache
-	cacheEntities := []*domain.Entity{
+	// "existing" is already in the durable store
+	storedEntities := []*domain.Entity{
 		{ID: "flights_commercial:existing", ExternalID: "existing", LayerType: "flights_commercial"},
 	}
 
 	entities, _ := server.FetchSparseRegion(
 		t.Context(), client,
 		"adsb_lol_flights", "flights_commercial",
-		bbox, cacheEntities,
+		bbox, storedEntities,
 	)
 
-	// Count entities with ExternalID "existing" — should be exactly 1 (the cache version)
+	// Count entities with ExternalID "existing" — should be exactly 1 (the stored one)
 	existingCount := 0
 	for _, e := range entities {
 		if e.ExternalID == "existing" {

@@ -29,122 +29,6 @@ import (
 // Spatial cache stub
 // ---------------------------------------------------------------------------
 
-// spatialMockCache wraps the standard MockCacheStorage and additionally
-// implements the spatialCache interface used by doOnDemandFetchDirect.
-type spatialMockCache struct {
-	mu           sync.RWMutex
-	entities     map[string]*domain.Entity
-	obs          map[string]*domain.Observation
-	counts       map[string]int64
-	bboxEntities []*domain.Entity // entities returned by GetLayerEntitiesByBBox
-	bboxObs      []*domain.Observation
-	bboxErr      error
-	setErr       error
-	getErr       error
-}
-
-func newSpatialMockCache() *spatialMockCache {
-	return &spatialMockCache{
-		entities: make(map[string]*domain.Entity),
-		obs:      make(map[string]*domain.Observation),
-		counts:   make(map[string]int64),
-	}
-}
-
-func (m *spatialMockCache) SetBBoxResults(entities []*domain.Entity, obs []*domain.Observation, err error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.bboxEntities = entities
-	m.bboxObs = obs
-	m.bboxErr = err
-}
-
-// GetLayerEntitiesByBBox implements the spatialCache interface.
-func (m *spatialMockCache) GetLayerEntitiesByBBox(ctx context.Context, layerType string, bbox domain.BBox, limit int) ([]*domain.Entity, []*domain.Observation, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.bboxEntities, m.bboxObs, m.bboxErr
-}
-
-// -- domain.CacheStorage implementation ----------------------------------------
-
-func (m *spatialMockCache) SetEntity(ctx context.Context, entity *domain.Entity, observation *domain.Observation) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.setErr != nil {
-		return m.setErr
-	}
-	key := entity.LayerType + ":" + entity.ExternalID
-	m.entities[key] = entity
-	if observation != nil {
-		m.obs[key] = observation
-	}
-	m.counts[entity.LayerType]++
-	return nil
-}
-
-func (m *spatialMockCache) GetEntity(ctx context.Context, layerType, externalID string) (*domain.Entity, *domain.Observation, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	if m.getErr != nil {
-		return nil, nil, m.getErr
-	}
-	key := layerType + ":" + externalID
-	e, ok := m.entities[key]
-	if !ok {
-		return nil, nil, domain.NewNotFoundError("entity not found in cache", nil)
-	}
-	return e, m.obs[key], nil
-}
-
-func (m *spatialMockCache) GetLayerEntities(ctx context.Context, layerType string, limit, offset int) ([]*domain.Entity, []*domain.Observation, int64, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	if m.getErr != nil {
-		return nil, nil, 0, m.getErr
-	}
-	var entities []*domain.Entity
-	var observations []*domain.Observation
-	for key, e := range m.entities {
-		if e.LayerType == layerType {
-			entities = append(entities, e)
-			if o, ok := m.obs[key]; ok {
-				observations = append(observations, o)
-			}
-		}
-	}
-	return entities, observations, int64(len(entities)), nil
-}
-
-func (m *spatialMockCache) GetLayerCount(ctx context.Context, layerType string) (int64, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	if m.getErr != nil {
-		return 0, m.getErr
-	}
-	return m.counts[layerType], nil
-}
-
-func (m *spatialMockCache) ClearLayer(ctx context.Context, layerType string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	for key, e := range m.entities {
-		if e.LayerType == layerType {
-			delete(m.entities, key)
-			delete(m.obs, key)
-		}
-	}
-	delete(m.counts, layerType)
-	return nil
-}
-
-func (m *spatialMockCache) GetStats(ctx context.Context) (map[string]any, error) {
-	return map[string]any{}, nil
-}
-
-func (m *spatialMockCache) HealthCheck(ctx context.Context) error { return nil }
-func (m *spatialMockCache) Close() error                          { return nil }
-
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -152,14 +36,11 @@ func (m *spatialMockCache) Close() error                          { return nil }
 // newTickerTestServer creates a Server + Client pair pre-wired together so
 // that startOnDemandTicker can call server.getOnDemandPollInterval and
 // server.doOnDemandFetchDirect.
-func newTickerTestServer(t *testing.T, apiURL string, pollInterval time.Duration, spatialCache *spatialMockCache) (*realtime.Server, *realtime.Client) {
+func newTickerTestServer(t *testing.T, apiURL string, pollInterval time.Duration, obsRepo *mockObsRepo) (*realtime.Server, *realtime.Client) {
 	t.Helper()
 	logger := zerolog.Nop()
 
-	var cacheArg interface{ Close() error } = spatialCache
-	_ = cacheArg
-
-	server := realtime.NewServer(logger, spatialCache, nil, nil, viewportRegistry("flights_commercial"))
+	server := realtime.NewServer(logger, nil, obsRepo, viewportRegistry("flights_commercial"))
 
 	cfg := realtime.OnDemandConfig{
 		Enabled:      true,
@@ -242,7 +123,7 @@ func TestGetOnDemandPollInterval(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			logger := zerolog.Nop()
-			server := realtime.NewServer(logger, nil, nil, nil, domain.NewDynamicSourceRegistry())
+			server := realtime.NewServer(logger, nil, nil, domain.NewDynamicSourceRegistry())
 
 			cfg := realtime.OnDemandConfig{
 				Enabled:       true,
@@ -298,8 +179,8 @@ func TestOnDemandTicker_ZeroInterval(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			logger := zerolog.Nop()
-			spatialCache := newSpatialMockCache()
-			server := realtime.NewServer(logger, spatialCache, nil, nil, viewportRegistry("flights_commercial"))
+			spatialCache := &mockObsRepo{}
+			server := realtime.NewServer(logger, nil, spatialCache, viewportRegistry("flights_commercial"))
 
 			cfg := realtime.OnDemandConfig{
 				Enabled:       true,
@@ -332,8 +213,8 @@ func TestOnDemandTicker_StartStop(t *testing.T) {
 		apiServer := testAPIServer(t, nil) // empty response is fine here
 		defer apiServer.Close()
 
-		sc := newSpatialMockCache()
-		sc.SetBBoxResults(nil, nil, nil)
+		sc := &mockObsRepo{}
+		sc.setBBoxSnapshots(nil, nil, nil)
 		_, client := newTickerTestServer(t, apiServer.URL, 500*time.Millisecond, sc)
 
 		bbox := &domain.BBox{West: -75.0, South: 39.0, East: -72.0, North: 42.0}
@@ -347,8 +228,8 @@ func TestOnDemandTicker_StartStop(t *testing.T) {
 		apiServer := testAPIServer(t, nil)
 		defer apiServer.Close()
 
-		sc := newSpatialMockCache()
-		sc.SetBBoxResults(nil, nil, nil)
+		sc := &mockObsRepo{}
+		sc.setBBoxSnapshots(nil, nil, nil)
 		_, client := newTickerTestServer(t, apiServer.URL, 500*time.Millisecond, sc)
 
 		bbox := &domain.BBox{West: -75.0, South: 39.0, East: -72.0, North: 42.0}
@@ -373,8 +254,8 @@ func TestOnDemandTicker_StartStop(t *testing.T) {
 		apiServer := testAPIServer(t, nil)
 		defer apiServer.Close()
 
-		sc := newSpatialMockCache()
-		sc.SetBBoxResults(nil, nil, nil)
+		sc := &mockObsRepo{}
+		sc.setBBoxSnapshots(nil, nil, nil)
 		_, client := newTickerTestServer(t, apiServer.URL, 500*time.Millisecond, sc)
 
 		bbox1 := &domain.BBox{West: -75.0, South: 39.0, East: -72.0, North: 42.0}
@@ -394,11 +275,11 @@ func TestOnDemandTicker_StartStop(t *testing.T) {
 		apiServer := testAPIServer(t, nil)
 		defer apiServer.Close()
 
-		sc := newSpatialMockCache()
-		sc.SetBBoxResults(nil, nil, nil)
+		sc := &mockObsRepo{}
+		sc.setBBoxSnapshots(nil, nil, nil)
 
 		logger := zerolog.Nop()
-		server := realtime.NewServer(logger, sc, nil, nil, viewportRegistry("flights_commercial", "satellites"))
+		server := realtime.NewServer(logger, nil, sc, viewportRegistry("flights_commercial", "satellites"))
 		cfg := realtime.OnDemandConfig{
 			Enabled:      true,
 			QueryTimeout: 5 * time.Second,
@@ -435,11 +316,11 @@ func TestOnDemandTicker_StopAll(t *testing.T) {
 		apiServer := testAPIServer(t, nil)
 		defer apiServer.Close()
 
-		sc := newSpatialMockCache()
-		sc.SetBBoxResults(nil, nil, nil)
+		sc := &mockObsRepo{}
+		sc.setBBoxSnapshots(nil, nil, nil)
 
 		logger := zerolog.Nop()
-		server := realtime.NewServer(logger, sc, nil, nil, viewportRegistry("flights_commercial", "satellites", "ships"))
+		server := realtime.NewServer(logger, nil, sc, viewportRegistry("flights_commercial", "satellites", "ships"))
 		cfg := realtime.OnDemandConfig{
 			Enabled:      true,
 			QueryTimeout: 5 * time.Second,
@@ -489,8 +370,8 @@ func TestRunOnDemandPoll_ContextCancel(t *testing.T) {
 	apiServer := testAPIServer(t, nil)
 	defer apiServer.Close()
 
-	sc := newSpatialMockCache()
-	sc.SetBBoxResults(nil, nil, nil)
+	sc := &mockObsRepo{}
+	sc.setBBoxSnapshots(nil, nil, nil)
 	_, client := newTickerTestServer(t, apiServer.URL, 200*time.Millisecond, sc)
 
 	bbox := &domain.BBox{West: -75.0, South: 39.0, East: -72.0, North: 42.0}
@@ -517,9 +398,9 @@ func TestRunOnDemandPoll_DeliversEntities(t *testing.T) {
 	apiServer := testAPIServer(t, aircraft)
 	defer apiServer.Close()
 
-	sc := newSpatialMockCache()
+	sc := &mockObsRepo{}
 	// BBox query returns empty (no pre-existing cache entities → not deduped out).
-	sc.SetBBoxResults(nil, nil, nil)
+	sc.setBBoxSnapshots(nil, nil, nil)
 
 	// Use a short poll interval so the test completes quickly.
 	_, client := newTickerTestServer(t, apiServer.URL, 80*time.Millisecond, sc)
@@ -574,7 +455,7 @@ func TestDoOnDemandFetchDirect(t *testing.T) {
 		{
 			name:             "no spatial cache interface returns empty",
 			enabled:          true,
-			spatialCache:     false, // MockCacheStorage does not implement GetLayerEntitiesByBBox
+			spatialCache:     false, // no observation repository wired
 			aircraft:         []parse.ADSBLolAircraft{{Hex: "abc", Flight: "T01", Lat: 40, Lon: -74, AltBaro: float64(35000)}},
 			wantZeroEntities: true,
 		},
@@ -632,14 +513,13 @@ func TestDoOnDemandFetchDirect(t *testing.T) {
 
 			var server *realtime.Server
 			if tt.spatialCache {
-				sc := newSpatialMockCache()
-				sc.SetBBoxResults(tt.bboxEntities, nil, nil)
-				server = realtime.NewServer(logger, sc, nil, nil, viewportRegistry("flights_commercial"))
+				sc := &mockObsRepo{}
+				sc.setBBoxSnapshots(tt.bboxEntities, nil, nil)
+				server = realtime.NewServer(logger, nil, sc, viewportRegistry("flights_commercial"))
 			} else {
-				// Use the standard MockCacheStorage which does NOT implement
-				// GetLayerEntitiesByBBox.
-				from := newStandardMockCacheOnly()
-				server = realtime.NewServer(logger, from, nil, nil, viewportRegistry("flights_commercial"))
+				// No observation repository wired: the spatial query the
+				// on-demand path depends on is unavailable.
+				server = realtime.NewServer(logger, nil, nil, viewportRegistry("flights_commercial"))
 			}
 
 			cfg := realtime.OnDemandConfig{
@@ -687,14 +567,14 @@ func TestDoOnDemandFetchDirect_DeduplicationDetails(t *testing.T) {
 	apiServer := testAPIServer(t, aircraft)
 	defer apiServer.Close()
 
-	sc := newSpatialMockCache()
+	sc := &mockObsRepo{}
 	// "skip1" already cached
-	sc.SetBBoxResults([]*domain.Entity{
+	sc.setBBoxSnapshots([]*domain.Entity{
 		{ID: "flights_commercial:skip1", ExternalID: "skip1", LayerType: "flights_commercial"},
 	}, nil, nil)
 
 	logger := zerolog.Nop()
-	server := realtime.NewServer(logger, sc, nil, nil, viewportRegistry("flights_commercial"))
+	server := realtime.NewServer(logger, nil, sc, viewportRegistry("flights_commercial"))
 	server.SetOnDemandConfig(realtime.OnDemandConfig{
 		Enabled:      true,
 		QueryTimeout: 3 * time.Second,
@@ -725,8 +605,8 @@ func TestOnDemandTicker_ConcurrentStartStop(t *testing.T) {
 	apiServer := testAPIServer(t, nil)
 	defer apiServer.Close()
 
-	sc := newSpatialMockCache()
-	sc.SetBBoxResults(nil, nil, nil)
+	sc := &mockObsRepo{}
+	sc.setBBoxSnapshots(nil, nil, nil)
 	_, client := newTickerTestServer(t, apiServer.URL, 500*time.Millisecond, sc)
 
 	bbox := &domain.BBox{West: -75.0, South: 39.0, East: -72.0, North: 42.0}
@@ -766,8 +646,8 @@ func TestOnDemandTicker_StopAll_WhileRunning(t *testing.T) {
 	apiServer := testAPIServer(t, aircraft)
 	defer apiServer.Close()
 
-	sc := newSpatialMockCache()
-	sc.SetBBoxResults(nil, nil, nil)
+	sc := &mockObsRepo{}
+	sc.setBBoxSnapshots(nil, nil, nil)
 	_, client := newTickerTestServer(t, apiServer.URL, 100*time.Millisecond, sc)
 
 	bbox := &domain.BBox{West: -75.0, South: 39.0, East: -72.0, North: 42.0}
@@ -791,31 +671,3 @@ func TestOnDemandTicker_StopAll_WhileRunning(t *testing.T) {
 		t.Fatal("StopAllOnDemandTickers timed out")
 	}
 }
-
-// ---------------------------------------------------------------------------
-// standardMockCacheOnly: a minimal CacheStorage that does NOT implement
-// the spatialCache interface — used to test the "no spatial cache" path.
-// ---------------------------------------------------------------------------
-
-type standardMockCacheOnly struct{}
-
-func newStandardMockCacheOnly() *standardMockCacheOnly { return &standardMockCacheOnly{} }
-
-func (s *standardMockCacheOnly) SetEntity(ctx context.Context, e *domain.Entity, o *domain.Observation) error {
-	return nil
-}
-func (s *standardMockCacheOnly) GetEntity(ctx context.Context, layerType, externalID string) (*domain.Entity, *domain.Observation, error) {
-	return nil, nil, domain.NewNotFoundError("not found", nil)
-}
-func (s *standardMockCacheOnly) GetLayerEntities(ctx context.Context, layerType string, limit, offset int) ([]*domain.Entity, []*domain.Observation, int64, error) {
-	return nil, nil, 0, nil
-}
-func (s *standardMockCacheOnly) GetLayerCount(ctx context.Context, layerType string) (int64, error) {
-	return 0, nil
-}
-func (s *standardMockCacheOnly) ClearLayer(ctx context.Context, layerType string) error { return nil }
-func (s *standardMockCacheOnly) GetStats(ctx context.Context) (map[string]any, error) {
-	return map[string]any{}, nil
-}
-func (s *standardMockCacheOnly) HealthCheck(ctx context.Context) error { return nil }
-func (s *standardMockCacheOnly) Close() error                          { return nil }

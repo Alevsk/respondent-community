@@ -467,7 +467,7 @@ export function useLayerStream() {
         const effectiveTo = timeTo ?? new Date().toISOString();
         wsClient.sendTimeRange(layerId, timeFrom, effectiveTo, layerViewport);
       } else {
-        // Live mode — use subscribe to query the Valkey cache (no time filtering).
+        // Live mode — use subscribe to read the current snapshot (no time filtering).
         // The backend's handleSubscribe sends the current cache snapshot and
         // enables Pub/Sub for real-time updates.
         wsClient.subscribeLayer(layerId, layerViewport);
@@ -504,7 +504,7 @@ export function useLayerStream() {
     const viewport = useViewerStore.getState().viewport;
 
     if (timeMode === 'live') {
-      // Live mode — use subscribe to query the Valkey cache (no time filtering).
+      // Live mode — use subscribe to read the current snapshot (no time filtering).
       enabledLayers.forEach((layerId) => {
         clearLayerEntities(layerId);
         // Time window changed → snapshot must REPLACE (old data is invalid).
@@ -615,7 +615,7 @@ export function useViewportSync() {
               }
             });
           } else {
-            // Live mode — send lightweight viewport_update (uses fast Valkey cache path)
+            // Live mode — send lightweight viewport_update (server-side spatial query)
             // instead of time_range (which always hits Postgres). Pan → MERGE.
             currentLayers.forEach((layerId) => {
               if (isSpatialLayer(layerId)) {

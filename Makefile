@@ -119,6 +119,14 @@ fmt: ## Format Go code (excludes gen/ + vendor/)
 
 lint: ## Lint Go (excludes generated gen/)
 	golangci-lint run ./...
+	@# The hot entity cache was deleted: it was a second, non-deterministic copy
+	@# of the durable store that returned different rows for identical requests.
+	@# Fail the build if the port reappears.
+	@if grep -rn --include='*.go' -E 'CacheStorage|SpatialCacheStorage|FeederCache|MemCache' internal/ cmd/ | grep -v '^\s*//' | grep -q .; then \
+		echo "error: the entity cache port was reintroduced:"; \
+		grep -rn --include='*.go' -E 'CacheStorage|SpatialCacheStorage|FeederCache|MemCache' internal/ cmd/; \
+		exit 1; \
+	fi
 
 test: ## Run Go tests with race + coverage (excludes generated gen/)
 	@PKGS=$$(go list ./... | grep -v '/gen/'); \

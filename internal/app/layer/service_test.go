@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Alevsk/respondent/internal/app/layer/layertest"
 	"github.com/Alevsk/respondent/internal/domain"
 )
 
@@ -183,6 +182,10 @@ type stubObsRepo struct {
 	mu           sync.RWMutex
 	observations []*domain.Observation
 	getErr       error // returned by every Get call when non-nil
+	// entities models the JOIN the real page query performs. An observation
+	// whose entity is absent cannot come back from an INNER JOIN, so the stub
+	// must not invent one either.
+	entities *stubEntityRepo
 }
 
 func newStubObsRepo() *stubObsRepo { return &stubObsRepo{} }
@@ -245,22 +248,34 @@ func (s *stubObsRepo) GetLatest(_ context.Context, entityID string) (*domain.Obs
 	return latest, nil
 }
 
-func (s *stubObsRepo) GetLatestForLayer(_ context.Context, layerType string, limit int) ([]*domain.Observation, error) {
+func (s *stubObsRepo) GetLatestForLayerPage(_ context.Context, layerType string, limit, offset int) ([]*domain.EntitySnapshot, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if s.getErr != nil {
 		return nil, s.getErr
 	}
-	var out []*domain.Observation
+	var snaps []*domain.EntitySnapshot
 	for _, o := range s.observations {
-		if o.SourceType == layerType {
-			out = append(out, o)
-			if len(out) >= limit {
-				break
+		snap := &domain.EntitySnapshot{Observation: *o}
+		if s.entities != nil {
+			s.entities.mu.RLock()
+			e, ok := s.entities.entities[o.EntityID]
+			s.entities.mu.RUnlock()
+			if !ok || e.LayerType != layerType {
+				continue
 			}
+			snap.Entity = *e
 		}
+		snaps = append(snaps, snap)
 	}
-	return out, nil
+	if offset >= len(snaps) {
+		return nil, nil
+	}
+	snaps = snaps[offset:]
+	if limit > 0 && limit < len(snaps) {
+		snaps = snaps[:limit]
+	}
+	return snaps, nil
 }
 
 func (s *stubObsRepo) CreateBatchUpsert(_ context.Context, obs []*domain.Observation) error {
@@ -347,9 +362,9 @@ func makeObservation(id, entityID, layerType string) *domain.Observation {
 func TestNewLayerService(t *testing.T) {
 	entityRepo := newStubEntityRepo()
 	obsRepo := newStubObsRepo()
-	cache := layertest.NewFakeCacheStorage()
+	obsRepo.entities = entityRepo
 
-	svc := NewLayerService(entityRepo, obsRepo, cache, domain.NewDynamicSourceRegistry())
+	svc := NewLayerService(entityRepo, obsRepo, domain.NewDynamicSourceRegistry())
 
 	if svc == nil {
 		t.Fatal("expected non-nil LayerService")
@@ -359,9 +374,6 @@ func TestNewLayerService(t *testing.T) {
 	}
 	if svc.obsRepo != obsRepo {
 		t.Error("obsRepo not wired correctly")
-	}
-	if svc.cache != cache {
-		t.Error("cache not wired correctly")
 	}
 }
 
@@ -382,7 +394,7 @@ func declaring(layerTypes ...string) *domain.DynamicSourceRegistry {
 
 func TestGetLayers(t *testing.T) {
 	t.Run("returns_empty_when_no_entities_in_db", func(t *testing.T) {
-		svc := NewLayerService(newStubEntityRepo(), newStubObsRepo(), nil, domain.NewDynamicSourceRegistry())
+		svc := NewLayerService(newStubEntityRepo(), newStubObsRepo(), domain.NewDynamicSourceRegistry())
 		layers, err := svc.GetLayers(context.Background())
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -397,7 +409,7 @@ func TestGetLayers(t *testing.T) {
 		entityRepo.add(makeEntity("e1", "adsb_lol_flights", "ext1"))
 		entityRepo.add(makeEntity("e2", "usgs_earthquakes", "ext2"))
 
-		svc := NewLayerService(entityRepo, newStubObsRepo(), nil, declaring("adsb_lol_flights", "usgs_earthquakes"))
+		svc := NewLayerService(entityRepo, newStubObsRepo(), declaring("adsb_lol_flights", "usgs_earthquakes"))
 
 		layers, err := svc.GetLayers(context.Background())
 		if err != nil {
@@ -414,7 +426,7 @@ func TestGetLayers(t *testing.T) {
 		entityRepo.add(makeEntity("e2", "adsb_lol_flights", "ext2"))
 		entityRepo.add(makeEntity("e3", "celes_trak_satellites", "ext3"))
 
-		svc := NewLayerService(entityRepo, newStubObsRepo(), nil, declaring("usgs_earthquakes", "adsb_lol_flights", "celes_trak_satellites"))
+		svc := NewLayerService(entityRepo, newStubObsRepo(), declaring("usgs_earthquakes", "adsb_lol_flights", "celes_trak_satellites"))
 
 		layers, err := svc.GetLayers(context.Background())
 		if err != nil {
@@ -432,7 +444,7 @@ func TestGetLayers(t *testing.T) {
 		entityRepo.add(makeEntity("e1", "adsb_lol_flights", "ext1"))
 		entityRepo.add(makeEntity("e2", "usgs_earthquakes", "ext2"))
 
-		svc := NewLayerService(entityRepo, newStubObsRepo(), nil, declaring("adsb_lol_flights", "usgs_earthquakes"))
+		svc := NewLayerService(entityRepo, newStubObsRepo(), declaring("adsb_lol_flights", "usgs_earthquakes"))
 
 		layers, err := svc.GetLayers(context.Background())
 		if err != nil {
@@ -450,7 +462,7 @@ func TestGetLayers(t *testing.T) {
 		entityRepo := newStubEntityRepo()
 		entityRepo.add(makeEntity("e1", "adsb_lol_flights", "ext1"))
 
-		svc := NewLayerService(entityRepo, newStubObsRepo(), nil, declaring("adsb_lol_flights"))
+		svc := NewLayerService(entityRepo, newStubObsRepo(), declaring("adsb_lol_flights"))
 
 		layers, err := svc.GetLayers(context.Background())
 		if err != nil {
@@ -483,14 +495,14 @@ func TestGetLayers(t *testing.T) {
 
 	t.Run("layer_count_populated_from_db", func(t *testing.T) {
 		// Count is the durable per-layer entity total from the repository — the
-		// same store layer discovery uses — not the volatile hot cache.
+		// same store layer discovery uses.
 		entityRepo := newStubEntityRepo()
 		entityRepo.add(makeEntity("e1", "adsb_lol_flights", "ext1"))
 		entityRepo.add(makeEntity("e2", "adsb_lol_flights", "ext2"))
 		entityRepo.add(makeEntity("e3", "adsb_lol_flights", "ext3"))
 		entityRepo.add(makeEntity("e4", "usgs_earthquakes", "ext4"))
 
-		svc := NewLayerService(entityRepo, newStubObsRepo(), nil, declaring("adsb_lol_flights", "usgs_earthquakes"))
+		svc := NewLayerService(entityRepo, newStubObsRepo(), declaring("adsb_lol_flights", "usgs_earthquakes"))
 		layers, err := svc.GetLayers(context.Background())
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -508,18 +520,16 @@ func TestGetLayers(t *testing.T) {
 		}
 	})
 
-	t.Run("layer_count_from_db_ignores_empty_cache", func(t *testing.T) {
-		// Regression: a layer with persisted entities must report a non-zero count
-		// even when the hot cache is empty (cold start). The bug sourced the count
-		// from the cache, which reported 0 while the layer rendered from SQLite.
+	t.Run("layer_count_comes_from_the_durable_store", func(t *testing.T) {
+		// Regression: a layer with persisted entities must report a non-zero
+		// count. The bug sourced it from a hot cache that was empty on cold
+		// start, so the layer reported 0 while rendering from SQLite.
 		const layerType = "adsb_lol_flights"
 		entityRepo := newStubEntityRepo()
 		entityRepo.add(makeEntity("e1", layerType, "ext1"))
 		entityRepo.add(makeEntity("e2", layerType, "ext2"))
 
-		emptyCache := layertest.NewFakeCacheStorage() // GetLayerCount returns 0
-
-		svc := NewLayerService(entityRepo, newStubObsRepo(), emptyCache, declaring("adsb_lol_flights"))
+		svc := NewLayerService(entityRepo, newStubObsRepo(), declaring("adsb_lol_flights"))
 		layers, err := svc.GetLayers(context.Background())
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -528,7 +538,7 @@ func TestGetLayers(t *testing.T) {
 			t.Fatalf("expected 1 layer, got %d", len(layers))
 		}
 		if layers[0].Count != 2 {
-			t.Errorf("Count: got %d, want 2 (from DB, not empty cache)", layers[0].Count)
+			t.Errorf("Count: got %d, want 2 (from the durable store)", layers[0].Count)
 		}
 	})
 
@@ -537,7 +547,7 @@ func TestGetLayers(t *testing.T) {
 		entityRepo.add(makeEntity("e1", "adsb_lol_flights", "ext1"))
 		entityRepo.countErr = errors.New("count query failed")
 
-		svc := NewLayerService(entityRepo, newStubObsRepo(), nil, declaring("adsb_lol_flights"))
+		svc := NewLayerService(entityRepo, newStubObsRepo(), declaring("adsb_lol_flights"))
 		if _, err := svc.GetLayers(context.Background()); !errors.Is(err, entityRepo.countErr) {
 			t.Errorf("expected count error to propagate, got %v", err)
 		}
@@ -549,7 +559,7 @@ func TestGetLayers(t *testing.T) {
 		entityRepo := newStubEntityRepo()
 		entityRepo.add(makeEntity("e1", "adsb_lol_flights", "ext1"))
 
-		svc := NewLayerService(entityRepo, newStubObsRepo(), nil, declaring("adsb_lol_flights"))
+		svc := NewLayerService(entityRepo, newStubObsRepo(), declaring("adsb_lol_flights"))
 		layers, err := svc.GetLayers(context.Background())
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -567,7 +577,7 @@ func TestGetLayers(t *testing.T) {
 		entityRepo.add(makeEntity("e1", "adsb_lol_flights", "f1"))
 		entityRepo.add(makeEntity("e2", "disaster_alerts", "da1"))
 
-		svc := NewLayerService(entityRepo, newStubObsRepo(), nil, declaring("adsb_lol_flights", "disaster_alerts"))
+		svc := NewLayerService(entityRepo, newStubObsRepo(), declaring("adsb_lol_flights", "disaster_alerts"))
 
 		layers, err := svc.GetLayers(context.Background())
 		if err != nil {
@@ -602,7 +612,7 @@ func TestGetLayers(t *testing.T) {
 		entityRepo := newStubEntityRepo()
 		entityRepo.add(makeEntity("e1", "weather_alerts", "wa1"))
 
-		svc := NewLayerService(entityRepo, newStubObsRepo(), nil, declaring("weather_alerts"))
+		svc := NewLayerService(entityRepo, newStubObsRepo(), declaring("weather_alerts"))
 
 		layers, err := svc.GetLayers(context.Background())
 		if err != nil {
@@ -629,7 +639,7 @@ func TestGetLayers(t *testing.T) {
 		entityRepo.add(makeEntity("e2", "usgs_earthquakes", "eq2"))
 		entityRepo.add(makeEntity("e3", "usgs_earthquakes", "eq3"))
 
-		svc := NewLayerService(entityRepo, newStubObsRepo(), nil, declaring("usgs_earthquakes"))
+		svc := NewLayerService(entityRepo, newStubObsRepo(), declaring("usgs_earthquakes"))
 
 		layers, err := svc.GetLayers(context.Background())
 		if err != nil {
@@ -646,7 +656,7 @@ func TestGetLayers(t *testing.T) {
 		entityRepo.add(makeEntity("e2", "radiation", "rad1"))
 		entityRepo.add(makeEntity("e3", "weather_alerts", "wa1"))
 
-		svc := NewLayerService(entityRepo, newStubObsRepo(), nil, declaring("disaster_alerts", "radiation", "weather_alerts"))
+		svc := NewLayerService(entityRepo, newStubObsRepo(), declaring("disaster_alerts", "radiation", "weather_alerts"))
 
 		layers, err := svc.GetLayers(context.Background())
 		if err != nil {
@@ -720,7 +730,7 @@ func TestToggleLayer(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			svc := NewLayerService(newStubEntityRepo(), newStubObsRepo(), nil, domain.NewDynamicSourceRegistry())
+			svc := NewLayerService(newStubEntityRepo(), newStubObsRepo(), domain.NewDynamicSourceRegistry())
 
 			layer, err := svc.ToggleLayer(context.Background(), tc.toggle)
 			if err != nil {
@@ -780,7 +790,7 @@ func TestToggleLayer_StyleApplied(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			svc := NewLayerService(newStubEntityRepo(), newStubObsRepo(), nil, reg)
+			svc := NewLayerService(newStubEntityRepo(), newStubObsRepo(), reg)
 
 			layer, err := svc.ToggleLayer(context.Background(), &domain.LayerToggle{
 				LayerID: tc.layerID,
@@ -806,7 +816,7 @@ func TestToggleLayer_StyleApplied(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestGetLayerSnapshot_UnknownLayerID(t *testing.T) {
-	svc := NewLayerService(newStubEntityRepo(), newStubObsRepo(), nil, domain.NewDynamicSourceRegistry())
+	svc := NewLayerService(newStubEntityRepo(), newStubObsRepo(), domain.NewDynamicSourceRegistry())
 
 	result, err := svc.GetLayerSnapshot(context.Background(), "nonexistent_layer", 10, 0)
 	if err != nil {
@@ -836,13 +846,14 @@ func TestGetLayerSnapshot_DeclarativeLayerID(t *testing.T) {
 
 	entityRepo := newStubEntityRepo()
 	obsRepo := newStubObsRepo()
+	obsRepo.entities = entityRepo
 
 	entity := makeEntity("e1", layerID, "ext1")
 	obs := makeObservation("o1", entity.ID, layerID)
 	entityRepo.add(entity)
 	obsRepo.add(obs)
 
-	svc := NewLayerService(entityRepo, obsRepo, nil, domain.NewDynamicSourceRegistry())
+	svc := NewLayerService(entityRepo, obsRepo, domain.NewDynamicSourceRegistry())
 
 	result, err := svc.GetLayerSnapshot(context.Background(), layerID, 10, 0)
 	if err != nil {
@@ -856,19 +867,20 @@ func TestGetLayerSnapshot_DeclarativeLayerID(t *testing.T) {
 	}
 }
 
-func TestGetLayerSnapshot_DeclarativeLayerID_CacheHit(t *testing.T) {
+func TestGetLayerSnapshot_DeclarativeLayerIDFromStore(t *testing.T) {
 	const layerID = "disaster_alerts"
 
-	cache := layertest.NewFakeCacheStorage()
 	ctx := context.Background()
 
+	entityRepo := newStubEntityRepo()
+	obsRepo := newStubObsRepo()
+	obsRepo.entities = entityRepo
 	entity := makeEntity("e1", layerID, "ext1")
 	obs := makeObservation("o1", entity.ID, layerID)
-	if err := cache.SetEntity(ctx, entity, obs); err != nil {
-		t.Fatalf("SetEntity: %v", err)
-	}
+	entityRepo.add(entity)
+	obsRepo.add(obs)
 
-	svc := NewLayerService(newStubEntityRepo(), newStubObsRepo(), cache, domain.NewDynamicSourceRegistry())
+	svc := NewLayerService(entityRepo, obsRepo, domain.NewDynamicSourceRegistry())
 
 	result, err := svc.GetLayerSnapshot(ctx, layerID, 10, 0)
 	if err != nil {
@@ -879,23 +891,23 @@ func TestGetLayerSnapshot_DeclarativeLayerID_CacheHit(t *testing.T) {
 	}
 }
 
-func TestGetLayerSnapshot_CacheHit(t *testing.T) {
+func TestGetLayerSnapshot_MultipleEntities(t *testing.T) {
 	const layerID = "adsb_lol_flights"
 
-	cache := layertest.NewFakeCacheStorage()
 	ctx := context.Background()
 
-	// Seed 3 entities with observations into the cache under the layerID directly.
+	entityRepo := newStubEntityRepo()
+	obsRepo := newStubObsRepo()
+	obsRepo.entities = entityRepo
 	for i := range 3 {
 		ext := fmt.Sprintf("ext%d", i)
 		entity := makeEntity(fmt.Sprintf("e%d", i), layerID, ext)
 		obs := makeObservation(fmt.Sprintf("o%d", i), entity.ID, layerID)
-		if err := cache.SetEntity(ctx, entity, obs); err != nil {
-			t.Fatalf("SetEntity: %v", err)
-		}
+		entityRepo.add(entity)
+		obsRepo.add(obs)
 	}
 
-	svc := NewLayerService(newStubEntityRepo(), newStubObsRepo(), cache, domain.NewDynamicSourceRegistry())
+	svc := NewLayerService(entityRepo, obsRepo, domain.NewDynamicSourceRegistry())
 
 	result, err := svc.GetLayerSnapshot(ctx, layerID, 10, 0)
 	if err != nil {
@@ -912,23 +924,24 @@ func TestGetLayerSnapshot_CacheHit(t *testing.T) {
 	}
 }
 
-func TestGetLayerSnapshot_CacheHit_Pagination(t *testing.T) {
+func TestGetLayerSnapshot_Pagination(t *testing.T) {
 	const layerID = "adsb_lol_flights"
 
-	cache := layertest.NewFakeCacheStorage()
 	ctx := context.Background()
 
+	entityRepo := newStubEntityRepo()
+	obsRepo := newStubObsRepo()
+	obsRepo.entities = entityRepo
 	total := 5
 	for i := range total {
 		ext := fmt.Sprintf("ext%d", i)
 		entity := makeEntity(fmt.Sprintf("e%d", i), layerID, ext)
 		obs := makeObservation(fmt.Sprintf("o%d", i), entity.ID, layerID)
-		if err := cache.SetEntity(ctx, entity, obs); err != nil {
-			t.Fatalf("SetEntity: %v", err)
-		}
+		entityRepo.add(entity)
+		obsRepo.add(obs)
 	}
 
-	svc := NewLayerService(newStubEntityRepo(), newStubObsRepo(), cache, domain.NewDynamicSourceRegistry())
+	svc := NewLayerService(entityRepo, obsRepo, domain.NewDynamicSourceRegistry())
 
 	// First page: limit=2, offset=0 → 2 results, hasMore=true
 	result, err := svc.GetLayerSnapshot(ctx, layerID, 2, 0)
@@ -955,11 +968,12 @@ func TestGetLayerSnapshot_CacheHit_Pagination(t *testing.T) {
 	}
 }
 
-func TestGetLayerSnapshot_CacheMiss_DBFallback(t *testing.T) {
+func TestGetLayerSnapshot_ReturnsStoredEntities(t *testing.T) {
 	const layerID = "adsb_lol_flights"
 
 	entityRepo := newStubEntityRepo()
 	obsRepo := newStubObsRepo()
+	obsRepo.entities = entityRepo
 
 	// Add entities and observations directly into the DB stubs.
 	for i := range 3 {
@@ -969,18 +983,13 @@ func TestGetLayerSnapshot_CacheMiss_DBFallback(t *testing.T) {
 		obsRepo.add(obs)
 	}
 
-	// Cache with a get error forces fallback to DB.
-	cache := layertest.NewFakeCacheStorage()
-	cache.SetError(nil, errors.New("cache miss"), nil)
-
-	svc := NewLayerService(entityRepo, obsRepo, cache, domain.NewDynamicSourceRegistry())
+	svc := NewLayerService(entityRepo, obsRepo, domain.NewDynamicSourceRegistry())
 
 	result, err := svc.GetLayerSnapshot(context.Background(), layerID, 10, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// obsRepo.GetLatestForLayer returns all matching observations (limit 1000).
-	// Each observation has an entityID that exists in entityRepo, so all 3 entities load.
+	// The page carries each entity with its latest observation, so all 3 load.
 	if len(result.Entities) != 3 {
 		t.Errorf("Entities: got %d, want 3", len(result.Entities))
 	}
@@ -989,45 +998,43 @@ func TestGetLayerSnapshot_CacheMiss_DBFallback(t *testing.T) {
 	}
 }
 
-func TestGetLayerSnapshot_CacheEmpty_DBFallback(t *testing.T) {
-	// When cache returns no error but 0 entities, the service falls back to DB.
+func TestGetLayerSnapshot_SingleEntity(t *testing.T) {
 	const layerID = "adsb_lol_flights"
 
 	entityRepo := newStubEntityRepo()
 	obsRepo := newStubObsRepo()
+	obsRepo.entities = entityRepo
 
 	entity := makeEntity("e1", layerID, "ext1")
 	obs := makeObservation("o1", entity.ID, layerID)
 	entityRepo.add(entity)
 	obsRepo.add(obs)
 
-	// Cache returns success but zero entities (empty cache).
-	cache := layertest.NewFakeCacheStorage()
-
-	svc := NewLayerService(entityRepo, obsRepo, cache, domain.NewDynamicSourceRegistry())
+	svc := NewLayerService(entityRepo, obsRepo, domain.NewDynamicSourceRegistry())
 
 	result, err := svc.GetLayerSnapshot(context.Background(), layerID, 10, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// DB fallback should return the single entity/observation.
+	// The store returns the single entity/observation.
 	if len(result.Entities) != 1 {
 		t.Errorf("Entities: got %d, want 1", len(result.Entities))
 	}
 }
 
-func TestGetLayerSnapshot_NilCache_DBFallback(t *testing.T) {
+func TestGetLayerSnapshot_NoRepositoriesConfigured(t *testing.T) {
 	const layerID = "adsb_lol_flights"
 
 	entityRepo := newStubEntityRepo()
 	obsRepo := newStubObsRepo()
+	obsRepo.entities = entityRepo
 
 	entity := makeEntity("e1", layerID, "ext1")
 	obs := makeObservation("o1", entity.ID, layerID)
 	entityRepo.add(entity)
 	obsRepo.add(obs)
 
-	svc := NewLayerService(entityRepo, obsRepo, nil, domain.NewDynamicSourceRegistry())
+	svc := NewLayerService(entityRepo, obsRepo, domain.NewDynamicSourceRegistry())
 
 	result, err := svc.GetLayerSnapshot(context.Background(), layerID, 10, 0)
 	if err != nil {
@@ -1043,6 +1050,7 @@ func TestGetLayerSnapshot_DBFallback_Pagination(t *testing.T) {
 
 	entityRepo := newStubEntityRepo()
 	obsRepo := newStubObsRepo()
+	obsRepo.entities = entityRepo
 
 	total := 5
 	for i := range total {
@@ -1053,7 +1061,7 @@ func TestGetLayerSnapshot_DBFallback_Pagination(t *testing.T) {
 	}
 
 	// Nil cache forces DB path.
-	svc := NewLayerService(entityRepo, obsRepo, nil, domain.NewDynamicSourceRegistry())
+	svc := NewLayerService(entityRepo, obsRepo, domain.NewDynamicSourceRegistry())
 	ctx := context.Background()
 
 	tests := []struct {
@@ -1095,6 +1103,7 @@ func TestGetLayerSnapshot_DBFallback_SkipsEntitiesNotInRepo(t *testing.T) {
 
 	entityRepo := newStubEntityRepo()
 	obsRepo := newStubObsRepo()
+	obsRepo.entities = entityRepo
 
 	// Only entity "e1" exists; observation "o2" references a missing "e2".
 	entity := makeEntity("e1", layerID, "ext1")
@@ -1103,7 +1112,7 @@ func TestGetLayerSnapshot_DBFallback_SkipsEntitiesNotInRepo(t *testing.T) {
 	obsRepo.add(makeObservation("o1", "e1", layerID))
 	obsRepo.add(makeObservation("o2", "e2_missing", layerID)) // entity not in repo
 
-	svc := NewLayerService(entityRepo, obsRepo, nil, domain.NewDynamicSourceRegistry())
+	svc := NewLayerService(entityRepo, obsRepo, domain.NewDynamicSourceRegistry())
 
 	result, err := svc.GetLayerSnapshot(context.Background(), layerID, 10, 0)
 	if err != nil {
@@ -1120,7 +1129,7 @@ func TestGetLayerSnapshot_DBFallback_ObsRepoError(t *testing.T) {
 	obsRepo := newStubObsRepo()
 	obsRepo.getErr = errors.New("db connection lost")
 
-	svc := NewLayerService(newStubEntityRepo(), obsRepo, nil, domain.NewDynamicSourceRegistry())
+	svc := NewLayerService(newStubEntityRepo(), obsRepo, domain.NewDynamicSourceRegistry())
 
 	result, err := svc.GetLayerSnapshot(context.Background(), layerID, 10, 0)
 	if err == nil {
@@ -1137,7 +1146,7 @@ func TestGetLayerSnapshot_DBFallback_ObsRepoError(t *testing.T) {
 func TestGetLayerSnapshot_EmptyDB(t *testing.T) {
 	const layerID = "adsb_lol_flights"
 
-	svc := NewLayerService(newStubEntityRepo(), newStubObsRepo(), nil, domain.NewDynamicSourceRegistry())
+	svc := NewLayerService(newStubEntityRepo(), newStubObsRepo(), domain.NewDynamicSourceRegistry())
 
 	result, err := svc.GetLayerSnapshot(context.Background(), layerID, 10, 0)
 	if err != nil {
@@ -1160,16 +1169,15 @@ func TestGetLayerSnapshot_EmptyDB(t *testing.T) {
 func TestGetLayerSnapshot_LayerIDUsedDirectlyAsLayerType(t *testing.T) {
 	entityRepo := newStubEntityRepo()
 	obsRepo := newStubObsRepo()
-	cache := layertest.NewFakeCacheStorage()
+	obsRepo.entities = entityRepo
 	ctx := context.Background()
 
 	entity := makeEntity("e1", "adsb_lol_flights", "ext1")
 	obs := makeObservation("o1", entity.ID, "adsb_lol_flights")
-	if err := cache.SetEntity(ctx, entity, obs); err != nil {
-		t.Fatalf("SetEntity: %v", err)
-	}
+	entityRepo.add(entity)
+	obsRepo.add(obs)
 
-	svc := NewLayerService(entityRepo, obsRepo, cache, domain.NewDynamicSourceRegistry())
+	svc := NewLayerService(entityRepo, obsRepo, domain.NewDynamicSourceRegistry())
 	result, err := svc.GetLayerSnapshot(ctx, "adsb_lol_flights", 10, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1192,7 +1200,7 @@ func TestGetLayers_WithDisplayConfig(t *testing.T) {
 	entityRepo := newStubEntityRepo()
 	entityRepo.add(makeEntity("e1", "test_display_layer", "ext1"))
 
-	svc := NewLayerService(entityRepo, newStubObsRepo(), nil, dynReg)
+	svc := NewLayerService(entityRepo, newStubObsRepo(), dynReg)
 	layers, err := svc.GetLayers(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1219,7 +1227,7 @@ func TestGetLayers_LayerDisplayNameOverride(t *testing.T) {
 	entityRepo := newStubEntityRepo()
 	entityRepo.add(makeEntity("e1", "traffic_stations", "ext1"))
 
-	svc := NewLayerService(entityRepo, newStubObsRepo(), nil, dynReg)
+	svc := NewLayerService(entityRepo, newStubObsRepo(), dynReg)
 	layers, err := svc.GetLayers(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1243,7 +1251,7 @@ func TestGetLayers_NoOverride_UsesFormattedLayerType(t *testing.T) {
 	entityRepo := newStubEntityRepo()
 	entityRepo.add(makeEntity("e1", "toll_booths", "ext1"))
 
-	svc := NewLayerService(entityRepo, newStubObsRepo(), nil, dynReg)
+	svc := NewLayerService(entityRepo, newStubObsRepo(), dynReg)
 	layers, err := svc.GetLayers(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1271,7 +1279,7 @@ func TestGetLayers_WithHistoryConfig(t *testing.T) {
 	entityRepo := newStubEntityRepo()
 	entityRepo.add(makeEntity("e1", "test_history_layer", "ext1"))
 
-	svc := NewLayerService(entityRepo, newStubObsRepo(), nil, dynReg)
+	svc := NewLayerService(entityRepo, newStubObsRepo(), dynReg)
 	layers, err := svc.GetLayers(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1288,7 +1296,7 @@ func TestGetLayers_RepositoryError(t *testing.T) {
 	entityRepo := newStubEntityRepo()
 	entityRepo.getErr = errors.New("db connection failed")
 
-	svc := NewLayerService(entityRepo, newStubObsRepo(), nil, domain.NewDynamicSourceRegistry())
+	svc := NewLayerService(entityRepo, newStubObsRepo(), domain.NewDynamicSourceRegistry())
 	_, err := svc.GetLayers(context.Background())
 	if err == nil {
 		t.Fatal("expected error from repository")
@@ -1304,7 +1312,7 @@ func TestToggleLayer_WithRegistryConfigs(t *testing.T) {
 	dynReg.SetFilteringMode(lt, "viewport")
 	defer dynReg.Unregister(st)
 
-	svc := NewLayerService(newStubEntityRepo(), newStubObsRepo(), nil, dynReg)
+	svc := NewLayerService(newStubEntityRepo(), newStubObsRepo(), dynReg)
 	layer, err := svc.ToggleLayer(context.Background(), &domain.LayerToggle{
 		LayerID: "test_toggle_layer",
 		Enabled: true,
@@ -1327,12 +1335,13 @@ func TestGetLayerSnapshot_ObservationMismatch(t *testing.T) {
 
 	entityRepo := newStubEntityRepo()
 	obsRepo := newStubObsRepo()
+	obsRepo.entities = entityRepo
 
 	entityRepo.add(makeEntity("e1", layerID, "ext1"))
 	obsRepo.add(makeObservation("o1", "e1", layerID))
 	obsRepo.add(makeObservation("o2", "e2", layerID))
 
-	svc := NewLayerService(entityRepo, obsRepo, nil, domain.NewDynamicSourceRegistry())
+	svc := NewLayerService(entityRepo, obsRepo, domain.NewDynamicSourceRegistry())
 
 	result, err := svc.GetLayerSnapshot(context.Background(), layerID, 10, 0)
 	if err != nil {
@@ -1348,6 +1357,7 @@ func TestGetLayerSnapshot_OffsetBeyondEntities(t *testing.T) {
 
 	entityRepo := newStubEntityRepo()
 	obsRepo := newStubObsRepo()
+	obsRepo.entities = entityRepo
 
 	for i := range 3 {
 		entity := makeEntity(fmt.Sprintf("e%d", i), layerID, fmt.Sprintf("ext%d", i))
@@ -1356,7 +1366,7 @@ func TestGetLayerSnapshot_OffsetBeyondEntities(t *testing.T) {
 		obsRepo.add(obs)
 	}
 
-	svc := NewLayerService(entityRepo, obsRepo, nil, domain.NewDynamicSourceRegistry())
+	svc := NewLayerService(entityRepo, obsRepo, domain.NewDynamicSourceRegistry())
 
 	result, err := svc.GetLayerSnapshot(context.Background(), layerID, 2, 10)
 	if err != nil {
@@ -1383,7 +1393,7 @@ func TestGetLayers_DisplayConfigWithNilStyle(t *testing.T) {
 	entityRepo := newStubEntityRepo()
 	entityRepo.add(makeEntity("e1", "test_nil_style_layer", "ext1"))
 
-	svc := NewLayerService(entityRepo, newStubObsRepo(), nil, dynReg)
+	svc := NewLayerService(entityRepo, newStubObsRepo(), dynReg)
 	layers, err := svc.GetLayers(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1410,7 +1420,7 @@ func TestGetLayers_DisplayConfigWithEmptyColor(t *testing.T) {
 	entityRepo := newStubEntityRepo()
 	entityRepo.add(makeEntity("e1", "test_empty_color_layer", "ext1"))
 
-	svc := NewLayerService(entityRepo, newStubObsRepo(), nil, dynReg)
+	svc := NewLayerService(entityRepo, newStubObsRepo(), dynReg)
 	layers, err := svc.GetLayers(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1440,7 +1450,7 @@ func TestGetLayersOmitsLayersNoSourceDeclares(t *testing.T) {
 	reg.Register("cctv_austin", "cctv")
 	reg.Register("cctv_calgary", "cctv")
 
-	svc := NewLayerService(entityRepo, newStubObsRepo(), nil, reg)
+	svc := NewLayerService(entityRepo, newStubObsRepo(), reg)
 	layers, err := svc.GetLayers(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

@@ -125,8 +125,8 @@ type testObsRepo struct {
 	latestObsErr         error
 	observationsByEntity []*domain.Observation
 	obsByEntityErr       error
-	latestForLayer       []*domain.Observation
-	latestForLayerErr    error
+	layerPage            []*domain.EntitySnapshot
+	layerPageErr         error
 }
 
 func (s *testObsRepo) Create(_ context.Context, _ *domain.Observation) error { return nil }
@@ -142,8 +142,11 @@ func (s *testObsRepo) GetByEntityID(_ context.Context, _ string, _ int, _ time.T
 func (s *testObsRepo) GetLatest(_ context.Context, _ string) (*domain.Observation, error) {
 	return s.latestObservation, s.latestObsErr
 }
-func (s *testObsRepo) GetLatestForLayer(_ context.Context, _ string, _ int) ([]*domain.Observation, error) {
-	return s.latestForLayer, s.latestForLayerErr
+func (s *testObsRepo) GetLatestForLayerPage(_ context.Context, _ string, _, _ int) ([]*domain.EntitySnapshot, error) {
+	if s.layerPageErr != nil {
+		return nil, s.layerPageErr
+	}
+	return s.layerPage, nil
 }
 func (s *testObsRepo) GetLatestForEntityIDs(_ context.Context, entityIDs []string) (map[string]*domain.Observation, error) {
 	if s.observations == nil {

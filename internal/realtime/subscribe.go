@@ -59,7 +59,7 @@ func (c *Client) handleSubscribe(msg WSMessage) {
 	}
 	c.SetGlobalMode(msg.LayerID, globalMode)
 
-	// Send initial snapshot from cache, with database fallback
+	// Send the initial snapshot from the durable store
 	if c.server == nil {
 		return
 	}
@@ -89,12 +89,10 @@ func (c *Client) handleSubscribe(msg WSMessage) {
 		}
 	}
 
-	// Build the initial snapshot from the DURABLE store, which is the authoritative,
-	// complete source (latest observation per entity). The hot cache holds only a
-	// partial subset — whatever has been polled since startup — so trusting it as the
-	// snapshot source under-reports: a static layer would render 5 of 506 entities, or
-	// a viewport 25 of thousands. The cache drives live push updates via broadcast; it
-	// is not the snapshot source of truth.
+	// Build the initial snapshot from the durable store — the authoritative,
+	// complete source (latest observation per entity). Live push updates are
+	// published by the feeder straight to the broadcaster and never travel
+	// through a snapshot read.
 	threshold := c.server.getBackfillThreshold(string(layerType))
 	// A viewport scopes the snapshot only for spatial layers; non-spatial layers (and
 	// global mode) always get their full latest-per-entity set regardless of viewport.
@@ -109,19 +107,10 @@ func (c *Client) handleSubscribe(msg WSMessage) {
 			observations = dbObs
 			c.Logger.Debug().Str("layer_id", msg.LayerID).Int("entities", len(entities)).Msg("snapshot from database (latest per entity)")
 		}
-		// Defensive: only if the durable store is unavailable/empty, try the cache.
-		if len(entities) == 0 && c.server.cache != nil {
-			cachedEntities, cachedObs, _, cErr := c.server.cache.GetLayerEntities(ctx, string(layerType), limit, 0)
-			if cErr == nil && len(cachedEntities) > 0 {
-				entities = cachedEntities
-				observations = cachedObs
-				c.Logger.Debug().Str("layer_id", msg.LayerID).Int("entities", len(entities)).Msg("snapshot from cache (db unavailable)")
-			}
-		}
 	} else {
-		// Spatial layer with a viewport: hot geo-cache first, then the durable store
-		// when sparse. Shared with handleViewportUpdate so a fresh subscribe and a pan
-		// to the same region return identical results.
+		// Spatial layer with a viewport, read from the durable store. Shared with
+		// handleViewportUpdate so a fresh subscribe and a pan to the same region
+		// return identical results.
 		vpLimit := viewportEntityLimit(effectiveViewport, c.server.getBackfillConfig().MaxResults)
 		entities, observations = c.server.buildSpatialViewportSnapshot(ctx, string(layerType), *effectiveViewport, vpLimit)
 	}
@@ -153,104 +142,73 @@ func (c *Client) handleSubscribe(msg WSMessage) {
 }
 
 // buildSpatialViewportSnapshot returns the latest entities for a spatial layer
-// within a viewport: the hot geo-cache first, then the durable store when the cache
-// is sparse — BEFORE any rate-limited on-demand fetch. A small geo-cache result
-// usually means the cache is not warmed for that region, not that the region is
-// empty. Shared by handleSubscribe and handleViewportUpdate so a fresh subscribe
-// and a pan to the same region load identically (the bug was that only subscribe
-// consulted the durable store, so panning to an uncached region rendered nothing).
+// within a viewport. Shared by handleSubscribe and handleViewportUpdate so a
+// fresh subscribe and a pan to the same region load identically.
+//
+// It reads the durable store. It used to consult a hot geo-cache first and keep
+// that result whenever it was non-empty, falling through only when the cache
+// returned fewer rows than the backfill threshold (default 10) — so a cache
+// holding 10 of a viewport's 2,000 entities suppressed the store entirely. The
+// cache also iterated a Go map and stopped at the limit, so two identical
+// viewport requests returned two arbitrary, sometimes disjoint, sets of
+// entities. The store is deterministic and complete.
 func (s *Server) buildSpatialViewportSnapshot(ctx context.Context, layerType string, bbox domain.BBox, limit int) ([]*domain.Entity, []*domain.Observation) {
-	var entities []*domain.Entity
-	var observations []*domain.Observation
-
-	if s.cache != nil {
-		if sc, ok := s.cache.(spatialCacheQuerier); ok {
-			if e, o, err := sc.GetLayerEntitiesByBBox(ctx, layerType, bbox, limit); err == nil && len(e) > 0 {
-				entities = e
-				observations = o
-			}
-		}
+	entities, observations, err := s.snapshotFromDBByBBox(ctx, layerType, bbox, limit)
+	if err != nil {
+		s.logger.Error().Err(err).Str("layer", layerType).Msg("viewport snapshot from database failed")
+		return nil, nil
 	}
-
-	if len(entities) < s.getBackfillThreshold(layerType) {
-		if de, do, err := s.snapshotFromDBByBBox(ctx, layerType, bbox, limit); err == nil && len(de) > len(entities) {
-			entities = de
-			observations = do
-		}
-	}
-
 	return entities, observations
 }
 
-// snapshotFromDB builds a complete layer snapshot — the latest observation per
-// entity — from the durable store. It is the authoritative snapshot source for
-// non-spatial (and global-mode) layers, where the hot cache holds only a partial
-// subset. Returns (nil, nil, nil) when the repositories are not wired.
+// snapshotFromDB builds a layer snapshot — each entity with its latest
+// observation — from the durable store, for non-spatial and global-mode layers.
+// Returns (nil, nil, nil) when the repositories are not wired.
 func (s *Server) snapshotFromDB(ctx context.Context, layerType string, limit int) ([]*domain.Entity, []*domain.Observation, error) {
-	if s.obsRepo == nil || s.entityRepo == nil {
+	if s.obsRepo == nil {
 		return nil, nil, nil
 	}
-	dbObs, err := s.obsRepo.GetLatestForLayer(ctx, layerType, limit)
+	snaps, err := s.obsRepo.GetLatestForLayerPage(ctx, layerType, limit, 0)
 	if err != nil {
 		return nil, nil, err
 	}
-	return s.resolveSnapshotEntities(ctx, dbObs)
-}
-
-// resolveSnapshotEntities batch-fetches the entities for a set of latest
-// observations and rewrites both to the composite (layer_type:external_id) ID the
-// frontend keys on. Observations whose entity is missing are dropped.
-func (s *Server) resolveSnapshotEntities(ctx context.Context, dbObs []*domain.Observation) ([]*domain.Entity, []*domain.Observation, error) {
-	if len(dbObs) == 0 {
-		return nil, nil, nil
-	}
-	entityIDs := make([]string, 0, len(dbObs))
-	for _, obs := range dbObs {
-		entityIDs = append(entityIDs, obs.EntityID)
-	}
-	dbEntities, err := s.entityRepo.GetByIDs(ctx, entityIDs)
-	if err != nil {
-		return nil, nil, err
-	}
-	entityMap := make(map[string]*domain.Entity, len(dbEntities))
-	for _, e := range dbEntities {
-		entityMap[e.ID] = e
-	}
-	entities := make([]*domain.Entity, 0, len(dbObs))
-	observations := make([]*domain.Observation, 0, len(dbObs))
-	for _, obs := range dbObs {
-		e, ok := entityMap[obs.EntityID]
-		if !ok {
-			continue
-		}
-		// Copy before rewriting IDs: the durable-store pointers may be reused by the
-		// caller (or shared by test doubles), so this helper must not mutate its input.
-		entityCopy := *e
-		obsCopy := *obs
-		compositeID := domain.EntityID(domain.LayerType(entityCopy.LayerType), entityCopy.ExternalID)
-		entityCopy.ID = compositeID
-		obsCopy.EntityID = compositeID
-		entities = append(entities, &entityCopy)
-		observations = append(observations, &obsCopy)
-	}
+	entities, observations := snapshotsToLive(snaps)
 	return entities, observations, nil
 }
 
-// snapshotFromDBByBBox builds a viewport-scoped snapshot from the durable store:
-// each entity's truly-latest observation whose current position falls inside the
-// bounding box. Used for spatial layers when the hot geo-cache is sparse, before
-// resorting to rate-limited on-demand fetches.
-func (s *Server) snapshotFromDBByBBox(ctx context.Context, layerType string, vp domain.BBox, limit int) ([]*domain.Entity, []*domain.Observation, error) {
-	if s.obsRepo == nil || s.entityRepo == nil {
+// snapshotPage returns one index-ordered page of a layer from the durable store.
+func (s *Server) snapshotPage(ctx context.Context, layerType string, limit, offset int) ([]*domain.Entity, []*domain.Observation, error) {
+	if s.obsRepo == nil {
 		return nil, nil, nil
 	}
-	// from = zero time (all history) → to = now: take each entity's truly-latest
-	// observation whose current position is in the bbox.
-	snaps, err := s.obsRepo.GetLatestByCurrentPositionInBBox(
-		ctx, layerType, vp.South, vp.North, vp.West, vp.East, time.Time{}, time.Now(), limit)
+	snaps, err := s.obsRepo.GetLatestForLayerPage(ctx, layerType, limit, offset)
 	if err != nil {
 		return nil, nil, err
 	}
+	entities, observations := snapshotsToLive(snaps)
+	return entities, observations, nil
+}
+
+// layerTotal reports how many entities a layer holds, for the "total available"
+// badge. It reads the durable store's own per-layer count — the source of truth
+// declared on domain.EntityRepository — rather than the length of the page,
+// which is what the caller falls back to when no repository is wired.
+func (s *Server) layerTotal(ctx context.Context, layerType string, pageLen int) int64 {
+	if s.entityRepo == nil {
+		return int64(pageLen)
+	}
+	counts, err := s.entityRepo.CountByLayerType(ctx)
+	if err != nil {
+		s.logger.Warn().Err(err).Str("layer", layerType).Msg("failed to get entity count")
+		return int64(pageLen)
+	}
+	return counts[layerType]
+}
+
+// snapshotsToLive rewrites each snapshot to the composite (layer_type:external_id)
+// ID the frontend keys on, copying first so the durable store's rows are never
+// mutated in place.
+func snapshotsToLive(snaps []*domain.EntitySnapshot) ([]*domain.Entity, []*domain.Observation) {
 	entities := make([]*domain.Entity, 0, len(snaps))
 	observations := make([]*domain.Observation, 0, len(snaps))
 	for _, snap := range snaps {
@@ -262,6 +220,25 @@ func (s *Server) snapshotFromDBByBBox(ctx context.Context, layerType string, vp 
 		entities = append(entities, &e)
 		observations = append(observations, &o)
 	}
+	return entities, observations
+}
+
+// snapshotFromDBByBBox builds a viewport-scoped snapshot from the durable store:
+// each entity's truly-latest observation whose current position falls inside the
+// bounding box. Used for spatial layers before resorting to rate-limited
+// on-demand fetches.
+func (s *Server) snapshotFromDBByBBox(ctx context.Context, layerType string, vp domain.BBox, limit int) ([]*domain.Entity, []*domain.Observation, error) {
+	if s.obsRepo == nil {
+		return nil, nil, nil
+	}
+	// from = zero time (all history) → to = now: take each entity's truly-latest
+	// observation whose current position is in the bbox.
+	snaps, err := s.obsRepo.GetLatestByCurrentPositionInBBox(
+		ctx, layerType, vp.South, vp.North, vp.West, vp.East, time.Time{}, time.Now(), limit)
+	if err != nil {
+		return nil, nil, err
+	}
+	entities, observations := snapshotsToLive(snaps)
 	return entities, observations, nil
 }
 
@@ -309,14 +286,17 @@ func (c *Client) handlePage(msg WSMessage) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// Fetch entities from cache at the cursor offset
-	if c.server == nil || c.server.cache == nil {
+	// Page the durable store at the cursor offset. This used to page the hot
+	// cache by ranging a Go map and counting to the offset — with randomised
+	// iteration order, so the same request returned different rows each time and
+	// pages both overlapped and skipped. The store's page is index-ordered.
+	if c.server == nil {
 		return
 	}
 	layerType := c.server.layerTypeForID(msg.LayerID)
-	entities, obs, _, err := c.server.cache.GetLayerEntities(ctx, string(layerType), limit, cursor.Offset)
+	entities, obs, err := c.server.snapshotPage(ctx, string(layerType), limit, cursor.Offset)
 	if err != nil {
-		c.Logger.Error().Err(err).Str("layer", msg.LayerID).Msg("page: cache query failed")
+		c.Logger.Error().Err(err).Str("layer", msg.LayerID).Msg("page: database query failed")
 		return
 	}
 
@@ -334,9 +314,7 @@ func (c *Client) handlePage(msg WSMessage) {
 		nextCursor = encodeCursor(cursor.Offset + len(entities))
 	}
 
-	// Get total count using existing GetLayerCount (SCARD — O(1))
-	var total int64
-	total, _ = c.server.cache.GetLayerCount(ctx, string(layerType))
+	total := c.server.layerTotal(ctx, string(layerType), len(entities))
 
 	// Build response
 	chunk := map[string]any{
@@ -457,14 +435,14 @@ func (c *Client) handleViewportUpdate(msg WSMessage) {
 		o.Source = "live"
 	}
 
-	// Tier 1.5 + Tier 2: On-demand fetch and Postgres backfill (concurrent)
+	// Tier 1.5 + Tier 2: on-demand fetch and durable-store backfill (concurrent)
 	// when cache is sparse. Also fires Tier 3 priority signal.
 	threshold := c.server.getBackfillThreshold(string(layerType))
 	if len(entities) < threshold {
 		c.Logger.Debug().
 			Int("geo_entities", len(entities)).
 			Int("threshold", threshold).
-			Msg("cache sparse: launching on-demand + backfill")
+			Msg("viewport sparse: launching on-demand + backfill")
 
 		sparseEntities, sparseObs := c.server.fetchSparseRegion(ctx, c, msg.LayerID, string(layerType), &bbox, entities)
 		// fetchSparseRegion returns the merged result including the original cache entities
@@ -477,7 +455,7 @@ func (c *Client) handleViewportUpdate(msg WSMessage) {
 		c.Logger.Debug().
 			Int("entities", len(entities)).
 			Int("threshold", threshold).
-			Msg("cache sufficient: skipping backfill")
+			Msg("viewport sufficient: skipping backfill")
 
 		// Cache sufficient — stop any running ticker (user moved to a populated area)
 		c.stopOnDemandTicker(msg.LayerID)
@@ -583,18 +561,7 @@ func (s *Server) SendSnapshotToClient(client *Client, layerID string, entities [
 // SendPaginatedSnapshot sends a paginated layer snapshot with total count and cursor.
 // If the dataset fits within `limit`, no cursor is sent (single-page result).
 func (s *Server) SendPaginatedSnapshot(ctx context.Context, client *Client, layerID, layerType string, entities []*domain.Entity, observations []*domain.Observation, limit int) {
-	// Get total entity count for this layer using existing GetLayerCount (SCARD — O(1))
-	var total int64
-	if s.cache != nil {
-		var err error
-		total, err = s.cache.GetLayerCount(ctx, layerType)
-		if err != nil {
-			s.logger.Warn().Err(err).Str("layer", layerID).Msg("failed to get entity count")
-			total = int64(len(entities))
-		}
-	} else {
-		total = int64(len(entities))
-	}
+	total := s.layerTotal(ctx, layerType, len(entities))
 
 	// Check for indicator layers — delegate to existing indicator path
 	if len(entities) > 0 && isIndicatorLayer(s.dynReg, entities[0].LayerType) {
@@ -616,10 +583,13 @@ func (s *Server) SendPaginatedSnapshot(ctx context.Context, client *Client, laye
 		}
 	}
 
-	// Build cursor if there are more entities
+	// Build a cursor if the layer holds more than this page. The comparison is
+	// against the layer total, not against len(entities): the store already
+	// applied the limit, so the page length can never exceed it and comparing
+	// the two would report "no more" for every layer.
 	var cursor string
-	if len(entities) > limit {
-		cursor = encodeCursor(limit)
+	if int64(len(pageEntities)) < total {
+		cursor = encodeCursor(len(pageEntities))
 	}
 
 	// Send in chunks for progressive rendering (same as existing chunking)

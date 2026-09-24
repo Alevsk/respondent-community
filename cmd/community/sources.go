@@ -109,10 +109,6 @@ func RegisterDeclarativeSources(logger zerolog.Logger, registry *ingest.SourceRe
 		if timeout <= 0 {
 			timeout = 30 * time.Second
 		}
-		cacheTTL := def.Cache.TTL.Duration
-		if cacheTTL <= 0 {
-			cacheTTL = 60 * time.Second
-		}
 
 		recordMode := config.ObservationRecordMode(def.Recording.Mode)
 		if !recordMode.Valid() {
@@ -124,7 +120,6 @@ func RegisterDeclarativeSources(logger zerolog.Logger, registry *ingest.SourceRe
 			Interval:              interval,
 			Timeout:               timeout,
 			APIURL:                def.Transport.URL,
-			CacheTTL:              cacheTTL,
 			ObservationRecordMode: recordMode,
 			DryRun:                def.DryRun,
 		}

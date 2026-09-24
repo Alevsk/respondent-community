@@ -78,10 +78,6 @@ type Worker struct {
 	// countryCentroids is a lookup table for country centroid fallback.
 	countryCentroids map[string][2]float64
 
-	// spatialCache is the hot cache (Valkey) refreshed after coordinate patching.
-	// When set, UpdateCoordinates refreshes both DB and cache geo index.
-	spatialCache domain.CacheStorage
-
 	// onEnrichmentComplete is an optional callback invoked when all operations
 	// for an entity complete successfully. Used to trigger event-based task
 	// pipelines from the tasks engine.
@@ -168,12 +164,6 @@ func (w *Worker) SetGeocoder(g geocoder.Geocoder) {
 // final fallback tier in geo-resolution. Must be called before Start().
 func (w *Worker) SetCountryCentroids(centroids map[string][2]float64) {
 	w.countryCentroids = centroids
-}
-
-// SetSpatialCache sets the hot cache used to refresh Valkey after coordinate patching.
-// Must be called before Start().
-func (w *Worker) SetSpatialCache(c domain.CacheStorage) {
-	w.spatialCache = c
 }
 
 // SetOnEnrichmentComplete configures an optional callback that fires when all
@@ -589,18 +579,6 @@ func (w *Worker) processOperation(ctx context.Context, job *Job, op *aiconfig.Op
 					Str("source", resolvedSource).
 					Msg("entity coordinates updated via geo enrichment")
 
-				// Refresh Valkey cache (geo index + entity hash) so the
-				// frontend sees updated coordinates immediately.
-				if w.spatialCache != nil && obs != nil {
-					if obs.Position == nil {
-						obs.Position = &domain.GeoPoint{}
-					}
-					obs.Position.Lat = resolvedLat
-					obs.Position.Lon = resolvedLon
-					if cacheErr := w.spatialCache.SetEntity(ctx, entity, obs); cacheErr != nil {
-						log.Warn().Err(cacheErr).Msg("failed to refresh spatial cache after coordinate patch")
-					}
-				}
 			}
 		}
 	}

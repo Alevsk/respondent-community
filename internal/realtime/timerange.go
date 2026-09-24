@@ -198,53 +198,12 @@ func (c *Client) doTimeRangeQuery(layerID string, from, to time.Time, frozen boo
 		return
 	}
 
-	// For non-frozen global queries, merge cache entities that have recent
-	// observations within the time window. This ensures freshly-ingested or
-	// enriched entities appear even if their event_time is outside the window.
-	if !frozen && viewport == nil && c.server.cache != nil {
-		cacheEntities, cacheObs, _, cacheErr := c.server.cache.GetLayerEntities(
-			ctx, string(layerType), maxResults, 0,
-		)
-		if cacheErr == nil {
-			cacheByExtID := make(map[string]*domain.EntitySnapshot, len(cacheEntities))
-			for i, e := range cacheEntities {
-				if i < len(cacheObs) && cacheObs[i] != nil {
-					obsTime := cacheObs[i].Timestamp
-					if obsTime.Before(from) || obsTime.After(to) {
-						continue
-					}
-					cacheByExtID[e.ExternalID] = &domain.EntitySnapshot{
-						Entity:      *e,
-						Observation: *cacheObs[i],
-					}
-				}
-			}
-
-			// Merge: cache wins on conflicts (fresher data).
-			var merged []*domain.EntitySnapshot
-			for _, s := range snapshots {
-				if cached, ok := cacheByExtID[s.Entity.ExternalID]; ok {
-					cached.Entity.Source = "live"
-					cached.Observation.Source = "live"
-					merged = append(merged, cached)
-					delete(cacheByExtID, s.Entity.ExternalID)
-				} else {
-					s.Entity.Source = "historical"
-					s.Observation.Source = "historical"
-					merged = append(merged, s)
-				}
-			}
-			for _, cached := range cacheByExtID {
-				cached.Entity.Source = "live"
-				cached.Observation.Source = "live"
-				merged = append(merged, cached)
-			}
-			snapshots = merged
-		} else {
-			c.Logger.Debug().Err(cacheErr).Str("layer", layerID).
-				Msg("cache leg failed for hybrid time range query, using postgres only")
-		}
-	}
+	// The durable store is the only source here. A second leg used to merge in
+	// hot-cache entities on the premise that the cache held fresher data, but
+	// the feeder writes SQLite before it writes the cache (and the enrichment
+	// worker does the same), so the cache was never ahead — it was only less
+	// complete and, because it iterated a Go map, non-deterministic about which
+	// subset it returned.
 
 	// Convert snapshots to entities + observations.
 	entities := make([]*domain.Entity, 0, len(snapshots))

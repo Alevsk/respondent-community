@@ -51,6 +51,7 @@ func newTestEngineWith(t *testing.T, provider llm.Provider, logger zerolog.Logge
 	t.Helper()
 	entityRepo := newMockEntityRepo()
 	obsRepo := newMockObsRepo()
+	obsRepo.entities = entityRepo
 	insightRepo := newMockInsightRepo()
 	engine, err := NewEngine(EngineConfig{
 		LLMRegistry: &mockLLMRegistry{provider: provider},

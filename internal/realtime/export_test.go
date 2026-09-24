@@ -227,26 +227,3 @@ func (s *Server) AddClientDirect(c *Client) {
 	defer s.mu.Unlock()
 	s.clients[c] = true
 }
-
-// FillPersistSem fills the persist semaphore to capacity so that
-// doOnDemandFetchCore's "semaphore full" branch can be exercised.
-func (s *Server) FillPersistSem() {
-	for {
-		select {
-		case s.persistSem <- struct{}{}:
-		default:
-			return
-		}
-	}
-}
-
-// DrainPersistSem drains the persist semaphore so tests can clean up.
-func (s *Server) DrainPersistSem() {
-	for {
-		select {
-		case <-s.persistSem:
-		default:
-			return
-		}
-	}
-}

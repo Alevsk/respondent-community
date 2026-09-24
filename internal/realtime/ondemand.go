@@ -101,9 +101,9 @@ type fetchResult struct {
 	observations []*domain.Observation
 }
 
-// fetchSparseRegion runs on-demand fetch (Tier 1.5) and Postgres backfill (Tier 2)
+// fetchSparseRegion runs on-demand fetch (Tier 1.5) and durable-store backfill (Tier 2)
 // concurrently, then merges results with live > stale priority.
-// Called when Tier 1 (Valkey cache) returns fewer entities than the backfill threshold.
+// Called when the durable store returns fewer entities than the backfill threshold.
 func (s *Server) fetchSparseRegion(
 	ctx context.Context,
 	c *Client,
@@ -123,7 +123,7 @@ func (s *Server) fetchSparseRegion(
 		odCh <- fetchResult{e, o}
 	}()
 
-	// Goroutine B: Postgres backfill (Tier 2)
+	// Goroutine B: durable-store backfill (Tier 2)
 	bfCfg := s.getBackfillConfig()
 	wg.Add(1)
 	go func() {
@@ -176,7 +176,7 @@ func (s *Server) fetchSparseRegion(
 	return entities, observations
 }
 
-// doBackfill queries Postgres for entities within the viewport that aren't in the cache.
+// doBackfill queries the durable store for entities within the viewport.
 // Returns entities and observations tagged with source "stale".
 func (s *Server) doBackfill(
 	ctx context.Context,
@@ -289,23 +289,40 @@ func (s *Server) doOnDemandFetchDirect(
 		return nil, nil
 	}
 
-	// Get current cache entities for dedup
-	sc, ok := s.cache.(spatialCacheQuerier)
-	if !ok {
+	if s.obsRepo == nil {
 		return nil, nil
 	}
 
 	fetchCtx, cancel := context.WithTimeout(ctx, odCfg.QueryTimeout)
 	defer cancel()
 
+	// What is already stored for this viewport, so the fetch can skip it. This
+	// is the same query doBackfill makes; it used to come from the hot cache,
+	// which returned an arbitrary subset and so let already-known entities be
+	// re-fetched from the upstream.
 	bfCfg := s.getBackfillConfig()
-	existingEntities, _, _ := sc.GetLayerEntitiesByBBox(fetchCtx, layerType, *bbox, bfCfg.MaxResults)
+	now := time.Now()
+	snaps, err := s.obsRepo.GetLatestForLayerByBBox(
+		fetchCtx, layerType,
+		bbox.South, bbox.North, bbox.West, bbox.East,
+		time.Time{}, now,
+		bfCfg.MaxResults,
+	)
+	if err != nil {
+		s.logger.Error().Err(err).Str("layer", layerID).Msg("on-demand: dedup query failed")
+		return nil, nil
+	}
+	existingEntities := make([]*domain.Entity, 0, len(snaps))
+	for _, snap := range snaps {
+		e := snap.Entity
+		existingEntities = append(existingEntities, &e)
+	}
 	return s.doOnDemandFetchCore(ctx, layerID, layerType, bbox, existingEntities)
 }
 
 // doOnDemandFetchCore contains the shared fetch logic used by both
 // doOnDemandFetch (with cooldown) and doOnDemandFetchDirect (without cooldown).
-// Performs HTTP fetch → parse → dedup → cache write → Pub/Sub → async Postgres persist.
+// Performs HTTP fetch → parse → dedup → persist → Pub/Sub.
 func (s *Server) doOnDemandFetchCore(
 	ctx context.Context,
 	layerID, layerType string,
@@ -378,23 +395,13 @@ func (s *Server) doOnDemandFetchCore(
 		return nil, nil
 	}
 
-	// Write to Valkey cache
-	for i, e := range newEntities {
-		if err := s.cache.SetEntity(ctx, e, newObservations[i]); err != nil {
-			s.logger.Warn().Err(err).Str("entity", e.ExternalID).Msg("on-demand: cache write failed")
-		}
-	}
-
-	// Persist to Postgres asynchronously (bounded by persistSem to avoid goroutine explosion).
-	select {
-	case s.persistSem <- struct{}{}:
-		go func() {
-			defer func() { <-s.persistSem }()
-			s.persistOnDemandAsync(newEntities, newObservations)
-		}()
-	default:
-		s.logger.Warn().Str("layer", layerID).Msg("on-demand: persist semaphore full, skipping async persist")
-	}
+	// Persist before returning. This used to run in a goroutine behind a
+	// semaphore whose full branch logged and DROPPED the write, so entities
+	// fetched on demand could be handed to the client and never stored — they
+	// existed only in a hot cache that has since been removed. The insert is
+	// single-digit milliseconds and already sits behind an upstream HTTP fetch
+	// of hundreds, so doing it inline costs nothing measurable.
+	s.persistOnDemand(newEntities, newObservations)
 
 	s.logger.Info().
 		Str("layer", layerID).
@@ -470,9 +477,9 @@ func (s *Server) fetchOnDemandPoint(
 	return entities, observations
 }
 
-// persistOnDemandAsync persists on-demand fetched entities and observations
-// to Postgres. Runs in a separate goroutine to avoid blocking the viewport response.
-func (s *Server) persistOnDemandAsync(entities []*domain.Entity, observations []*domain.Observation) {
+// persistOnDemand writes on-demand fetched entities and observations to the
+// durable store before the viewport response is returned.
+func (s *Server) persistOnDemand(entities []*domain.Entity, observations []*domain.Observation) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 

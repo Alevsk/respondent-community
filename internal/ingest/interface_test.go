@@ -205,7 +205,7 @@ func (m *mockObservationRepository) GetLatest(ctx context.Context, entityID stri
 	return nil, nil
 }
 
-func (m *mockObservationRepository) GetLatestForLayer(ctx context.Context, layerType string, limit int) ([]*domain.Observation, error) {
+func (m *mockObservationRepository) GetLatestForLayerPage(_ context.Context, _ string, _, _ int) ([]*domain.EntitySnapshot, error) {
 	return nil, nil
 }
 

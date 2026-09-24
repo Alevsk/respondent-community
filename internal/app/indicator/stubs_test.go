@@ -168,16 +168,22 @@ func (s *stubEntityRepo) UpdateCoordinates(_ context.Context, _ string, _, _ flo
 type stubObsRepo struct {
 	mu           sync.RWMutex
 	observations []*domain.Observation
-	getErr       error // returned by every Get call when non-nil
+	snapshots    map[string][]*domain.EntitySnapshot // layerType -> page
+	getErr       error                               // returned by every Get call when non-nil
+}
+
+// addSnapshot seeds one entity+observation pair for a layer, the shape
+// GetLatestForLayerPage returns.
+func (s *stubObsRepo) addSnapshot(layerType string, e *domain.Entity, o *domain.Observation) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.snapshots == nil {
+		s.snapshots = make(map[string][]*domain.EntitySnapshot)
+	}
+	s.snapshots[layerType] = append(s.snapshots[layerType], &domain.EntitySnapshot{Entity: *e, Observation: *o})
 }
 
 func newStubObsRepo() *stubObsRepo { return &stubObsRepo{} }
-
-func (s *stubObsRepo) add(o *domain.Observation) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.observations = append(s.observations, o)
-}
 
 func (s *stubObsRepo) Create(_ context.Context, o *domain.Observation) error {
 	s.mu.Lock()
@@ -231,22 +237,13 @@ func (s *stubObsRepo) GetLatest(_ context.Context, entityID string) (*domain.Obs
 	return latest, nil
 }
 
-func (s *stubObsRepo) GetLatestForLayer(_ context.Context, layerType string, limit int) ([]*domain.Observation, error) {
+func (s *stubObsRepo) GetLatestForLayerPage(_ context.Context, layerType string, _, _ int) ([]*domain.EntitySnapshot, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if s.getErr != nil {
 		return nil, s.getErr
 	}
-	var out []*domain.Observation
-	for _, o := range s.observations {
-		if o.SourceType == layerType {
-			out = append(out, o)
-			if len(out) >= limit {
-				break
-			}
-		}
-	}
-	return out, nil
+	return s.snapshots[layerType], nil
 }
 
 func (s *stubObsRepo) CreateBatchUpsert(_ context.Context, obs []*domain.Observation) error {
