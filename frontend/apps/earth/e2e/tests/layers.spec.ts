@@ -57,9 +57,12 @@ test.describe('Earth App — layers interactions (deterministic)', () => {
     await page.goto('/');
     await expect(page.getByTestId('bottom-toolbar')).toBeVisible();
 
-    // Open the layers panel.
+    // Open the layers panel. Wait for data-state="open", not merely for the
+    // element: the panel fades in, and until that finishes its rows cannot take
+    // focus, so a keyboard test would press against the toolbar button that
+    // still holds focus and close the panel again.
     await page.getByTestId('toolbar-btn-layers').click();
-    await expect(page.getByTestId('panel-layers')).toBeVisible();
+    await expect(page.getByTestId('panel-layers')).toHaveAttribute('data-state', 'open');
   });
 
   test('layer row starts inactive and toggles to active on click', async ({ page }) => {

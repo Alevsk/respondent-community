@@ -236,6 +236,17 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
   panelId,
 }) => {
   const { isMobile } = useResponsive();
+  const panelRef = React.useRef<HTMLDivElement>(null);
+  // The panel is not interactive the instant `open` flips: it fades in, and
+  // until that finishes its contents cannot take focus. Until then focus is
+  // still on whatever opened the panel — a toolbar toggle — so the next Space
+  // or Enter re-triggers that button and closes the panel the user just
+  // opened. Moving focus in when the transition completes is both the fix for
+  // that and the dialog focus behaviour this role already promises.
+  const [entered, setEntered] = React.useState(false);
+  React.useEffect(() => {
+    if (!open) setEntered(false);
+  }, [open]);
   const isMinimized = displayMode === 'minimized';
   const isMaximized = displayMode === 'maximized';
 
@@ -294,16 +305,34 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({
   };
 
   return (
-    <Fade in={open} {...TransitionProps}>
+    <Fade
+      in={open}
+      {...TransitionProps}
+      onEntered={(node, isAppearing) => {
+        setEntered(true);
+        panelRef.current?.focus({ preventScroll: true });
+        TransitionProps?.onEntered?.(node, isAppearing);
+      }}
+    >
       <Box
+        ref={panelRef}
         data-testid={testId}
         role="dialog"
         aria-labelledby="config-panel-title"
         aria-modal="false"
+        // Focusable as a target for the focus move above, but not a tab stop.
+        tabIndex={-1}
+        // "open" means the fade has finished and the contents can take focus.
+        // Anything waiting for the panel to be usable should wait for this
+        // rather than for the element merely existing.
+        data-state={entered ? 'open' : 'opening'}
         onMouseDown={panelId ? () => bringToFront(panelId) : undefined}
         style={rootStyle}
         sx={{
           ...positionSx,
+          // The focus move on open is programmatic, not a tab stop, so it must
+          // not paint a focus ring on the whole panel.
+          '&:focus': { outline: 'none' },
           display: 'flex',
           flexDirection: 'column',
           overflow: 'hidden',

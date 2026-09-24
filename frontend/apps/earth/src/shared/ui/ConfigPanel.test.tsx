@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
@@ -47,6 +47,48 @@ describe('ConfigPanel', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  describe('Focus on open', () => {
+    // The panel fades in, and until that finishes its contents cannot take
+    // focus. Focus is meanwhile still on whatever opened the panel — a toolbar
+    // toggle — so the user's next Space or Enter re-triggers that button and
+    // closes the panel they just opened. The panel takes focus when the
+    // transition completes, and says so via data-state.
+    it('reports data-state="opening" until the transition finishes', () => {
+      renderWithTheme(<ConfigPanel {...defaultProps} />);
+      expect(screen.getByTestId('config-panel')).toHaveAttribute('data-state', 'opening');
+    });
+
+    it('takes focus off the trigger and reports open once entered', async () => {
+      const trigger = document.createElement('button');
+      document.body.appendChild(trigger);
+      trigger.focus();
+      expect(document.activeElement).toBe(trigger);
+
+      renderWithTheme(<ConfigPanel {...defaultProps} />);
+      const panel = screen.getByTestId('config-panel');
+
+      await waitFor(() => expect(panel).toHaveAttribute('data-state', 'open'));
+      expect(document.activeElement).toBe(panel);
+
+      trigger.remove();
+    });
+
+    it('returns to "opening" when closed, so a reopen waits again', async () => {
+      const { rerender } = renderWithTheme(<ConfigPanel {...defaultProps} />);
+      const panel = screen.getByTestId('config-panel');
+      await waitFor(() => expect(panel).toHaveAttribute('data-state', 'open'));
+
+      rerender(
+        <TestWrapper>
+          <ConfigPanel {...defaultProps} open={false} />
+        </TestWrapper>,
+      );
+      await waitFor(() =>
+        expect(screen.getByTestId('config-panel')).toHaveAttribute('data-state', 'opening'),
+      );
+    });
   });
 
   describe('Rendering', () => {
