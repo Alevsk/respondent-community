@@ -30,6 +30,12 @@ ai:
   # neither stored nor notified, unless an analysis sets output.min_attention.
   # One of info/low/medium/high/critical. "low" drops routine info observations.
   min_attention: "low"
+  # Per-entity LLM enrichment, gated separately from analysis because its cost
+  # scales with ingestion rather than with a fixed schedule: one job per new
+  # entity means hundreds of LLM calls per feeder cycle per source. Leave it off
+  # unless the host has the CPU and the API budget for it. Analysis above still
+  # runs, on its own timers.
+  enrichment: false
   workers:
     enrichment: 2                  # Concurrent enrichment workers
     analysis: 1                    # Concurrent analysis workers

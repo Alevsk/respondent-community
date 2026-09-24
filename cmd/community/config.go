@@ -104,6 +104,13 @@ type AIConfig struct {
 	Enabled     bool          `yaml:"enabled" mapstructure:"enabled"`
 	AnalysisDir string        `yaml:"analysis_dir" mapstructure:"analysis_dir"`
 	Workers     WorkersConfig `yaml:"workers" mapstructure:"workers"`
+	// Enrichment gates per-entity LLM enrichment, separately from analysis.
+	// Enrichment scales with the number of entities ingested — a single feeder
+	// cycle publishes one job per new entity, hundreds per source — so on a
+	// small host it is the more expensive of the two AI features by a wide
+	// margin. Analysis, by contrast, runs a fixed number of definitions on a
+	// timer. They are gated separately because their costs are unrelated.
+	Enrichment bool `yaml:"enrichment" mapstructure:"enrichment"`
 	// MinAttention is the engine-wide floor for storing/notifying analysis
 	// insights when an analysis sets no output.min_attention of its own. One of
 	// info/low/medium/high/critical. "low" drops pure-info routine observations
@@ -175,6 +182,7 @@ func setCommunityDefaults() {
 	viper.SetDefault("ingest.concurrency", 0) // 0 = derive from available CPUs
 
 	// AI workers.
+	viper.SetDefault("ai.enrichment", false) // per-entity LLM calls: opt in
 	viper.SetDefault("ai.workers.enrichment", 2)
 	viper.SetDefault("ai.workers.analysis", 1)
 

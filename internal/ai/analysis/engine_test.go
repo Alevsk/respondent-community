@@ -359,6 +359,7 @@ func newTestEngine(t *testing.T, provider *mockLLMProvider) (*Engine, *mockEntit
 		ObsRepo:     obsRepo,
 		InsightRepo: insightRepo,
 		Schemas:     reg,
+		Layers:      stubLayers{},
 		Logger:      zerolog.Nop(),
 		Clock:       clk,
 	})

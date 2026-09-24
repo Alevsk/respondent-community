@@ -50,6 +50,7 @@ type Engine struct {
 	llmRegistry llm.Registry
 	entityRepo  domain.EntityRepository
 	obsRepo     domain.ObservationRepository
+	layers      LayerRegistry
 	insightRepo domain.AIInsightRepository
 	schemas     *schema.Registry
 	logger      zerolog.Logger
@@ -90,6 +91,10 @@ type EngineConfig struct {
 	LLMRegistry llm.Registry
 	EntityRepo  domain.EntityRepository
 	ObsRepo     domain.ObservationRepository
+	// Layers decides which layer types exist. Required: an analysis that names
+	// no layers means "all layers", and without the declarations that resolves
+	// to every layer_type the database has ever held.
+	Layers      LayerRegistry
 	InsightRepo domain.AIInsightRepository
 	Schemas     *schema.Registry
 	Logger      zerolog.Logger
@@ -104,6 +109,9 @@ type EngineConfig struct {
 
 // NewEngine creates a new analysis engine with the given dependencies.
 func NewEngine(cfg EngineConfig) (*Engine, error) {
+	if cfg.Layers == nil {
+		return nil, fmt.Errorf("analysis engine: Layers registry is required")
+	}
 	celEnv, err := newEngineCELEnv()
 	if err != nil {
 		return nil, fmt.Errorf("create engine CEL env: %w", err)
@@ -119,6 +127,7 @@ func NewEngine(cfg EngineConfig) (*Engine, error) {
 		llmRegistry:         cfg.LLMRegistry,
 		entityRepo:          cfg.EntityRepo,
 		obsRepo:             cfg.ObsRepo,
+		layers:              cfg.Layers,
 		insightRepo:         cfg.InsightRepo,
 		schemas:             cfg.Schemas,
 		logger:              cfg.Logger,
@@ -398,12 +407,13 @@ func (e *Engine) fetchData(ctx context.Context, def *AnalysisDefinition, log zer
 	// Determine which layers to query.
 	layers := def.Data.Layers
 	if len(layers) == 0 {
-		// Query all distinct layer types.
+		// "All layers" means every layer a source still declares that holds
+		// data — not every layer_type the database has ever held.
 		distinctLayers, err := e.entityRepo.GetDistinctLayerTypes(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("get distinct layers: %w", err)
 		}
-		layers = distinctLayers
+		layers = declaredLayersOnly(e.layers, distinctLayers)
 	}
 
 	var records []AnalysisRecord

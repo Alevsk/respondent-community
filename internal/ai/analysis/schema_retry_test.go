@@ -58,6 +58,7 @@ func newTestEngineWith(t *testing.T, provider llm.Provider, logger zerolog.Logge
 		ObsRepo:     obsRepo,
 		InsightRepo: insightRepo,
 		Schemas:     schema.NewRegistry(),
+		Layers:      stubLayers{},
 		Logger:      logger,
 		Clock:       &mockClock{now: time.Date(2026, 3, 28, 12, 0, 0, 0, time.UTC)},
 	})

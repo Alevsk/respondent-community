@@ -222,7 +222,7 @@ func runServe(ctx context.Context) error {
 	var enrichWorker *enrichment.Worker
 	var enrichPub enrichment.JobPublisher
 
-	if cfg.AI.Enabled && llmProvider != nil {
+	if cfg.AI.Enabled && cfg.AI.Enrichment && llmProvider != nil {
 		enrichPub = enrichment.NewPublisher(msgPublisher, inproc.EnrichJobRoot)
 
 		enrichWorker = enrichment.NewWorker(enrichment.WorkerConfig{
@@ -269,6 +269,7 @@ func runServe(ctx context.Context) error {
 
 	if cfg.AI.Enabled && llmRegistry != nil && cfg.AI.AnalysisDir != "" {
 		analysisEngine, err = analysis.NewEngine(analysis.EngineConfig{
+			Layers:      dynReg,
 			LLMRegistry: llmRegistry,
 			EntityRepo:  entityRepo,
 			ObsRepo:     obsRepo,
@@ -428,6 +429,8 @@ func runServe(ctx context.Context) error {
 			}
 		}()
 		logger.Info().Int("workers", cfg.AI.Workers.Enrichment).Msg("enrichment worker started")
+	} else if cfg.AI.Enabled {
+		logger.Info().Msg("per-entity AI enrichment disabled (ai.enrichment=false); no enrichment jobs are published")
 	}
 
 	// Analysis engine.
