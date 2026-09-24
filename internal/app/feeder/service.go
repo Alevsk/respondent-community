@@ -398,63 +398,62 @@ func (s *IngestionService) persistEntities(ctx context.Context, sourceName strin
 		}
 	}
 
-	// --- Hot cache with TTL ---
-	// The index SET is additive via SAdd. Stale members are harmless because
-	// GetLayerEntities already skips expired hashes.
+	// --- Broadcast, and the hot cache alongside it ---
 	//
-	// Only cache entities that have new observations (passed dedupe). Stale
-	// entities already in the cache may carry enriched coordinates from the
-	// AI pipeline — blindly overwriting them with the raw 0,0 from the feed
-	// would undo geo-enrichment.
+	// Only entities with new observations are handled here. In dedupe mode the
+	// rest are unchanged, and a stale entity may carry coordinates the AI
+	// pipeline enriched — overwriting those with the raw 0,0 from the feed
+	// would undo the enrichment, and rebroadcasting them says nothing new.
+	//
+	// The publish is NOT conditional on the cache write. It used to be nested
+	// inside it, after a `continue` on cache error, so a cache that was failing
+	// or absent silenced the live globe entirely even though every entity had
+	// already been committed to the durable store. Broadcasting is what the
+	// globe depends on; caching is an optimisation beside it.
 	cacheCount := 0
-	if s.cache != nil {
-		obsMap := make(map[string]*domain.Observation)
-		for _, obs := range observations {
-			obsMap[obs.EntityID] = obs
+	obsMap := make(map[string]*domain.Observation, len(observations))
+	for _, obs := range observations {
+		obsMap[obs.EntityID] = obs
+	}
+
+	ttl := s.sourceConfigs[sourceName].CacheTTL
+	if ttl <= 0 {
+		ttl = 60 * time.Second
+	}
+
+	for _, entity := range entities {
+		dbID := entityIDMap[entity.ExternalID]
+		if dbID == "" {
+			continue
 		}
 
-		// Get TTL from source config
-		ttl := s.sourceConfigs[sourceName].CacheTTL
-		if ttl <= 0 {
-			ttl = 60 * time.Second
-		}
-
-		for _, entity := range entities {
-			dbID := entityIDMap[entity.ExternalID]
-			if dbID == "" {
+		if recordMode == config.RecordDedupe {
+			if _, isNew := newObsEntityIDs[dbID]; !isNew {
 				continue
 			}
+		}
 
-			// In dedupe mode, skip cache writes for entities whose observations
-			// were filtered out (unchanged content hash). Their cache entries
-			// already exist and may contain enriched coordinates.
-			if recordMode == config.RecordDedupe {
-				if _, isNew := newObsEntityIDs[dbID]; !isNew {
-					continue
-				}
+		obs, ok := obsMap[entity.ID]
+		if !ok {
+			obs = &domain.Observation{
+				ID:        fmt.Sprintf("%s-obs", entity.ID),
+				EntityID:  entity.ID,
+				Timestamp: time.Now(),
 			}
+		}
 
-			obs, ok := obsMap[entity.ID]
-			if !ok {
-				obs = &domain.Observation{
-					ID:        fmt.Sprintf("%s-obs", entity.ID),
-					EntityID:  entity.ID,
-					Timestamp: time.Now(),
-				}
-			}
-
+		if s.cache != nil {
 			if err := s.cache.SetEntity(ctx, entity, obs, ttl); err != nil {
 				s.logger.Error().Str("external_id", entity.ExternalID).Err(err).Msg("failed to cache entity")
-				continue
+			} else {
+				cacheCount++
 			}
-			cacheCount++
+		}
 
-			// Publish update to Pub/Sub
-			if s.publisher != nil {
-				updateJSON, marshalErr := MarshalLayerUpdate(entity, obs)
-				if marshalErr == nil {
-					_ = s.publisher.PublishLayerUpdate(ctx, entity.LayerType, updateJSON)
-				}
+		if s.publisher != nil {
+			updateJSON, marshalErr := MarshalLayerUpdate(entity, obs)
+			if marshalErr == nil {
+				_ = s.publisher.PublishLayerUpdate(ctx, entity.LayerType, updateJSON)
 			}
 		}
 	}
