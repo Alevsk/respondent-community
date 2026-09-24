@@ -7,19 +7,23 @@ import "runtime"
 //
 // These are cgo allocations and a file mapping: the Go allocator never sees
 // them, so GOMEMLIMIT cannot restrain them, but RSS and the container's
-// memory.current both charge them. Sizing them per-connection — as a literal
-// repeated in the write pragma and the read DSN — meant the total scaled with
-// the pool and nothing bounded it. On a single-vCPU host, which sizes the read
-// pool at its floor of 2, that reserved 3 x 64MiB = 192MiB of a 2GB box before
-// a single row was read.
+// memory.current both charge them. The value used to be a single literal
+// repeated in the write pragma and the read DSN, so the total scaled with the
+// pool and nothing bounded it — on a 1-vCPU host that reserved 3 x 64MiB.
+//
+// The two pools are sized by the traffic they carry, not by an even split.
+// Every repository is opened on the write handle (see cmd/community/serve.go),
+// so that one connection serves every snapshot, viewport, REST read and feeder
+// write. The read pool is reached only by scheduled analysis SQL. Dividing one
+// budget evenly across both would starve the hot connection to fund idle ones.
 const (
-	// pageCacheBudgetKiB is the total page cache across ALL connections.
-	pageCacheBudgetKiB = 48 * 1024
+	// writeCacheKiB is the page cache for the connection every repository uses.
+	writeCacheKiB = 48 * 1024
 
-	// minCacheKiB is SQLite's own default (2MiB). A pool wide enough to divide
-	// the budget below this gets the default rather than a starved cache; such a
-	// host has the cores to justify the extra memory.
-	minCacheKiB = 2 * 1024
+	// readCacheKiB is the page cache for each read-pool connection. These serve
+	// occasional analysis queries, so they get SQLite's own default rather than
+	// a share of the budget.
+	readCacheKiB = 2 * 1024
 
 	// mmapBytes maps part of the database file into the address space so page
 	// reads skip a syscall and a copy. It is virtual address space rather than
@@ -27,18 +31,6 @@ const (
 	// memory, so on a small container it is not free and is sized accordingly.
 	mmapBytes = 64 * 1024 * 1024
 )
-
-// perConnectionCacheKiB divides the page cache budget across the pool.
-func perConnectionCacheKiB(connections int) int {
-	if connections <= 1 {
-		return pageCacheBudgetKiB
-	}
-	per := pageCacheBudgetKiB / connections
-	if per < minCacheKiB {
-		return minCacheKiB
-	}
-	return per
-}
 
 // readPoolSize is how many concurrent readers the pool allows. Reads run
 // concurrently with the writer and with each other under WAL, so a long
@@ -52,4 +44,10 @@ func readPoolSize() int {
 		return n
 	}
 	return 2
+}
+
+// totalPageCacheKiB is the ceiling this configuration can reserve across both
+// pools. Exposed for the test that pins the budget.
+func totalPageCacheKiB() int {
+	return writeCacheKiB + readCacheKiB*readPoolSize()
 }

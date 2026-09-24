@@ -42,15 +42,22 @@ type ObservationRepository interface {
 	// GetLatestForLayerPage returns each entity's latest observation for a
 	// layer, with its entity, ordered by external_id ascending, skipping offset
 	// rows and returning at most limit.
-	// Deterministic and index-served: pages neither overlap nor skip, and the
-	// same request always returns the same rows in the same order.
+	// Deterministic and index-served: the same request always returns the same
+	// rows in the same order, and a walk of a quiescent layer neither overlaps
+	// nor skips. Offsets are positional, so concurrent writes below the current
+	// offset can shift a walk already in progress.
 	GetLatestForLayerPage(ctx context.Context, layerType string, limit, offset int) ([]*EntitySnapshot, error)
+	// CountLatestForLayer counts the entities a page of this layer can return.
+	// It is the population GetLatestForLayerPage draws from, which is what
+	// "total available" and "has more" must be measured against — an entity
+	// whose observations retention has pruned is not pageable.
+	CountLatestForLayer(ctx context.Context, layerType string) (int64, error)
 	GetLatestForEntityIDs(ctx context.Context, entityIDs []string) (map[string]*Observation, error)
 	GetLatestContentHashes(ctx context.Context, entityIDs []string) (map[string]string, error)
 	// GetLayerSnapshotAt returns the latest observation per entity for a layer
 	// at a specific point in time, within the given lookback window.
 	// This enables historical replay across all entity types.
-	GetLayerSnapshotAt(ctx context.Context, layerType string, asOf time.Time, window time.Duration) ([]*EntitySnapshot, error)
+	GetLayerSnapshotAt(ctx context.Context, layerType string, asOf time.Time, window time.Duration, limit int) ([]*EntitySnapshot, error)
 
 	// GetLatestForLayerByBBox returns the latest observation per entity within
 	// a geographic bounding box, limited to observations within the time window [from, to].

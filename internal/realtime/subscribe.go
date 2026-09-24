@@ -189,20 +189,21 @@ func (s *Server) snapshotPage(ctx context.Context, layerType string, limit, offs
 	return entities, observations, nil
 }
 
-// layerTotal reports how many entities a layer holds, for the "total available"
-// badge. It reads the durable store's own per-layer count — the source of truth
-// declared on domain.EntityRepository — rather than the length of the page,
-// which is what the caller falls back to when no repository is wired.
+// layerTotal reports how many entities a layer can page out, for the "total
+// available" badge and the cursor. It counts the same population the page
+// draws from — entities that still have an observation — rather than every row
+// in the entities table, which would include entities retention has pruned the
+// observations from and so keep the cursor advancing past the end.
 func (s *Server) layerTotal(ctx context.Context, layerType string, pageLen int) int64 {
-	if s.entityRepo == nil {
+	if s.obsRepo == nil {
 		return int64(pageLen)
 	}
-	counts, err := s.entityRepo.CountByLayerType(ctx)
+	total, err := s.obsRepo.CountLatestForLayer(ctx, layerType)
 	if err != nil {
-		s.logger.Warn().Err(err).Str("layer", layerType).Msg("failed to get entity count")
+		s.logger.Warn().Err(err).Str("layer", layerType).Msg("failed to count layer entities")
 		return int64(pageLen)
 	}
-	return counts[layerType]
+	return total
 }
 
 // snapshotsToLive rewrites each snapshot to the composite (layer_type:external_id)

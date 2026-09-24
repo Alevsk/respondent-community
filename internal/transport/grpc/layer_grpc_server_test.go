@@ -208,8 +208,11 @@ func TestLayerServer_GetLayerSnapshot(t *testing.T) {
 			Observation: domain.Observation{EntityID: "uuid-2", Timestamp: now, Position: &domain.GeoPoint{Lat: 37.7749, Lon: -122.4194}, AltitudeM: 10000},
 		},
 	}
-	// CountByLayerType derives the layer total from these, which is what
-	// TotalCount and HasMore are computed from — not the length of the page.
+	// The layer holds 3 entities that a page can return. TotalCount and HasMore
+	// are measured against that population — not the length of the page, and
+	// not the entities table, which also counts entities whose observations
+	// retention has pruned and which no page can ever yield.
+	const pageable = int64(3)
 	stored := map[string]*domain.Entity{
 		"uuid-1": {ID: "uuid-1", LayerType: "flights_commercial"},
 		"uuid-2": {ID: "uuid-2", LayerType: "flights_commercial"},
@@ -220,6 +223,7 @@ func TestLayerServer_GetLayerSnapshot(t *testing.T) {
 		name            string
 		req             *respondentv1.GetLayerSnapshotRequest
 		page            []*domain.EntitySnapshot
+		total           int64
 		pageErr         error
 		wantCode        codes.Code
 		wantEntityCount int
@@ -236,6 +240,7 @@ func TestLayerServer_GetLayerSnapshot(t *testing.T) {
 			name:            "returns the page from the durable store",
 			req:             &respondentv1.GetLayerSnapshotRequest{LayerId: "flights_commercial", Limit: 100},
 			page:            snaps,
+			total:           pageable,
 			wantCode:        codes.OK,
 			wantEntityCount: 2,
 			wantObsCount:    2,
@@ -249,19 +254,23 @@ func TestLayerServer_GetLayerSnapshot(t *testing.T) {
 			wantCode: codes.Internal,
 		},
 		{
-			name:            "empty layer returns an empty page, not an error",
+			// An empty layer has nothing more to offer. Reporting has_more on a
+			// page that yielded nothing loops a paging client forever.
+			name:            "empty layer returns an empty page and no more",
 			req:             &respondentv1.GetLayerSnapshotRequest{LayerId: "flights_commercial", Limit: 100},
 			page:            nil,
+			total:           0,
 			wantCode:        codes.OK,
 			wantEntityCount: 0,
 			wantObsCount:    0,
-			wantTotal:       3,
-			wantHasMore:     true,
+			wantTotal:       0,
+			wantHasMore:     false,
 		},
 		{
 			name:            "zero limit defaults",
 			req:             &respondentv1.GetLayerSnapshotRequest{LayerId: "flights_commercial", Limit: 0},
 			page:            snaps,
+			total:           pageable,
 			wantCode:        codes.OK,
 			wantEntityCount: 2,
 			wantObsCount:    2,
@@ -272,6 +281,7 @@ func TestLayerServer_GetLayerSnapshot(t *testing.T) {
 			name:            "negative limit defaults",
 			req:             &respondentv1.GetLayerSnapshotRequest{LayerId: "flights_commercial", Limit: -10},
 			page:            snaps,
+			total:           pageable,
 			wantCode:        codes.OK,
 			wantEntityCount: 2,
 			wantObsCount:    2,
@@ -282,6 +292,7 @@ func TestLayerServer_GetLayerSnapshot(t *testing.T) {
 			name:            "offset past the end of the layer reports no more",
 			req:             &respondentv1.GetLayerSnapshotRequest{LayerId: "flights_commercial", Limit: 100, Offset: 3},
 			page:            nil,
+			total:           pageable,
 			wantCode:        codes.OK,
 			wantEntityCount: 0,
 			wantObsCount:    0,
@@ -293,7 +304,7 @@ func TestLayerServer_GetLayerSnapshot(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			eRepo := &testEntityRepo{entities: stored}
-			oRepo := &testObsRepo{layerPage: tt.page, layerPageErr: tt.pageErr}
+			oRepo := &testObsRepo{layerPage: tt.page, layerPageErr: tt.pageErr, pageableTotal: tt.total}
 			svc := layer.NewLayerService(eRepo, oRepo, domain.NewDynamicSourceRegistry())
 			srv := NewLayerServer(svc)
 

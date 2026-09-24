@@ -184,6 +184,10 @@ func (f *FakeObservationRepo) GetLatest(_ context.Context, entityID string) (*do
 	return obs[len(obs)-1], nil
 }
 
+func (f *FakeObservationRepo) CountLatestForLayer(_ context.Context, _ string) (int64, error) {
+	return 0, nil
+}
+
 func (f *FakeObservationRepo) GetLatestForLayerPage(_ context.Context, _ string, _, _ int) ([]*domain.EntitySnapshot, error) {
 	return nil, nil
 }
@@ -204,7 +208,7 @@ func (f *FakeObservationRepo) GetLatestContentHashes(_ context.Context, _ []stri
 	return nil, nil
 }
 
-func (f *FakeObservationRepo) GetLayerSnapshotAt(_ context.Context, _ string, _ time.Time, _ time.Duration) ([]*domain.EntitySnapshot, error) {
+func (f *FakeObservationRepo) GetLayerSnapshotAt(_ context.Context, _ string, _ time.Time, _ time.Duration, _ int) ([]*domain.EntitySnapshot, error) {
 	return nil, nil
 }
 

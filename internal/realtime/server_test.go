@@ -35,7 +35,8 @@ import (
 type mockObsRepo struct {
 	mu              sync.RWMutex
 	snapshots       []*domain.EntitySnapshot
-	bboxSnapshots   []*domain.EntitySnapshot // what the two bbox queries return
+	bboxSnapshots   []*domain.EntitySnapshot // GetLatestByCurrentPositionInBBox: the live viewport
+	backfillBBox    []*domain.EntitySnapshot // GetLatestForLayerByBBox: the staleness-window backfill
 	latestObs       []*domain.Observation
 	err             error
 	getBBoxErr      error
@@ -60,6 +61,7 @@ func (m *mockObsRepo) SetSnapshots(snaps []*domain.EntitySnapshot) {
 	defer m.mu.Unlock()
 	m.snapshots = snaps
 	m.bboxSnapshots = snaps
+	m.backfillBBox = snaps
 }
 
 func (m *mockObsRepo) SetLatestObs(obs []*domain.Observation) {
@@ -119,6 +121,15 @@ func (m *mockObsRepo) GetLatest(ctx context.Context, entityID string) (*domain.O
 	return nil, m.err
 }
 
+func (m *mockObsRepo) CountLatestForLayer(_ context.Context, _ string) (int64, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.err != nil {
+		return 0, m.err
+	}
+	return int64(len(m.snapshots)), nil
+}
+
 func (m *mockObsRepo) GetLatestForLayerPage(_ context.Context, _ string, limit, offset int) ([]*domain.EntitySnapshot, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -148,9 +159,10 @@ func (m *mockObsRepo) addSnapshot(e *domain.Entity, o *domain.Observation) {
 	m.snapshots = append(m.snapshots, snap)
 }
 
-// setBBoxSnapshots seeds what the two bbox queries return. It is separate from
-// the page seeding because they are separate queries: a viewport answer is not
-// the same set as a full-layer page.
+// setBBoxSnapshots seeds the LIVE viewport query
+// (GetLatestByCurrentPositionInBBox). The staleness-window backfill query is
+// seeded separately by setBackfillBBox — they are different questions, and a
+// test that wants the viewport empty while backfill has rows needs both.
 func (m *mockObsRepo) setBBoxSnapshots(entities []*domain.Entity, obs []*domain.Observation, err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -178,7 +190,7 @@ func (m *mockObsRepo) GetLatestContentHashes(ctx context.Context, entityIDs []st
 	return nil, m.err
 }
 
-func (m *mockObsRepo) GetLayerSnapshotAt(ctx context.Context, layerType string, asOf time.Time, window time.Duration) ([]*domain.EntitySnapshot, error) {
+func (m *mockObsRepo) GetLayerSnapshotAt(ctx context.Context, layerType string, asOf time.Time, window time.Duration, limit int) ([]*domain.EntitySnapshot, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	if m.snapshotAtErr != nil {
@@ -199,7 +211,14 @@ func (m *mockObsRepo) GetLatestForLayerByBBox(ctx context.Context, layerType str
 	if m.err != nil {
 		return nil, m.err
 	}
-	return m.bboxSnapshots, nil
+	return m.backfillBBox, nil
+}
+
+// setBackfillBBox seeds the staleness-window backfill query.
+func (m *mockObsRepo) setBackfillBBox(snaps []*domain.EntitySnapshot) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.backfillBBox = snaps
 }
 
 func (m *mockObsRepo) GetLatestByCurrentPositionInBBox(ctx context.Context, layerType string, south, north, west, east float64, from, to time.Time, limit int) ([]*domain.EntitySnapshot, error) {
@@ -1847,10 +1866,11 @@ func TestPersistOnDemandAsync_ViaOnDemandFetch(t *testing.T) {
 func TestHandleSubscribe_SparseViewport_TriggersBackfill(t *testing.T) {
 	obsRepo := newMockObsRepo()
 	snap := makeEntitySnapshot("flights_commercial", "backfill-from-sub")
-	obsRepo.SetSnapshots([]*domain.EntitySnapshot{snap})
-
-	sc := &mockObsRepo{}
-	sc.setBBoxSnapshots(nil, nil, nil) // empty cache → sparse
+	// The live viewport query finds nothing, so the region reads as sparse; the
+	// staleness-window backfill is what must supply the entity. Seeding both
+	// from one field made this pass even with backfill disabled.
+	obsRepo.setBBoxSnapshots(nil, nil, nil)
+	obsRepo.setBackfillBBox([]*domain.EntitySnapshot{snap})
 
 	logger := zerolog.Nop()
 	server := realtime.NewServer(logger, nil, obsRepo, viewportRegistry("flights_commercial"))

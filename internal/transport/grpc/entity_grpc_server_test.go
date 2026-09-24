@@ -127,6 +127,7 @@ type testObsRepo struct {
 	obsByEntityErr       error
 	layerPage            []*domain.EntitySnapshot
 	layerPageErr         error
+	pageableTotal        int64
 }
 
 func (s *testObsRepo) Create(_ context.Context, _ *domain.Observation) error { return nil }
@@ -142,6 +143,16 @@ func (s *testObsRepo) GetByEntityID(_ context.Context, _ string, _ int, _ time.T
 func (s *testObsRepo) GetLatest(_ context.Context, _ string) (*domain.Observation, error) {
 	return s.latestObservation, s.latestObsErr
 }
+func (s *testObsRepo) CountLatestForLayer(_ context.Context, _ string) (int64, error) {
+	if s.layerPageErr != nil {
+		return 0, s.layerPageErr
+	}
+	if s.pageableTotal > 0 {
+		return s.pageableTotal, nil
+	}
+	return int64(len(s.layerPage)), nil
+}
+
 func (s *testObsRepo) GetLatestForLayerPage(_ context.Context, _ string, _, _ int) ([]*domain.EntitySnapshot, error) {
 	if s.layerPageErr != nil {
 		return nil, s.layerPageErr
@@ -163,7 +174,7 @@ func (s *testObsRepo) GetLatestForEntityIDs(_ context.Context, entityIDs []strin
 func (s *testObsRepo) GetLatestContentHashes(_ context.Context, _ []string) (map[string]string, error) {
 	return nil, nil
 }
-func (s *testObsRepo) GetLayerSnapshotAt(_ context.Context, _ string, _ time.Time, _ time.Duration) ([]*domain.EntitySnapshot, error) {
+func (s *testObsRepo) GetLayerSnapshotAt(_ context.Context, _ string, _ time.Time, _ time.Duration, _ int) ([]*domain.EntitySnapshot, error) {
 	return nil, nil
 }
 func (s *testObsRepo) GetLatestForLayerByBBox(_ context.Context, _ string, _, _, _, _ float64, _, _ time.Time, _ int) ([]*domain.EntitySnapshot, error) {

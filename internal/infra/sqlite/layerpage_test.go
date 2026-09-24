@@ -145,3 +145,104 @@ func TestGetLatestForLayerPageUsesNoTempBTree(t *testing.T) {
 	assert.Contains(t, plan.String(), "idx_entities_layer_external")
 	assert.NotContains(t, strings.ToUpper(plan.String()), "TEMP B-TREE")
 }
+
+// Retention prunes observations and never deletes entities, so an entity with
+// no surviving observation is the designed steady state. The page joins
+// entities to observations, so such an entity is invisible to it — and a total
+// counted from the entities table alone therefore exceeds what paging can ever
+// return, leaving has_more permanently true.
+func TestCountLatestForLayerCountsOnlyPageableEntities(t *testing.T) {
+	db := newTestDB(t)
+	seedLayer(t, db, "cctv", 10)
+
+	eRepo := sqlitedb.NewEntityRepository(db.SqlDB(), testLogger())
+	oRepo := sqlitedb.NewObservationRepository(db.SqlDB(), testLogger())
+	ctx := context.Background()
+
+	// An entity whose observations retention has already pruned.
+	require.NoError(t, eRepo.Create(ctx, &domain.Entity{
+		ID: "cctv-orphan", ExternalID: "EXT99999", LayerType: "cctv", Name: "pruned",
+	}))
+
+	counts, err := eRepo.CountByLayerType(ctx)
+	require.NoError(t, err)
+	if counts["cctv"] != 11 {
+		t.Fatalf("entity count: got %d, want 11", counts["cctv"])
+	}
+
+	pageable, err := oRepo.CountLatestForLayer(ctx, "cctv")
+	require.NoError(t, err)
+	if pageable != 10 {
+		t.Errorf("pageable count: got %d, want 10 (the orphan can never appear in a page)", pageable)
+	}
+
+	// And it agrees with what exhaustive paging actually yields.
+	page, err := oRepo.GetLatestForLayerPage(ctx, "cctv", 1000, 0)
+	require.NoError(t, err)
+	if int64(len(page)) != pageable {
+		t.Errorf("page returned %d rows but count says %d", len(page), pageable)
+	}
+}
+
+// Sources default to recording.mode: append, so an entity accumulates
+// observations over time and the page must return only its newest one. Without
+// the "o.ts = (SELECT MAX(...))" clause an entity with 50 observations would
+// take 50 slots of a page and snapshotsToLive would emit 50 copies of it at 50
+// historical positions, all sharing one composite id. Every other test in this
+// file seeds one observation per entity and so cannot see that.
+func TestGetLatestForLayerPageReturnsOnlyTheNewestObservationPerEntity(t *testing.T) {
+	db := newTestDB(t)
+	eRepo := sqlitedb.NewEntityRepository(db.SqlDB(), testLogger())
+	oRepo := sqlitedb.NewObservationRepository(db.SqlDB(), testLogger())
+	ctx := context.Background()
+
+	const entities, perEntity = 20, 5
+	base := time.Date(2026, 9, 24, 0, 0, 0, 0, time.UTC)
+
+	newest := make(map[string]time.Time, entities)
+	var ents []*domain.Entity
+	var obs []*domain.Observation
+	for i := range entities {
+		id := fmt.Sprintf("flights-e%03d", i)
+		ext := fmt.Sprintf("EXT%03d", i)
+		ents = append(ents, &domain.Entity{ID: id, ExternalID: ext, LayerType: "flights"})
+		for j := range perEntity {
+			ts := base.Add(time.Duration(j) * time.Hour)
+			obs = append(obs, &domain.Observation{
+				ID: fmt.Sprintf("%s-o%d", id, j), EntityID: id, Timestamp: ts,
+			})
+			if cur, ok := newest[ext]; !ok || ts.After(cur) {
+				newest[ext] = ts
+			}
+		}
+	}
+	require.NoError(t, eRepo.CreateBatch(ctx, ents))
+	require.NoError(t, oRepo.CreateBatch(ctx, obs))
+
+	page, err := oRepo.GetLatestForLayerPage(ctx, "flights", 1000, 0)
+	require.NoError(t, err)
+
+	if len(page) != entities {
+		t.Fatalf("page returned %d rows for %d entities with %d observations each; "+
+			"the page must carry one row per entity", len(page), entities, perEntity)
+	}
+	seen := make(map[string]bool, entities)
+	for _, s := range page {
+		ext := s.Entity.ExternalID
+		if seen[ext] {
+			t.Errorf("entity %s appeared more than once", ext)
+		}
+		seen[ext] = true
+		if !s.Observation.Timestamp.Equal(newest[ext]) {
+			t.Errorf("entity %s carried observation at %s, want the newest at %s",
+				ext, s.Observation.Timestamp, newest[ext])
+		}
+	}
+
+	// The count must agree with what the page yields, on the same shape.
+	total, err := oRepo.CountLatestForLayer(ctx, "flights")
+	require.NoError(t, err)
+	if total != int64(entities) {
+		t.Errorf("count: got %d, want %d", total, entities)
+	}
+}

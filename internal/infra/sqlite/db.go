@@ -86,13 +86,12 @@ func Open(path string, logger zerolog.Logger) (*DB, error) {
 	// snapshot/analysis ORDER BYs spill their temp B-trees to disk — the "loads
 	// and returns data super slowly" symptom.
 
-	// Page cache (negative = KiB), one shared budget split across every
-	// connection in both pools. Keeps hot index/leaf pages resident so repeated
-	// reads of the same entities/indexes don't re-hit disk on every query,
-	// without the total growing with the pool. See pagecache.go.
+	// Page cache (negative = KiB) for the connection every repository uses.
+	// Keeps hot index/leaf pages resident so repeated reads of the same
+	// entities/indexes don't re-hit disk on every query. See pagecache.go for
+	// why the two pools are sized separately.
 	readConns := readPoolSize()
-	cacheKiB := perConnectionCacheKiB(1 + readConns)
-	if _, err := db.Exec(fmt.Sprintf("PRAGMA cache_size=-%d", cacheKiB)); err != nil {
+	if _, err := db.Exec(fmt.Sprintf("PRAGMA cache_size=-%d", writeCacheKiB)); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("set cache size: %w", err)
 	}
@@ -147,7 +146,7 @@ func Open(path string, logger zerolog.Logger) (*DB, error) {
 	readPragmas := []string{
 		"_pragma=query_only(1)", // defense-in-depth: this pool never writes
 		"_pragma=busy_timeout(5000)",
-		fmt.Sprintf("_pragma=cache_size(-%d)", cacheKiB),
+		fmt.Sprintf("_pragma=cache_size(-%d)", readCacheKiB),
 		"_pragma=temp_store(2)", // MEMORY
 		fmt.Sprintf("_pragma=mmap_size(%d)", mmapBytes),
 	}

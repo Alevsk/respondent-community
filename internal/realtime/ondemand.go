@@ -489,16 +489,26 @@ func (s *Server) persistOnDemand(entities []*domain.Entity, observations []*doma
 		}
 	}
 	if s.obsRepo != nil && s.entityRepo != nil {
-		// Resolve DB UUIDs for each entity so observation FK references are valid.
-		// CreateBatch generates UUIDs internally; we need to look them up.
-		uuidMap := make(map[string]string, len(entities))
+		// Resolve stored IDs so observation FK references are valid. One batch
+		// lookup per layer, the way the feeder already does it
+		// (app/feeder.persistEntities): a fill routinely carries hundreds of
+		// aircraft, and a query per entity serialises them all on the single
+		// writer connection while the client waits for its viewport.
+		byLayer := make(map[string][]string, 1)
 		for _, e := range entities {
-			dbEntity, err := s.entityRepo.GetByExternalID(ctx, e.LayerType, e.ExternalID)
+			byLayer[e.LayerType] = append(byLayer[e.LayerType], e.ExternalID)
+		}
+		uuidMap := make(map[string]string, len(entities))
+		for layerType, extIDs := range byLayer {
+			dbEntities, err := s.entityRepo.GetByExternalIDs(ctx, layerType, extIDs)
 			if err != nil {
-				s.logger.Warn().Err(err).Str("external_id", e.ExternalID).Msg("on-demand: entity UUID lookup failed")
+				s.logger.Warn().Err(err).Str("layer", layerType).Int("count", len(extIDs)).
+					Msg("on-demand: entity id lookup failed")
 				continue
 			}
-			uuidMap[e.ID] = dbEntity.ID
+			for _, dbEntity := range dbEntities {
+				uuidMap[domain.EntityID(domain.LayerType(layerType), dbEntity.ExternalID)] = dbEntity.ID
+			}
 		}
 
 		// Rewrite observation EntityID from composite ID to DB UUID

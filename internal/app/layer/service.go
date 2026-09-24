@@ -211,11 +211,13 @@ func (s *LayerService) GetLayerSnapshot(ctx context.Context, layerID string, lim
 		observations = append(observations, &snapshots[i].Observation)
 	}
 
-	counts, err := s.entityRepo.CountByLayerType(ctx)
+	// The total must measure the same population the page draws from. Counting
+	// the entities table would include entities whose observations retention has
+	// pruned: invisible to every page, yet enough to keep HasMore true forever.
+	totalCount, err := s.obsRepo.CountLatestForLayer(ctx, layerType)
 	if err != nil {
 		return nil, err
 	}
-	totalCount := counts[layerType]
 
 	return &domain.SnapshotResult{
 		Entities:     entities,

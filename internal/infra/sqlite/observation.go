@@ -169,7 +169,7 @@ func (r *observationRepository) GetLatest(ctx context.Context, entityID string) 
 // LatestForLayerPageSQL is the query behind GetLatestForLayerPage, exported so
 // a test can assert its query plan.
 //
-// It keysets on external_id rather than sorting. idx_entities_layer_external is
+// It pages in index order rather than sorting. idx_entities_layer_external is
 // (layer_type, external_id), so the scan is already in key order: no temp
 // B-tree, and LIMIT terminates early. The query it replaced ended in
 // "ORDER BY o.ts DESC LIMIT ?", which materialised every row in the layer into
@@ -188,13 +188,39 @@ const LatestForLayerPageSQL = `SELECT e.id, e.external_id, e.layer_type, e.name,
          ORDER BY e.external_id
          LIMIT ? OFFSET ?`
 
+// CountLatestForLayer counts the entities a page of this layer can return —
+// those that still have at least one observation.
+//
+// It shares LatestForLayerPageSQL's join, so it counts exactly the population
+// the page draws from. Counting the entities table instead would overcount:
+// retention prunes observations and never deletes entities, so an entity whose
+// history has aged out is invisible to the page forever while still sitting in
+// the entity count, which leaves has_more stuck true on pages that yield
+// nothing.
+func (r *observationRepository) CountLatestForLayer(ctx context.Context, layerType string) (int64, error) {
+	var count int64
+	err := r.db.QueryRowContext(ctx,
+		`SELECT COUNT(*)
+           FROM entities e
+           JOIN observations o ON o.entity_id = e.id
+          WHERE e.layer_type = ?
+            AND o.ts = (SELECT MAX(o2.ts) FROM observations o2 WHERE o2.entity_id = e.id)`,
+		layerType).Scan(&count)
+	if err != nil {
+		return 0, translateError("observation", err)
+	}
+	return count, nil
+}
+
 // GetLatestForLayerPage returns each entity's latest observation for a layer,
 // with its entity, ordered by external_id ascending, skipping offset rows and
 // returning at most limit.
 //
-// Pages neither overlap nor skip, and identical requests return identical rows:
-// the property the hot cache it replaced could not provide, because that cache
-// ranged a Go map whose iteration order is randomised per call.
+// Against a quiescent layer, pages neither overlap nor skip and identical
+// requests return identical rows — the property the hot cache it replaced could
+// not provide, because that cache ranged a Go map whose iteration order is
+// randomised per call. Offsets are positional, so a concurrent insert or delete
+// below the current offset can still shift a walk that is already in progress.
 func (r *observationRepository) GetLatestForLayerPage(
 	ctx context.Context, layerType string, limit, offset int,
 ) ([]*domain.EntitySnapshot, error) {
@@ -293,7 +319,15 @@ func (r *observationRepository) GetLatestContentHashes(ctx context.Context, enti
 	return result, nil
 }
 
-func (r *observationRepository) GetLayerSnapshotAt(ctx context.Context, layerType string, asOf time.Time, window time.Duration) ([]*domain.EntitySnapshot, error) {
+// GetLayerSnapshotAt returns each entity's latest observation inside the window
+// ending at asOf, newest first, at most limit rows.
+//
+// The ordering and the limit are applied together in SQL so the limit selects
+// the newest rows IN the window. Taking a limit first and filtering by time
+// afterwards is not the same query: on a layer whose entities were last seen
+// years apart it returns mostly rows outside the window and silently analyses
+// almost nothing.
+func (r *observationRepository) GetLayerSnapshotAt(ctx context.Context, layerType string, asOf time.Time, window time.Duration, limit int) ([]*domain.EntitySnapshot, error) {
 	from := asOf.Add(-window)
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT e.id, e.external_id, e.layer_type, e.name, e.metadata, e.ai_metadata, e.source, e.created_at,
@@ -306,8 +340,10 @@ func (r *observationRepository) GetLayerSnapshotAt(ctx context.Context, layerTyp
            AND o.ts = (
                SELECT MAX(o2.ts) FROM observations o2
                WHERE o2.entity_id = e.id AND o2.ts BETWEEN ? AND ?
-           )`,
-		layerType, formatTime(from), formatTime(asOf), formatTime(from), formatTime(asOf))
+           )
+         ORDER BY o.ts DESC
+         LIMIT ?`,
+		layerType, formatTime(from), formatTime(asOf), formatTime(from), formatTime(asOf), limit)
 	if err != nil {
 		return nil, translateError("observation", err)
 	}

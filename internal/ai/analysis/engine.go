@@ -386,7 +386,8 @@ func (e *Engine) RunAnalysis(ctx context.Context, def *AnalysisDefinition) error
 // fetchData retrieves entities and observations based on the data config.
 func (e *Engine) fetchData(ctx context.Context, def *AnalysisDefinition, log zerolog.Logger) ([]AnalysisRecord, error) {
 	lookbackDur, _ := time.ParseDuration(def.Data.Lookback) // already validated
-	cutoff := e.clock.Now().Add(-lookbackDur)
+	now := e.clock.Now()
+	cutoff := now.Add(-lookbackDur)
 
 	// If SQL is set and a query executor is available, validate and execute
 	// the SQL directly instead of the layer-based query path.
@@ -419,20 +420,18 @@ func (e *Engine) fetchData(ctx context.Context, def *AnalysisDefinition, log zer
 	var records []AnalysisRecord
 
 	for _, layerType := range layers {
-		// One page carries each entity alongside its latest observation, so the
+		// The window is part of the query, so the record cap selects the newest
+		// observations INSIDE the lookback rather than an arbitrary slice that
+		// mostly predates it. Each row carries its entity, so the
 		// per-observation entity lookup this loop used to make is gone.
-		snapshots, err := e.obsRepo.GetLatestForLayerPage(ctx, layerType, defaultMaxRecordsPerLayer, 0)
+		snapshots, err := e.obsRepo.GetLayerSnapshotAt(ctx, layerType, now, lookbackDur, defaultMaxRecordsPerLayer)
 		if err != nil {
 			log.Warn().Err(err).Str("layer", layerType).Msg("failed to fetch observations, skipping layer")
 			continue
 		}
 
-		// Filter by lookback window.
 		for _, snapshot := range snapshots {
 			entity, obs := &snapshot.Entity, &snapshot.Observation
-			if obs.Timestamp.Before(cutoff) {
-				continue
-			}
 
 			// Build merged metadata: entity metadata as base, observation metadata overlaid.
 			// This ensures prompt templates can access fields from either source via .Metadata.

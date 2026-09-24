@@ -205,6 +205,10 @@ func (m *mockObservationRepository) GetLatest(ctx context.Context, entityID stri
 	return nil, nil
 }
 
+func (m *mockObservationRepository) CountLatestForLayer(_ context.Context, _ string) (int64, error) {
+	return 0, nil
+}
+
 func (m *mockObservationRepository) GetLatestForLayerPage(_ context.Context, _ string, _, _ int) ([]*domain.EntitySnapshot, error) {
 	return nil, nil
 }
@@ -217,7 +221,7 @@ func (m *mockObservationRepository) GetLatestContentHashes(ctx context.Context, 
 	return nil, nil
 }
 
-func (m *mockObservationRepository) GetLayerSnapshotAt(ctx context.Context, layerType string, asOf time.Time, window time.Duration) ([]*domain.EntitySnapshot, error) {
+func (m *mockObservationRepository) GetLayerSnapshotAt(ctx context.Context, layerType string, asOf time.Time, window time.Duration, limit int) ([]*domain.EntitySnapshot, error) {
 	return nil, nil
 }
 

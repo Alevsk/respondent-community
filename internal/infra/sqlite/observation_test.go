@@ -138,7 +138,7 @@ func TestObservationRepository_GetLayerSnapshotAt(t *testing.T) {
 	require.NoError(t, obsRepo.Create(context.Background(), makeObservation(e.ID, now.Add(-30*time.Minute), 40.0, -74.0)))
 	require.NoError(t, obsRepo.Create(context.Background(), makeObservation(e.ID, now.Add(-10*time.Minute), 41.0, -75.0)))
 
-	snapshots, err := obsRepo.GetLayerSnapshotAt(context.Background(), "flights", now, time.Hour)
+	snapshots, err := obsRepo.GetLayerSnapshotAt(context.Background(), "flights", now, time.Hour, 1000)
 	require.NoError(t, err)
 	assert.Len(t, snapshots, 1)
 	assert.InDelta(t, 41.0, snapshots[0].Observation.Position.Lat, 0.0001)

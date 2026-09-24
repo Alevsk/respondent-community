@@ -568,10 +568,11 @@ func TestDoOnDemandFetchDirect_DeduplicationDetails(t *testing.T) {
 	defer apiServer.Close()
 
 	sc := &mockObsRepo{}
-	// "skip1" already cached
-	sc.setBBoxSnapshots([]*domain.Entity{
-		{ID: "flights_commercial:skip1", ExternalID: "skip1", LayerType: "flights_commercial"},
-	}, nil, nil)
+	// "skip1" is already stored for this viewport, so the fetch must not
+	// re-import it. On-demand dedup reads the same bbox query doBackfill uses.
+	sc.setBackfillBBox([]*domain.EntitySnapshot{
+		{Entity: domain.Entity{ID: "flights_commercial:skip1", ExternalID: "skip1", LayerType: "flights_commercial"}},
+	})
 
 	logger := zerolog.Nop()
 	server := realtime.NewServer(logger, nil, sc, viewportRegistry("flights_commercial"))

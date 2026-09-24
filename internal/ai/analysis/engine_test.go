@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"sync"
 	"testing"
 	"time"
@@ -219,6 +220,10 @@ func (r *mockObservationRepository) GetByEntityID(_ context.Context, _ string, _
 func (r *mockObservationRepository) GetLatest(_ context.Context, _ string) (*domain.Observation, error) {
 	return nil, nil
 }
+func (r *mockObservationRepository) CountLatestForLayer(_ context.Context, _ string) (int64, error) {
+	return 0, nil
+}
+
 func (r *mockObservationRepository) GetLatestForLayerPage(ctx context.Context, layerType string, limit, offset int) ([]*domain.EntitySnapshot, error) {
 	r.mu.Lock()
 	obs := r.latestForLayer[layerType]
@@ -253,8 +258,39 @@ func (r *mockObservationRepository) GetLatestForEntityIDs(_ context.Context, _ [
 func (r *mockObservationRepository) GetLatestContentHashes(_ context.Context, _ []string) (map[string]string, error) {
 	return nil, nil
 }
-func (r *mockObservationRepository) GetLayerSnapshotAt(_ context.Context, _ string, _ time.Time, _ time.Duration) ([]*domain.EntitySnapshot, error) {
-	return nil, nil
+
+// GetLayerSnapshotAt models the real query: each entity's latest observation
+// inside the window, newest first, capped at limit. The analysis engine reads
+// through this, so the window must be applied here rather than by the caller —
+// that is the whole point of the query.
+func (r *mockObservationRepository) GetLayerSnapshotAt(ctx context.Context, layerType string, asOf time.Time, window time.Duration, limit int) ([]*domain.EntitySnapshot, error) {
+	r.mu.Lock()
+	obs := append([]*domain.Observation(nil), r.latestForLayer[layerType]...)
+	err := r.getLatestForLayerErr
+	entities := r.entities
+	r.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	from := asOf.Add(-window)
+	sort.Slice(obs, func(i, j int) bool { return obs[i].Timestamp.After(obs[j].Timestamp) })
+	snaps := make([]*domain.EntitySnapshot, 0, len(obs))
+	for _, o := range obs {
+		if o.Timestamp.Before(from) || o.Timestamp.After(asOf) {
+			continue
+		}
+		snap := &domain.EntitySnapshot{Observation: *o}
+		if entities != nil {
+			if e, gErr := entities.GetByID(ctx, o.EntityID); gErr == nil && e != nil {
+				snap.Entity = *e
+			}
+		}
+		snaps = append(snaps, snap)
+		if limit > 0 && len(snaps) >= limit {
+			break
+		}
+	}
+	return snaps, nil
 }
 func (r *mockObservationRepository) GetLatestForLayerByBBox(_ context.Context, _ string, _, _, _, _ float64, _, _ time.Time, _ int) ([]*domain.EntitySnapshot, error) {
 	return nil, nil
@@ -957,6 +993,10 @@ func TestEngine_RunAnalysis_AllLayersWhenEmpty(t *testing.T) {
 	engine, entityRepo, obsRepo, insightRepo := newTestEngine(t, provider)
 
 	entityRepo.distinctLayers = []string{"flights_commercial", "earthquakes"}
+	// "All layers" resolves through the declarations, so a test that wants both
+	// layers analysed has to declare both — otherwise it passes by analysing
+	// nothing at all.
+	engine.layers = stubLayers{declared: []domain.LayerType{"flights_commercial", "earthquakes"}}
 
 	entity := makeTestEntity("ent-1", "ABC123", "Flight", "flights_commercial")
 	entityRepo.AddEntity(entity)

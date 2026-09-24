@@ -237,6 +237,10 @@ func (s *stubObsRepo) GetLatest(_ context.Context, entityID string) (*domain.Obs
 	return latest, nil
 }
 
+func (s *stubObsRepo) CountLatestForLayer(_ context.Context, _ string) (int64, error) {
+	return 0, nil
+}
+
 func (s *stubObsRepo) GetLatestForLayerPage(_ context.Context, layerType string, _, _ int) ([]*domain.EntitySnapshot, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -279,7 +283,7 @@ func (s *stubObsRepo) GetLatestContentHashes(_ context.Context, entityIDs []stri
 	return make(map[string]string), nil
 }
 
-func (s *stubObsRepo) GetLayerSnapshotAt(_ context.Context, _ string, _ time.Time, _ time.Duration) ([]*domain.EntitySnapshot, error) {
+func (s *stubObsRepo) GetLayerSnapshotAt(_ context.Context, _ string, _ time.Time, _ time.Duration, _ int) ([]*domain.EntitySnapshot, error) {
 	return nil, nil
 }
 

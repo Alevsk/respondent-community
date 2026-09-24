@@ -190,7 +190,7 @@ func (c *Client) doTimeRangeQuery(layerID string, from, to time.Time, frozen boo
 		}
 	} else {
 		// No viewport — use layer-wide query with time bounds
-		snapshots, err = c.server.obsRepo.GetLayerSnapshotAt(ctx, string(layerType), to, to.Sub(from))
+		snapshots, err = c.server.obsRepo.GetLayerSnapshotAt(ctx, string(layerType), to, to.Sub(from), maxResults)
 	}
 
 	if err != nil {

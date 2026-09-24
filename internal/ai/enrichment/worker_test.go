@@ -144,6 +144,10 @@ func (m *mockObsRepo) GetLatest(_ context.Context, _ string) (*domain.Observatio
 	}
 	return m.obs, nil
 }
+func (m *mockObsRepo) CountLatestForLayer(_ context.Context, _ string) (int64, error) {
+	return 0, nil
+}
+
 func (m *mockObsRepo) GetLatestForLayerPage(_ context.Context, _ string, _, _ int) ([]*domain.EntitySnapshot, error) {
 	return nil, nil
 }
@@ -153,7 +157,7 @@ func (m *mockObsRepo) GetLatestForEntityIDs(_ context.Context, _ []string) (map[
 func (m *mockObsRepo) GetLatestContentHashes(_ context.Context, _ []string) (map[string]string, error) {
 	return nil, nil
 }
-func (m *mockObsRepo) GetLayerSnapshotAt(_ context.Context, _ string, _ time.Time, _ time.Duration) ([]*domain.EntitySnapshot, error) {
+func (m *mockObsRepo) GetLayerSnapshotAt(_ context.Context, _ string, _ time.Time, _ time.Duration, _ int) ([]*domain.EntitySnapshot, error) {
 	return nil, nil
 }
 func (m *mockObsRepo) GetLatestForLayerByBBox(_ context.Context, _ string, _, _, _, _ float64, _, _ time.Time, _ int) ([]*domain.EntitySnapshot, error) {
